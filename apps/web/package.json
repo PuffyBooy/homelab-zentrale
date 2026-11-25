@@ -1,0 +1,10 @@
+{
+  "name": "@hz/web",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Web app: React, Vite, PWA",
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json"
+  }
+}
