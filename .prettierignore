@@ -1,0 +1,10 @@
+# Design system is a copy of the reference, never reformatted by hand.
+design/
+# Prose docs keep their own formatting.
+*.md
+pnpm-lock.yaml
+dist/
+coverage/
+playwright-report/
+test-results/
+templates/

@@ -1,0 +1,3 @@
+/* Design system entry point. Tokens and components come only from design/. */
+@import '../../../design/tokens.css';
+@import '../../../design/components.css';
