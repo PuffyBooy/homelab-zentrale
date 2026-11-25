@@ -29,6 +29,9 @@ importers:
       globals:
         specifier: ^17.14.0
         version: 17.14.0
+      otpauth:
+        specifier: ^9.6.0
+        version: 9.6.0
       prettier:
         specifier: ^3.10.1
         version: 3.10.1
