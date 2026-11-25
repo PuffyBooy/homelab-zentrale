@@ -2,7 +2,7 @@ import { defineConfig } from 'vitest/config';
 
 // Workspace packages export their TypeScript sources under this condition,
 // so tests never depend on a prior build of packages/shared.
-const conditions = ['@hz/source', 'module', 'node', 'import', 'default'];
+const conditions = ['@hz/source', 'module', 'node'];
 
 const packages = [
   'apps/core',

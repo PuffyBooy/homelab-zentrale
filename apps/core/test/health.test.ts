@@ -26,6 +26,8 @@ describe('GET /api/health', () => {
     const res = await app.inject({ method: 'GET', url: '/api/health' });
     expect(res.statusCode).toBe(200);
     expect(res.json()).toEqual({ ok: true });
+    expect(res.headers['content-security-policy']).toContain("default-src 'self'");
+    expect(res.headers['x-content-type-options']).toBe('nosniff');
   });
 
   it('returns JSON 404 for unknown API routes', async () => {

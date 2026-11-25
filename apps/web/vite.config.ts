@@ -9,8 +9,8 @@ export default defineConfig({
     port: 5173,
     strictPort: true,
     proxy: { '/api': 'http://127.0.0.1:8080' },
-    fs: { allow: ['../..'] },
+    fs: { allow: ['.', '../../design', '../../packages'] },
   },
   preview: { host: '127.0.0.1', port: 4173, strictPort: true },
-  build: { outDir: 'dist', emptyOutDir: true, sourcemap: true },
+  build: { outDir: 'dist', emptyOutDir: true, sourcemap: false },
 });

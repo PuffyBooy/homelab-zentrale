@@ -1,6 +1,6 @@
 import { mkdirSync } from 'node:fs';
 import { buildApp } from './app.js';
-import { ConfigError, loadConfig } from './config.js';
+import { ConfigError, isLoopback, loadConfig } from './config.js';
 
 async function main(): Promise<void> {
   let config;
@@ -27,6 +27,12 @@ async function main(): Promise<void> {
   process.on('SIGINT', shutdown);
   process.on('SIGTERM', shutdown);
 
+  if (!isLoopback(config.host)) {
+    app.log.warn(
+      { host: config.host },
+      'HZ_HOST is not a loopback address. Only allowed inside the core container with the port published on 127.0.0.1.',
+    );
+  }
   await app.listen({ host: config.host, port: config.port });
 }
 

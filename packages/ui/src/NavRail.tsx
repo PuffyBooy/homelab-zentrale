@@ -36,7 +36,7 @@ export function NavRail({ items, active, title }: NavRailProps): ReactElement {
               className={cx('hz-nav-item', it.id === active && 'hz-nav-active')}
               aria-current={it.id === active ? 'page' : undefined}
             >
-              <span className="hz-nav-key">{it.key ?? String(i + 1)}</span>
+              <span className="hz-nav-key">{it.key || String(i + 1)}</span>
               <span>{it.label}</span>
               {it.count ? <span className="hz-nav-count">{it.count}</span> : null}
             </a>

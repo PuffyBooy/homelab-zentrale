@@ -5,20 +5,21 @@ const boolFlag = z
   .default('0')
   .transform((v) => v === '1' || v === 'true');
 
+const base64 = /^[A-Za-z0-9+/]+={0,2}$/;
+
 const secretKey = z
   .string({ error: 'HZ_SECRET_KEY fehlt' })
   .min(1, 'HZ_SECRET_KEY fehlt')
-  .refine((v) => {
-    try {
-      return Buffer.from(v, 'base64').length === 32;
-    } catch {
-      return false;
-    }
-  }, 'HZ_SECRET_KEY muss 32 Byte als Base64 sein (openssl rand -base64 32)');
+  .refine(
+    (v) => base64.test(v) && Buffer.from(v, 'base64').length === 32,
+    'HZ_SECRET_KEY muss 32 Byte als Base64 sein (openssl rand -base64 32)',
+  );
 
 export const configSchema = z.object({
   HZ_SECRET_KEY: secretKey,
   HZ_DATA_DIR: z.string().min(1).default('./data'),
+  // 127.0.0.1 outside Docker. 0.0.0.0 only inside the core container, whose port is
+  // published on 127.0.0.1 only (deploy/docker-compose.core.yml). See docs/NETWORK.md.
   HZ_HOST: z.ipv4().default('127.0.0.1'),
   HZ_PORT: z.coerce.number().int().min(1).max(65535).default(8080),
   HZ_BASE_URL: z.url().optional(),
@@ -36,6 +37,10 @@ export interface Config {
   webDir: string | undefined;
   demo: boolean;
   env: 'development' | 'production' | 'test';
+}
+
+export function isLoopback(host: string): boolean {
+  return host.startsWith('127.');
 }
 
 export class ConfigError extends Error {

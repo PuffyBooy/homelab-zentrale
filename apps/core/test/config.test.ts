@@ -23,6 +23,12 @@ describe('loadConfig', () => {
     );
   });
 
+  it('rejects junk that would decode to 32 bytes', () => {
+    expect(() => loadConfig({ HZ_SECRET_KEY: `${key.slice(0, 10)}!!${key.slice(10)}` })).toThrow(
+      /HZ_SECRET_KEY/,
+    );
+  });
+
   it('never echoes the secret in the error', () => {
     const bad = 'c3VwZXItc2VjcmV0LXZhbHVl';
     try {
