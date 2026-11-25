@@ -9,11 +9,8 @@ ENV PNPM_HOME=/pnpm PATH=/pnpm:$PATH CI=1
 RUN corepack enable
 WORKDIR /repo
 
-# Build stage: full install (incl. native build tools for better-sqlite3), build, then prune.
+# Build stage: full install, build, then copy only the core's production deps.
 FROM base AS build
-RUN apt-get update \
-  && apt-get install -y --no-install-recommends python3 make g++ \
-  && rm -rf /var/lib/apt/lists/*
 COPY . .
 RUN --mount=type=cache,id=pnpm,target=/pnpm/store pnpm install --frozen-lockfile
 RUN pnpm --filter @hz/web... --filter @hz/core... build
