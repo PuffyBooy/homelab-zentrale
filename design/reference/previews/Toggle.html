@@ -1,0 +1,13 @@
+<!-- @dsCard group="Smart Home" height=150 -->
+<!doctype html>
+<html>
+<head><link rel="stylesheet" href="../../tokens.css"><link rel="stylesheet" href="../../components.css"><script src="https://cdn.jsdelivr.net/npm/react@18.3.1/umd/react.production.min.js"></script><script src="https://cdn.jsdelivr.net/npm/react-dom@18.3.1/umd/react-dom.production.min.js"></script><script src="../bundle.js"></script><meta charset="utf-8"><title>Toggle</title><style>body{background:var(--bg-000);}</style></head>
+<body>
+<div id="root" class="hz-demo-col"></div>
+<script>
+  var Z = window.HZ, h = React.createElement;
+  function D(){var a=React.useState(true),b=React.useState(false);return h('div',{style:{width:'100%',maxWidth:'380px'}},h(Z.Toggle,{label:'Licht Wohnzimmer',icon:'plug',checked:a[0],onChange:a[1]}),h(Z.Toggle,{label:'Server-Steckdose',hint:'38 W · aus nur mit Bestätigung',icon:'power',checked:b[0],onChange:b[1]}),h(Z.Toggle,{label:'Türöffner',hint:'offline',icon:'door',disabled:true}));}
+  ReactDOM.createRoot(document.getElementById('root')).render(h(D));
+</script>
+</body>
+</html>

@@ -1,0 +1,16 @@
+<!-- @dsCard group="Server" height=260 -->
+<!doctype html>
+<html>
+<head><link rel="stylesheet" href="../../tokens.css"><link rel="stylesheet" href="../../components.css"><script src="https://cdn.jsdelivr.net/npm/react@18.3.1/umd/react.production.min.js"></script><script src="https://cdn.jsdelivr.net/npm/react-dom@18.3.1/umd/react-dom.production.min.js"></script><script src="../bundle.js"></script><meta charset="utf-8"><title>ServerList</title><style>body{background:var(--bg-000);}</style></head>
+<body>
+<div id="root" class="hz-demo-col"></div>
+<script>
+  var Z = window.HZ, h = React.createElement;
+  function D(){var s=React.useState('home');return h('div',{className:'hz-tile hz-tile-flush',style:{width:'100%'}},h(Z.ServerList,{active:s[0],onSelect:s[1],servers:[{id:'home',name:'heimserver',where:'Wien',ip:'192.168.1.20',status:'ok',cpu:23,ram:48,disk:81,uptime:'41d'},
+ {id:'oci',name:'oracle-a1',where:'Frankfurt',ip:'130.61.x.x',status:'warn',cpu:64,ram:92,disk:37,uptime:'12d'},
+ {id:'pi',name:'soundos-pi',where:'Studio',ip:'192.168.1.42',status:'ok',cpu:8,ram:31,disk:22,uptime:'6d'},
+ {id:'vps',name:'web-vps',where:'Nürnberg',status:'crit',note:'kein Ping seit 23:02 · SSH timeout'}]}));}
+  ReactDOM.createRoot(document.getElementById('root')).render(h(D));
+</script>
+</body>
+</html>

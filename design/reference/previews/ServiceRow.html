@@ -1,0 +1,16 @@
+<!-- @dsCard group="Listen" height=250 -->
+<!doctype html>
+<html>
+<head><link rel="stylesheet" href="../../tokens.css"><link rel="stylesheet" href="../../components.css"><script src="https://cdn.jsdelivr.net/npm/react@18.3.1/umd/react.production.min.js"></script><script src="https://cdn.jsdelivr.net/npm/react-dom@18.3.1/umd/react-dom.production.min.js"></script><script src="../bundle.js"></script><meta charset="utf-8"><title>ServiceRow</title><style>body{background:var(--bg-000);}</style></head>
+<body>
+<div id="root" class="hz-demo-col"></div>
+<script>
+  var Z = window.HZ, h = React.createElement;
+  ReactDOM.createRoot(document.getElementById('root')).render(h('div',{style:{width:'100%',maxWidth:'560px',background:'var(--bg-100)',border:'1px solid var(--line)',borderRadius:'10px',padding:'4px'}},
+ h(Z.ServiceRow,{name:'homeassistant',icon:'home',host:'heimserver · :8123',meta:'41 T',actions:h(Z.Button,{size:'sm',variant:'ghost',icon:'terminal','aria-label':'Logs'})}),
+ h(Z.ServiceRow,{name:'minecraft-paper',icon:'container',host:'oracle-a1 · :25565',status:'warn',meta:'RAM 92 %',actions:h(Z.Button,{size:'sm',variant:'ghost',icon:'refresh','aria-label':'Neu starten'})}),
+ h(Z.ServiceRow,{name:'sc-ball.at',icon:'globe',host:'extern · https',status:'crit',meta:'503',actions:h(Z.Button,{size:'sm',variant:'ghost',icon:'refresh','aria-label':'Erneut prüfen'})}),
+ h(Z.ServiceRow,{name:'uptime-kuma',icon:'container',host:'heimserver · :3001',status:'off',meta:'—',actions:h(Z.Button,{size:'sm',variant:'ghost',icon:'play','aria-label':'Starten'})})));
+</script>
+</body>
+</html>

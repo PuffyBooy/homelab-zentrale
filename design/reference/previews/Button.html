@@ -1,0 +1,12 @@
+<!-- @dsCard group="Aktionen" height=80 -->
+<!doctype html>
+<html>
+<head><link rel="stylesheet" href="../../tokens.css"><link rel="stylesheet" href="../../components.css"><script src="https://cdn.jsdelivr.net/npm/react@18.3.1/umd/react.production.min.js"></script><script src="https://cdn.jsdelivr.net/npm/react-dom@18.3.1/umd/react-dom.production.min.js"></script><script src="../bundle.js"></script><meta charset="utf-8"><title>Button</title><style>body{background:var(--bg-000);}</style></head>
+<body>
+<div id="root" class="hz-demo"></div>
+<script>
+  var Z = window.HZ, h = React.createElement;
+  ReactDOM.createRoot(document.getElementById('root')).render(h(React.Fragment,null,h(Z.Button,{variant:'primary',icon:'refresh'},'Neu deployen'),h(Z.Button,{icon:'play'},'Starten'),h(Z.Button,{variant:'ghost',icon:'terminal'},'Logs'),h(Z.Button,{variant:'danger',icon:'power'},'Neustart'),h(Z.Button,{size:'sm',icon:'stop','aria-label':'Stoppen'}),h(Z.Button,{disabled:true},'Gesperrt')));
+</script>
+</body>
+</html>

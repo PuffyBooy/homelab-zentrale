@@ -1,0 +1,20 @@
+{
+  "$schema": "../template.schema.json",
+  "id": "minecraft-java",
+  "name": "Minecraft Java",
+  "image": "itzg/minecraft-server",
+  "ram": { "min": "4G", "recommended": "6G" },
+  "ports": [{ "name": "game", "container": 25565, "protocol": "tcp", "default": 25565 }],
+  "query": { "method": "minecraft", "port": "game" },
+  "rcon": { "supported": true, "port": 25575 },
+  "dataDir": "./data",
+  "fields": [
+    { "key": "TYPE", "label": "Server-Typ", "type": "select", "options": ["PAPER", "VANILLA", "FABRIC"], "default": "PAPER" },
+    { "key": "VERSION", "label": "Version", "type": "text", "default": "LATEST" },
+    { "key": "MAX_PLAYERS", "label": "Max. Spieler", "type": "number", "default": 20, "min": 1, "max": 100 },
+    { "key": "MEMORY", "label": "RAM", "type": "select", "options": ["4G", "6G", "8G"], "default": "6G" },
+    { "key": "SEED", "label": "Seed", "type": "text", "default": "", "optional": true },
+    { "key": "ENABLE_WHITELIST", "label": "Whitelist", "type": "boolean", "default": true },
+    { "key": "ONLINE_MODE", "label": "Online-Mode (nur echte Accounts)", "type": "boolean", "default": true }
+  ]
+}

@@ -1,0 +1,16 @@
+<!-- @dsCard group="Listen" height=200 -->
+<!doctype html>
+<html>
+<head><link rel="stylesheet" href="../../tokens.css"><link rel="stylesheet" href="../../components.css"><script src="https://cdn.jsdelivr.net/npm/react@18.3.1/umd/react.production.min.js"></script><script src="https://cdn.jsdelivr.net/npm/react-dom@18.3.1/umd/react-dom.production.min.js"></script><script src="../bundle.js"></script><meta charset="utf-8"><title>WebCheckRow</title><style>body{background:var(--bg-000);}</style></head>
+<body>
+<div id="root" class="hz-demo-col"></div>
+<script>
+  var Z = window.HZ, h = React.createElement;
+  ReactDOM.createRoot(document.getElementById('root')).render(h('div',{className:'hz-tile hz-tile-flush',style:{width:'100%'}},
+ h(Z.WebCheckRow,{url:'sc-ball.at',host:'WordPress · World4You',status:'ok',code:200,ms:312,sslDays:61}),
+ h(Z.WebCheckRow,{url:'volontaers-alarm.app',host:'heimserver · caddy',status:'warn',code:200,ms:1240,sslDays:9}),
+ h(Z.WebCheckRow,{url:'lernen.hoebe.at',host:'heimserver · docker',status:'crit',code:503,ms:null,sslDays:44,actions:h(Z.Button,{size:'sm',variant:'ghost',icon:'terminal','aria-label':'Logs'})}),
+ h(Z.WebCheckRow,{url:'mc.hoebe.at',host:'oracle-a1 · tcp 25565',status:'ok',code:'TCP',ms:28})));
+</script>
+</body>
+</html>

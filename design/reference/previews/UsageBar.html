@@ -1,0 +1,12 @@
+<!-- @dsCard group="Daten" height=150 -->
+<!doctype html>
+<html>
+<head><link rel="stylesheet" href="../../tokens.css"><link rel="stylesheet" href="../../components.css"><script src="https://cdn.jsdelivr.net/npm/react@18.3.1/umd/react.production.min.js"></script><script src="https://cdn.jsdelivr.net/npm/react-dom@18.3.1/umd/react-dom.production.min.js"></script><script src="../bundle.js"></script><meta charset="utf-8"><title>UsageBar</title><style>body{background:var(--bg-000);}</style></head>
+<body>
+<div id="root" class="hz-demo-col"></div>
+<script>
+  var Z = window.HZ, h = React.createElement;
+  ReactDOM.createRoot(document.getElementById('root')).render(h('div',{style:{display:'grid',gap:'16px',width:'100%',maxWidth:'420px'}},h(Z.UsageBar,{label:'CPU',value:23}),h(Z.UsageBar,{label:'Speicher /',value:81,detail:'389 / 480 GB'}),h(Z.UsageBar,{label:'OCPU',value:96,detail:'3,85 / 4'})));
+</script>
+</body>
+</html>

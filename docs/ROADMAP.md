@@ -1,0 +1,99 @@
+# Roadmap
+
+Arbeite die Meilensteine **in dieser Reihenfolge** ab. Jeder Meilenstein bekommt einen Branch `m<N>-<name>` und endet mit einem PR auf `main`. Fertig ist er erst, wenn
+- alle Abnahmekriterien erfüllt sind,
+- `pnpm check` grün ist (lint, typecheck, test),
+- der Playwright-Smoke-Test des Meilensteins grün ist,
+- `docs/CHANGELOG.md` einen Eintrag hat.
+
+**Sub-Agents:** Innerhalb eines Meilensteins sind die Arbeitspakete (WP) mit **∥** parallel möglich. Jedes WP hat einen Besitzer-Ordner. Nur der Besitzer ändert Dateien darin. `packages/shared` gehört immer dem WP „Schema“, das zuerst fertig sein muss. Danach dürfen andere WPs dort nur nach Absprache ergänzen.
+
+---
+
+## M0: Fundament
+**Ziel:** Ein lauffähiges, leeres Monorepo mit Werkzeugen und CI.
+
+- pnpm-Workspaces: `apps/{core,web,agent,share}`, `packages/{shared,ui}`
+- TypeScript strict, ESLint (flat config), Prettier, Vitest, Playwright
+- Skripte: `dev`, `check`, `build`, `e2e` (siehe `AGENTS.md`)
+- GitHub Actions: `check` + `build` bei jedem Push/PR, `pnpm audit --prod`
+- `apps/core`: Fastify mit `/api/health`, Config-Validierung (zod) aus `.env`
+- `apps/web`: Vite + React, lädt `design/tokens.css` und `design/components.css`, zeigt eine leere Seite mit `NavRail`
+- `deploy/docker-compose.core.yml`: ein Image (Core liefert die Web-App aus), Volume für `data/`
+
+**Abnahme:** `pnpm install && pnpm check && pnpm build` laufen sauber; `docker compose -f deploy/docker-compose.core.yml up` startet, und `/api/health` antwortet `{ok:true}`.
+
+## M1: Designsystem, Shell, Login
+- **WP Schema** (`packages/shared`): API-Schemas für Auth und Session.
+- **WP UI ∥** (`packages/ui`): Alle Komponenten aus `design/reference/bundle.js` nach TSX portieren, mit den Props aus `design/reference/index.d.ts` und denselben `hz-`-Klassen. Dazu eine Storybook-freie Galerie unter `/dev/ui` (nur im Dev-Modus), die alle Previews aus `design/reference/previews` mit denselben Daten nachbaut. Visueller Vergleich: Playwright-Screenshot jeder Galerie-Karte in allen 3 Themes.
+- **WP Auth ∥** (`apps/core/src/auth`, `apps/web/src/pages/login`): Setup-Assistent, Login, TOTP-Einrichtung mit QR, Wiederherstellungscodes, Sessions, Step-up, Rate-Limit, `audit_log`.
+- **WP Shell** (`apps/web/src/routes`, Layout): NavRail mit Tastenkürzeln, untere Leiste am Handy, Statussatz-Bereich, ServerSwitch-Platzhalter, Befehlspalette (`Strg/⌘+K`, vorerst nur Navigation), Theme-Umschalter (dark/light, folgt System), PWA-Manifest und Icons aus `design/assets/`.
+
+**Abnahme:** Erstes Setup → Login mit TOTP → leere Übersicht mit Navigation. Ohne Session gibt es auf jede `/api/*`-Route 401. Die UI-Galerie stimmt sichtbar mit den Previews überein. Tests für Login, falsches TOTP, Rate-Limit, Step-up.
+
+## M2: Agent und Server
+- **WP Schema:** `agent-protocol.ts` vollständig (alle Nachrichten aus `ARCHITECTURE.md`, auch die späteren, damit spätere Meilensteine nicht am Protokoll rütteln müssen).
+- **WP Agent ∥** (`apps/agent`): Verbindung mit Backoff, `hello`/Enrollment, `metrics` (systeminformation), `inventory` (Updates via `apt list --upgradable` auf dem Host, reboot-required, SSH-Fehlversuche aus `journalctl`/auth.log, fail2ban falls vorhanden, Ports), Multi-Arch-Dockerfile, `deploy/docker-compose.agent.yml`, `deploy/install-agent.sh`.
+- **WP Core-Agents ∥** (`apps/core/src/agents`, `metrics`, `servers`): Agent-Hub, Enrollment-Tokens, Speicherung und Verdichtung der Messwerte, Statusregeln (SPEC 5.1), Live-Topic `servers`.
+- **WP Web-Server ∥** (`apps/web/src/pages/servers`, Übersicht-Abschnitt): `ServerList`, Serverdetail (UsageBars, Sparklines, System, Updates, Sicherheit), „Server hinzufügen“-Dialog mit Einzeiler, Aufräumen mit Vorschau, Neustart mit Bestätigung.
+
+**Abnahme:** Zwei Agents (einer lokal per Docker, einer simuliert im Test) erscheinen live. Wird ein Agent gestoppt, steht der Server nach ≤ 90 s auf DOWN, und es gibt eine Meldung. Ein ARM64-Image wird in CI gebaut. Tests für Allowlist und Pfadprüfung.
+
+## M3: Container
+- Agent: Docker-Inventar plus Docker-Events, `container.*`, `compose.*`, Log-Streams
+- Core/Web: Container-Seite gruppiert nach Server und Compose-Projekt, `ServiceRow`, Logs im `Terminal` (Folgen, Pause, Suche), Start/Stop/Neustart, „Image aktualisieren“
+- Übersicht: Container-Kachel (Probleme zuerst)
+
+**Abnahme:** Ein Container wird gestoppt → er steht live auf OFF/DOWN und erzeugt eine Meldung. Logs streamen. Nach einem Image-Update läuft der Container mit dem neuen Image.
+
+## M4: Checks und Meldungen
+- **WP Checks ∥** (`checks/`): HTTP, TCP, Ping über den Agent, SSL-Ablauf, RDAP, „ausführen von“ (Core oder Agent), 2-Fehlschläge-Regel, Verlauf.
+- **WP Alerts ∥** (`alerts/`, `pages/alerts`): Meldungsmodell (offen/bestätigt/erledigt, Dedupe-Key), Seite „Meldungen“ mit Filtern, Web-Push (VAPID, Abo-Verwaltung, Testnachricht), Ruhezeit, warn-Bündelung, Wochenbericht.
+- Web: Seite „Websites“ mit `WebCheckRow`, Check anlegen/bearbeiten.
+
+**Abnahme:** Ein Check auf eine nicht erreichbare URL erzeugt nach 2 Intervallen eine CRIT-Meldung und eine Push-Nachricht am Handy (PWA über `tailscale serve`). Erholt sich der Check, kommt eine OK-Meldung, und die alte wird erledigt.
+
+## M5: GitHub und Deploy
+- Token-Einstellung, Polling mit ETag, Repos, CI-Status, Commits
+- Deploy-Ziele, Deploy-Key-Erzeugung mit Anleitung, `deploy.run` im Agent (compose/script), Live-Log, Sperre pro Ziel, Rollback, Auto-Deploy bei grünem CI
+- Seite „GitHub“ mit `RepoRow` und `CommitRow`-Verlauf, Kachel in der Übersicht
+
+**Abnahme:** Ein Test-Repo mit `compose.yml` wird per Knopf auf den lokalen Agent deployt. Ein neuer Commit erscheint innerhalb von 60 s als „1 neu“. Ein Rollback stellt den vorherigen Commit wieder her. Bei rotem CI gibt es keinen Deploy-Knopf.
+
+## M6: Gameserver
+- **WP Vorlagen ∥** (`templates/games`): Die 6 Vorlagen aus SPEC 6.2 mit `compose.yml` + `template.json` und ein JSON-Schema für `template.json`.
+- **WP Core-Games ∥** (`games/`): Vorlagen laden, Formular-Schema aus `template.json`, Compose rendern, Port-Vorschlag, RAM-Prüfung, Status/Spieler (minecraft-server-util, gamedig), RCON, Backups, Auto-Stopp.
+- **WP Web-Games ∥** (`pages/games`): `GameTemplates`, Formular, Fortschritt beim Aufsetzen, `GameServer`-Kacheln, Detail mit Konsole, Backups, Einstellungen, Löschen, Hinweis zur Portweiterleitung.
+
+**Abnahme:** Ein Minecraft-Paper-Server wird aus der Oberfläche auf dem lokalen Agent aufgesetzt, ist erreichbar, zeigt Spieler und TPS, die RCON-Konsole funktioniert, und ein Backup wird erstellt.
+
+## M7: Benutzerlinks und Share-Gateway
+- Share-Links (SPEC 6.4): erstellen, Rechte, Ablauf, PIN, widerrufen, Audit
+- Share-Seite `/s/<token>` im Core (nur im Tailnet)
+- `apps/share`: optionales öffentliches Gateway mit eigener Mini-UI (gleiche Tokens/CSS), enge Gateway-API im Core, Rate-Limits, Deploy-Anleitung mit Caddy für `oracle-a1`
+
+**Abnahme:** Ein Link mit dem Recht „Starten/Stoppen“ kann den Server starten, aber keine Konsole öffnen (serverseitig geprüft, Test). Ein widerrufener Link gibt sofort 410. Das Gateway gibt keine internen Daten preis (Test auf die Antwortfelder).
+
+## M8: Wohnung (Home Assistant)
+- HA-Verbindung (WebSocket), Auswahl der Entitäten und Räume, `Toggle`/`Metric`, Türöffner als Button mit Bestätigung, Stromkosten-Schätzung (€/kWh einstellbar)
+- Übersicht-Kachel „Wohnung“
+
+**Abnahme:** Mit einer HA-Testinstanz (Docker, Demo-Integration) schalten Lichter live hin und her, und Sensoren aktualisieren sich.
+
+## M9: Konsole, Wandmodus, Feinschliff
+- Web-Konsole (xterm.js ↔ Agent-PTY) mit Step-up und Protokoll
+- Wandmodus `/wall` mit Geräte-Token, Dimmen nachts
+- Befehlspalette mit Aktionen
+- Einstellungen vollständig (SPEC 13), Export der SQLite-Datenbank
+- Leistung: Übersicht lädt < 1 s im Tailnet, Bundle < 400 kB gzip
+- Barrierefreiheit: Tastatur überall, Fokusring, axe-Check in Playwright ohne ernste Fehler
+
+**Abnahme:** Alle Smoke-Tests grün; ein Durchgang durch jede Seite in allen 3 Themes per Screenshot in `docs/screenshots/`.
+
+---
+
+## Definition of Done (für jeden PR)
+- Code, Tests und Doku sind aktuell (`docs/` mitpflegen, wenn sich etwas ändert)
+- Keine `any`, keine auskommentierten Blöcke, keine TODOs ohne Issue
+- UI nur aus `packages/ui` plus Tokens; neue Komponenten zuerst als Vorschlag in `docs/QUESTIONS.md`
+- Sicherheitsregeln aus `SECURITY.md` eingehalten

@@ -1,0 +1,12 @@
+<!-- @dsCard group="Status" height=56 -->
+<!doctype html>
+<html>
+<head><link rel="stylesheet" href="../../tokens.css"><link rel="stylesheet" href="../../components.css"><script src="https://cdn.jsdelivr.net/npm/react@18.3.1/umd/react.production.min.js"></script><script src="https://cdn.jsdelivr.net/npm/react-dom@18.3.1/umd/react-dom.production.min.js"></script><script src="../bundle.js"></script><meta charset="utf-8"><title>Badge</title><style>body{background:var(--bg-000);}</style></head>
+<body>
+<div id="root" class="hz-demo"></div>
+<script>
+  var Z = window.HZ, h = React.createElement;
+  ReactDOM.createRoot(document.getElementById('root')).render(h(React.Fragment,null,h(Z.Badge,null,'docker'),h(Z.Badge,{tone:'ok'},'online'),h(Z.Badge,{tone:'warn',icon:'alert'},'3 Updates'),h(Z.Badge,{tone:'crit'},'offline'),h(Z.Badge,{tone:'info'},'deploy'),h(Z.Badge,{tone:'accent',icon:'check'},'live')));
+</script>
+</body>
+</html>

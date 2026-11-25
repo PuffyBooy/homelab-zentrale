@@ -1,0 +1,34 @@
+<!-- @dsCard page height=1010 width=1280 subtitle="Übersicht: alles zusammen" -->
+<!doctype html>
+<html>
+<head><link rel="stylesheet" href="../../tokens.css"><link rel="stylesheet" href="../../components.css"><script src="https://cdn.jsdelivr.net/npm/react@18.3.1/umd/react.production.min.js"></script><script src="https://cdn.jsdelivr.net/npm/react-dom@18.3.1/umd/react-dom.production.min.js"></script><script src="../bundle.js"></script><meta charset="utf-8"><title>Dashboard</title><style>body{background:var(--bg-000);}html,body,#root{height:100%;margin:0}</style></head>
+<body>
+<div id="root" class=""></div>
+<script>
+  var Z = window.HZ, h = React.createElement;
+  ReactDOM.createRoot(document.getElementById('root')).render(h('div',{className:'hz-page'},
+ h(Z.NavRail,{active:'overview',items:[{id:'overview',label:'Übersicht'},{id:'servers',label:'Server'},{id:'docker',label:'Container'},{id:'games',label:'Gameserver'},{id:'git',label:'GitHub'},{id:'web',label:'Websites',count:1},{id:'home',label:'Wohnung'},{id:'alerts',label:'Meldungen',count:2},{id:'shell',label:'Konsole',key:'`'}]}),
+ h('main',{className:'hz-page-main'},
+  h('div',{className:'hz-page-top'},h('div',null,h('h1',{className:'hz-page-title'},h('em',null,'2 Probleme'),' · 3 von 4 Servern laufen'),h('div',{className:'hz-page-sub'},'aktualisiert 23:24:08 · nächster Check in 12 s')),h(Z.ServerSwitch,{active:'all',servers:[{id:'all',name:'alle'},{id:'home',name:'heimserver'},{id:'oci',name:'oracle-a1',status:'warn'},{id:'pi',name:'soundos-pi'},{id:'vps',name:'web-vps',status:'crit'}]})),
+  h(Z.Alert,{tone:'crit',time:'23:02',title:'web-vps nicht erreichbar',action:h(Z.Button,{size:'sm'},'Ansehen')},'kein Ping, SSH timeout seit 22 Min.'),
+  h(Z.Tile,{title:'Server',icon:'server',count:'4',flush:true},h(Z.ServerList,{active:'home',servers:[{id:'home',name:'heimserver',where:'Wien',ip:'192.168.1.20',status:'ok',cpu:23,ram:48,disk:81,uptime:'41d'},
+ {id:'oci',name:'oracle-a1',where:'Frankfurt',ip:'130.61.x.x',status:'warn',cpu:64,ram:92,disk:37,uptime:'12d'},
+ {id:'pi',name:'soundos-pi',where:'Studio',ip:'192.168.1.42',status:'ok',cpu:8,ram:31,disk:22,uptime:'6d'},
+ {id:'vps',name:'web-vps',where:'Nürnberg',status:'crit',note:'kein Ping seit 23:02 · SSH timeout'}]})),
+  h('div',{style:{display:'grid',gridTemplateColumns:'1.2fr 1fr',gap:'16px'}},
+   h(Z.GameServer,{name:'survival',game:'Minecraft Paper',version:'1.21.4',address:'mc.hoebe.at',status:'ok',players:[4,20],ram:72,ramDetail:'5,8 / 8 GB',tps:19.8,online:['Alex','Lukas','mia_07','Tobi'],host:'oracle-a1'}),
+   h(Z.Tile,{title:'Websites',icon:'globe',count:'3',flush:true},
+    h(Z.WebCheckRow,{url:'sc-ball.at',status:'ok',code:200,ms:312,sslDays:61}),
+    h(Z.WebCheckRow,{url:'volontaers-alarm.app',status:'warn',code:200,ms:1240,sslDays:9}),
+    h(Z.WebCheckRow,{url:'lernen.hoebe.at',status:'crit',code:503,ms:null,sslDays:44}))),
+  h('div',{style:{display:'grid',gridTemplateColumns:'1.2fr 1fr',gap:'16px'}},
+   h(Z.Tile,{title:'GitHub',icon:'git',count:'PuffyBooy',flush:true},
+    h(Z.RepoRow,{repo:'soundos',commit:'a3f9c21 Lyrics-Sync · vor 2 Std',ci:'ok',deployedTo:'soundos-pi'}),
+    h(Z.RepoRow,{repo:'novritsch-konfigurator',commit:'7be0d44 3D ohne data:-Links · vor 5 Std',ci:'ok',deployedTo:'heimserver',behind:2,action:h(Z.Button,{size:'sm',variant:'primary'},'Deploy')})),
+   h(Z.Tile,{title:'Container',icon:'container',count:'14 · 1 aus',flush:true},
+    h(Z.ServiceRow,{name:'homeassistant',host:'heimserver · :8123',meta:'41d'}),
+    h(Z.ServiceRow,{name:'lernplattform',host:'heimserver · :3000',status:'crit',meta:'exit 1'}),
+    h(Z.ServiceRow,{name:'uptime-kuma',host:'heimserver · :3001',status:'off',meta:'—'}))))));
+</script>
+</body>
+</html>

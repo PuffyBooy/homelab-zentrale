@@ -1,0 +1,16 @@
+<!-- @dsCard group="Rückmeldung" height=250 -->
+<!doctype html>
+<html>
+<head><link rel="stylesheet" href="../../tokens.css"><link rel="stylesheet" href="../../components.css"><script src="https://cdn.jsdelivr.net/npm/react@18.3.1/umd/react.production.min.js"></script><script src="https://cdn.jsdelivr.net/npm/react-dom@18.3.1/umd/react-dom.production.min.js"></script><script src="../bundle.js"></script><meta charset="utf-8"><title>Alert</title><style>body{background:var(--bg-000);}</style></head>
+<body>
+<div id="root" class="hz-demo-col"></div>
+<script>
+  var Z = window.HZ, h = React.createElement;
+  ReactDOM.createRoot(document.getElementById('root')).render(h(React.Fragment,null,
+ h(Z.Alert,{tone:'crit',title:'sc-ball.at ist offline',time:'23:04',action:h(Z.Button,{size:'sm'},'Ansehen')},'HTTP 503 seit 6 Min. Letzter erfolgreicher Check 22:58.'),
+ h(Z.Alert,{tone:'warn',title:'Speicher auf heimserver bei 81 %',time:'22:40'},'Docker-Images belegen 64 GB. Aufräumen gibt ca. 40 GB frei.'),
+ h(Z.Alert,{tone:'ok',title:'Backup fertig',time:'03:00'},'heimserver → oracle-a1, 12,4 GB, 6 Min.'),
+ h(Z.Alert,{tone:'info',title:'Neuer Commit in soundos',time:'21:12',floating:true},'„Lyrics-Sync für Bühne-Stil“ ist bereit zum Deploy.')));
+</script>
+</body>
+</html>

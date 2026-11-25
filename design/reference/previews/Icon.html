@@ -1,0 +1,12 @@
+<!-- @dsCard group="Grundlagen" height=80 -->
+<!doctype html>
+<html>
+<head><link rel="stylesheet" href="../../tokens.css"><link rel="stylesheet" href="../../components.css"><script src="https://cdn.jsdelivr.net/npm/react@18.3.1/umd/react.production.min.js"></script><script src="https://cdn.jsdelivr.net/npm/react-dom@18.3.1/umd/react-dom.production.min.js"></script><script src="../bundle.js"></script><meta charset="utf-8"><title>Icon</title><style>body{background:var(--bg-000);}</style></head>
+<body>
+<div id="root" class="hz-demo"></div>
+<script>
+  var Z = window.HZ, h = React.createElement;
+  ReactDOM.createRoot(document.getElementById('root')).render(h(React.Fragment,null,Z.Icon.names.map(function(n){return h('span',{key:n,title:n,style:{color:'var(--ink-muted)',padding:'6px'}},h(Z.Icon,{name:n,size:20}));})));
+</script>
+</body>
+</html>

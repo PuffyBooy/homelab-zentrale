@@ -1,0 +1,12 @@
+<!-- @dsCard group="Daten" height=64 -->
+<!doctype html>
+<html>
+<head><link rel="stylesheet" href="../../tokens.css"><link rel="stylesheet" href="../../components.css"><script src="https://cdn.jsdelivr.net/npm/react@18.3.1/umd/react.production.min.js"></script><script src="https://cdn.jsdelivr.net/npm/react-dom@18.3.1/umd/react-dom.production.min.js"></script><script src="../bundle.js"></script><meta charset="utf-8"><title>Sparkline</title><style>body{background:var(--bg-000);}</style></head>
+<body>
+<div id="root" class="hz-demo"></div>
+<script>
+  var Z = window.HZ, h = React.createElement;
+  ReactDOM.createRoot(document.getElementById('root')).render(h(React.Fragment,null,h(Z.Sparkline,{data:[12,18,15,22,30,26,23,28,24,21,19,23]}),h(Z.Sparkline,{tone:'ok',data:[40,42,41,44,47,45,49,52,50,53]}),h(Z.Sparkline,{tone:'info',data:[3,3,4,9,4,3,3,2,8,3]}),h(Z.Sparkline,{tone:'muted',data:[5,6,5,7,6,6,5,6]})));
+</script>
+</body>
+</html>

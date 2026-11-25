@@ -1,0 +1,13 @@
+<!-- @dsCard group="Layout" height=72 -->
+<!doctype html>
+<html>
+<head><link rel="stylesheet" href="../../tokens.css"><link rel="stylesheet" href="../../components.css"><script src="https://cdn.jsdelivr.net/npm/react@18.3.1/umd/react.production.min.js"></script><script src="https://cdn.jsdelivr.net/npm/react-dom@18.3.1/umd/react-dom.production.min.js"></script><script src="../bundle.js"></script><meta charset="utf-8"><title>ServerSwitch</title><style>body{background:var(--bg-000);}</style></head>
+<body>
+<div id="root" class="hz-demo"></div>
+<script>
+  var Z = window.HZ, h = React.createElement;
+  function D(){var s=React.useState('home');return h(Z.ServerSwitch,{active:s[0],onChange:s[1],servers:[{id:'all',name:'Alle',icon:'cpu'},{id:'home',name:'heimserver',where:'Wien'},{id:'oci',name:'oracle-a1',icon:'cloud',where:'Frankfurt',status:'warn'},{id:'pi',name:'soundos-pi',where:'Studio',status:'off'}]});}
+  ReactDOM.createRoot(document.getElementById('root')).render(h(D));
+</script>
+</body>
+</html>

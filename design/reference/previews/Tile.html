@@ -1,0 +1,16 @@
+<!-- @dsCard group="Layout" height=230 -->
+<!doctype html>
+<html>
+<head><link rel="stylesheet" href="../../tokens.css"><link rel="stylesheet" href="../../components.css"><script src="https://cdn.jsdelivr.net/npm/react@18.3.1/umd/react.production.min.js"></script><script src="https://cdn.jsdelivr.net/npm/react-dom@18.3.1/umd/react-dom.production.min.js"></script><script src="../bundle.js"></script><meta charset="utf-8"><title>Tile</title><style>body{background:var(--bg-000);}</style></head>
+<body>
+<div id="root" class="hz-demo-col"></div>
+<script>
+  var Z = window.HZ, h = React.createElement;
+  ReactDOM.createRoot(document.getElementById('root')).render(h('div',{className:'hz-grid',style:{gridTemplateColumns:'1fr 1fr'}},
+ h(Z.Tile,{title:'Heimserver',icon:'server',status:'ok',footer:[h('span',{key:1},'ubuntu-24.04 · 192.168.1.20'),h('span',{key:2},'vor 4 s')]},
+   h(Z.Metric,{label:'CPU-Last',value:'23',unit:'%',delta:'−4 %',deltaTone:'ok',hint:'letzte Stunde'})),
+ h(Z.Tile,{title:'Oracle Cloud',icon:'cloud',status:'crit',statusLabel:'Nicht erreichbar',actions:h(Z.Button,{size:'sm',variant:'ghost',icon:'refresh','aria-label':'Erneut prüfen'})},
+   h('div',{style:{color:'var(--ink-muted)'}},'Letzter Kontakt vor 12 Min. Ping und SSH schlagen fehl.'))));
+</script>
+</body>
+</html>

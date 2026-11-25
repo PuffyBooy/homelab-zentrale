@@ -1,0 +1,187 @@
+# Spezifikation: Homelab-Zentrale
+
+## 1. Ziel und Nutzer
+
+Ein Admin (Alex) will alle seine Server, Container, Gameserver, Repos, Websites und die Wohnung auf **einer** Oberfläche sehen und steuern, am Desktop, am Handy (PWA) und auf einem Tablet an der Wand.
+
+**Grundsatz:** Wenn alles läuft, ist der Bildschirm still. Probleme stehen immer oben, und ein Blick muss reichen.
+
+Außer Alex gibt es nur eine Art von Nutzer: **Freunde mit einem Benutzerlink** für einen einzelnen Gameserver (Abschnitt 6.4). Sie sehen nichts anderes.
+
+## 2. Ausgangslage
+
+| Server | Ort | Rolle | Erreichbarkeit |
+| --- | --- | --- | --- |
+| `heimserver` | Wien, Ubuntu Server 24.04, Docker | Core, Home Assistant, eigene Web-Apps, kleinere Gameserver | Tailscale; zu Hause hinter TP-Link Deco Mesh, eigene öffentliche IPv4 mit DDNS |
+| `oracle-a1` | Oracle Cloud, VM.Standard.A1.Flex (ARM), Ubuntu | Gameserver (Minecraft Paper), öffentliche Dienste | Tailscale; reservierte öffentliche IP |
+| `soundos-pi` | Raspberry Pi 5 im Studio | SoundOS (FastAPI) | Tailscale |
+| weitere | beliebig | | Tailscale |
+
+Alle Server laufen auf Linux mit Docker. ARM (Oracle, Pi) und x86 müssen beide unterstützt werden: Multi-Arch-Images für den Agent.
+
+## 3. Navigation und Seiten
+
+Linke Navigation (`NavRail`), Tastenkürzel in Klammern:
+
+1. Übersicht (`1`)
+2. Server (`2`)
+3. Container (`3`)
+4. Gameserver (`4`)
+5. GitHub (`5`)
+6. Websites (`6`)
+7. Wohnung (`7`)
+8. Meldungen (`8`)
+9. Konsole (`` ` ``)
+
+Dazu kommen die Einstellungen (Zahnrad unten in der Navigation) und eine **Befehlspalette** (`Strg/⌘+K`): Suche über Server, Container, Repos, Gameserver und Aktionen wie „minecraft neu starten“ oder „soundos deployen“.
+
+Am Handy wird die Navigation zur unteren Leiste mit Übersicht, Server, Gameserver und Meldungen sowie „Mehr“ für den Rest.
+
+Oben auf jeder Seite steht ein **Statussatz**, der zuerst die Probleme nennt („2 Probleme · 3 von 4 Servern laufen“), und rechts der **ServerSwitch**, der die Seite auf einen Server filtert.
+
+## 4. Übersicht
+
+Die Vorlage ist `design/reference/previews/Dashboard.html`:
+
+1. Statussatz und ServerSwitch
+2. Offene `crit`-Meldungen als `Alert` (höchstens 3, dann „+N weitere“)
+3. `ServerList` über die volle Breite
+4. Gameserver (laufende) und Websites als Paar
+5. GitHub (Repos mit neuen Commits zuerst) und Container (Probleme zuerst) als Paar
+6. Wohnung (Klima, Strom, wichtigste Schalter), wenn Home Assistant verbunden ist
+
+Alles aktualisiert sich live über WebSocket. Es gibt kein Neuladen.
+
+## 5. Server
+
+### 5.1 Liste
+`ServerList`: Status, Name, Ort, Tailscale-IP, CPU, RAM, Disk, Uptime. Sortierung: `crit` → `warn` → Name.
+
+**Status-Regeln** (Schwellen pro Server einstellbar):
+- `crit`: Agent seit über 90 s nicht gemeldet, Disk ≥ 95 %, RAM ≥ 95 % für 5 Min
+- `warn`: CPU ≥ 85 % für 10 Min, RAM ≥ 90 %, Disk ≥ 85 %, Temperatur ≥ 75 °C, Sicherheitsupdates offen, Neustart nötig (`/var/run/reboot-required`)
+- `ok`: sonst
+
+### 5.2 Detail
+- `UsageBar` für CPU, RAM, Swap, jede Disk, Temperatur; `Sparkline` für die letzten 24 h (CPU, RAM, Netz ein/aus)
+- System: OS, Kernel, Architektur, Uptime, Tailscale-IP, öffentliche IP (falls vorhanden)
+- Updates: Anzahl offener Pakete, davon Sicherheitsupdates, „Neustart nötig“
+- Sicherheit: fehlgeschlagene SSH-Logins (24 h), von fail2ban gesperrte IPs (falls installiert), offene Ports (`ss -tlnp`)
+- Container dieses Servers (Abschnitt 6)
+- Aktionen: „Aufräumen“ (zeigt vorher die frei werdenden GB: apt-Cache, alte Kernel, Journal > 200 MB, ungenutzte Docker-Images) und „Neustart“ (Danger, mit Bestätigung durch Eintippen des Servernamens)
+
+### 5.3 Server hinzufügen (Enrollment)
+1. In der Zentrale: „Server hinzufügen“ → Name eingeben → einmaliges Token (15 Min gültig)
+2. Die Zentrale zeigt einen Einzeiler zum Kopieren: `docker run …` bzw. ein Compose-Snippet mit `HZ_CORE_URL` und Token
+3. Der Agent meldet sich, tauscht das Einmal-Token gegen ein dauerhaftes Agent-Token und erscheint in der Liste
+
+## 6. Container und Gameserver
+
+### 6.1 Container
+`ServiceRow` pro Container, gruppiert nach Server: Status (running/exited/restarting/unhealthy), Name, Image, Ports, Uptime oder Exit-Code, CPU/RAM.
+Aktionen: Logs (live, `Terminal`, die letzten 500 Zeilen plus Folgen), Start, Stop, Neustart, „Image aktualisieren“ (pull + recreate, für Compose-Projekte über `docker compose pull && up -d`).
+Compose-Projekte werden als Gruppe erkannt (Label `com.docker.compose.project`).
+
+### 6.2 Gameserver anlegen
+„Neuer Gameserver“ öffnet `GameTemplates`:
+
+| Vorlage | Image | RAM | Port |
+| --- | --- | --- | --- |
+| Minecraft Java (Paper/Vanilla/Fabric) | `itzg/minecraft-server` | 4–8 GB | 25565/tcp |
+| Minecraft Bedrock | `itzg/minecraft-bedrock-server` | 2 GB | 19132/udp |
+| Valheim | `lloesche/valheim-server` | 4 GB | 2456-2458/udp |
+| Terraria / tModLoader | `ryshe/terraria` | 2 GB | 7777/tcp |
+| Counter-Strike 2 | `joedwards32/cs2` | 8 GB | 27015/tcp+udp |
+| Palworld | `thijsvanloef/palworld-server-docker` | 16 GB | 8211/udp |
+
+Vorlagen liegen als Dateien in `templates/games/<id>/`: `compose.yml` mit `${VAR}`-Platzhaltern und `template.json` (Name, Image, Ports, RAM, Felder für das Formular, Query-Methode, RCON-Unterstützung). Neue Vorlagen sind einfach ein neuer Ordner.
+
+**Ablauf:**
+1. Vorlage wählen
+2. Formular: Name, Zielserver (mit freiem RAM, „zu wenig RAM frei“ als Warnung), Version, max. Spieler, Port (Vorschlag: der nächste freie), vorlagenspezifische Felder (z. B. Minecraft: Typ, Seed, Whitelist an/aus, Online-Mode)
+3. „Aufsetzen“: Der Core rendert die Compose-Datei, der Agent legt sie unter `/opt/homelab/games/<name>/` ab und startet sie. Der Fortschritt erscheint live (Image ziehen, Welt erzeugen, „bereit“).
+4. Danach erscheint die `GameServer`-Kachel. Der Hinweis zur Portweiterleitung (Deco bzw. Oracle Security List) wird mit den genauen Ports angezeigt, wenn der Server von außen erreichbar sein soll.
+
+RCON-Passwörter werden automatisch erzeugt und verschlüsselt gespeichert.
+
+### 6.3 Gameserver betreiben
+`GameServer`-Kachel: Spiel, Version, Adresse (Klick kopiert sie; extern: DDNS-Name oder öffentliche IP mit Port), Spieler x/y mit Namen, RAM, TPS (Minecraft), Status.
+Aktionen: Start/Stop, Neustart, Konsole (RCON, sonst `docker attach`), Teilen (Benutzerlink), Backup jetzt (Welt-Ordner als tar.zst nach `/opt/homelab/backups/`, die letzten 7 behalten), Einstellungen (Formular von oben, mit Neustart), Löschen (Danger, Name eintippen; die Welt wird vorher gesichert).
+Spielerdaten kommen über RCON/Query (`minecraft-server-util`) bzw. GameDig (`gamedig`).
+Optional: automatisch stoppen nach N Minuten ohne Spieler.
+
+### 6.4 Benutzerlinks (Share)
+Freunde bekommen pro Gameserver einen Link, mit dem sie **nur diesen Server** steuern.
+- Erstellen: Name der Person, Rechte (Starten/Stoppen, Neustart, Konsole lesen, Konsole schreiben, Whitelist bearbeiten), Ablauf (1 Tag / 7 Tage / 14 Tage / 30 Tage / nie)
+- Link: zufälliges Token (≥ 128 Bit, URL-safe). Gespeichert wird nur der Hash. Optional zusätzlich eine 4-stellige PIN.
+- Die Seite hinter dem Link zeigt: Name des Servers, Status, Adresse zum Kopieren, Spieler online und die erlaubten Knöpfe. Sonst nichts: keine Server-Liste, keine IPs, keine Navigation.
+- Jede Aktion wird mit Person und Zeit protokolliert und ist in der Gameserver-Detailseite sichtbar.
+- Widerrufen jederzeit. Abgelaufene Links zeigen „Link abgelaufen“.
+- **Erreichbarkeit:** Über das optionale Share-Gateway (`apps/share`, siehe `docs/NETWORK.md`). Solange das Gateway aus ist, funktionieren Links nur im Tailnet. Das ist der Standard.
+
+## 7. GitHub
+
+- **Anbindung:** Ein Fine-grained Personal Access Token (Contents read, Actions read, Metadata read; für Deploy nur read nötig). Es wird verschlüsselt gespeichert. Später ist eine GitHub-App möglich.
+- **Abgleich:** Polling alle 60 s mit ETags (spart Rate-Limit), da der Core nicht öffentlich erreichbar ist und deshalb keine Webhooks bekommt.
+- **Repos:** `RepoRow` pro Repo: letzter Commit, Branch, CI-Status (letzter Workflow-Run), wohin deployt, „N neu“, wenn GitHub weiter ist als der Server.
+- **Deploy-Ziele** pro Repo (in den Repo-Einstellungen der Zentrale): Server, Pfad (`/opt/homelab/apps/<repo>`), Branch, Methode (`compose`: `git fetch && git checkout <sha> && docker compose up -d --build`; `script`: eine Datei `deploy.sh` im Repo), optional „automatisch deployen, wenn CI grün“.
+- **Deploy:** Knopf in `RepoRow`, Live-Log im `Terminal`, Ergebnis als `Alert`. Ist CI rot, wird nicht angeboten zu deployen. Sperre: pro Ziel höchstens ein Deploy gleichzeitig.
+- **Verlauf:** `CommitRow`-Liste (die letzten 30 Commits) mit LIVE-Markierung. Ein Commit, der früher deployt war, bekommt den Knopf „Rollback“.
+- Klonen privater Repos auf dem Zielserver: Ein Deploy-Key pro Repo (die Zentrale erzeugt ihn und zeigt an, wo er bei GitHub einzutragen ist) oder das Token per HTTPS. Der Key liegt nur auf dem Zielserver.
+
+## 8. Websites und Checks
+
+`WebCheckRow` pro Check. Arten:
+- **HTTP(S):** URL, erwarteter Status (Standard 200–399), optional ein Text, der vorkommen muss, Timeout 10 s
+- **TCP:** Host:Port (z. B. Gameserver-Port)
+- **Ping (ICMP)** über den Agent
+
+Ein Check läuft von einem wählbaren Ort aus: dem Core oder einem bestimmten Agent. So lässt sich „von außen“ prüfen, z. B. von Oracle aus auf die Heim-IP.
+Intervall 60 s, Status `crit` erst nach 2 Fehlschlägen hintereinander (gegen Fehlalarme).
+Zusätzlich: SSL-Ablauf (Warnung < 14 Tage, crit < 5 Tage) und Domain-Ablauf über RDAP (täglich, Warnung < 30 Tage).
+Verlauf: Uptime in % für 24 h / 7 d / 30 d, Antwortzeit als `Sparkline`.
+
+## 9. Meldungen und Push
+
+- Jedes Ereignis wird zur Meldung (`Alert`-Logzeile): Zeit, Level (OK/INFO/WARN/CRIT), Titel (Was + Wo), Details (seit wann + was hilft), Server, Quelle.
+- Meldungen haben einen Zustand: offen → bestätigt → erledigt (automatisch erledigt, wenn sich der Zustand erholt; dann kommt eine OK-Meldung).
+- **Push:** Web-Push (VAPID) an die installierte PWA. Regeln: `crit` sofort; `warn` gesammelt, höchstens eine Push alle 30 Min; „Ruhezeit“ 23–7 Uhr nur `crit`.
+- Optional als zweiter Kanal: ntfy (selbst gehostet) oder E-Mail.
+- **Wochenbericht** sonntags 19:00: Uptime pro Server/Website, Ausfälle, Deploys, Backups, Speicherverbrauch.
+- Texte nach den Regeln in `design/README.md` → „Stimme und Text“.
+
+## 10. Wohnung (Home Assistant)
+
+- Verbindung über URL und Long-Lived Access Token (verschlüsselt gespeichert), WebSocket-API für Live-Zustände.
+- In den Einstellungen wählt man, welche Entitäten erscheinen und in welchem Raum.
+- Darstellung: `Toggle` für Schalter und Lichter, `Metric` für Sensoren (Temperatur, Luftfeuchte, CO₂, Strom in W, Energie in kWh pro Monat mit €-Schätzung).
+- Türöffner und Gegensprechanlage (BTicino Classe 100X bzw. Shelly): **Button mit Bestätigung**, nie Toggle.
+- Fällt HA aus, erscheint eine Meldung, und der Bereich zeigt „Home Assistant nicht erreichbar“.
+
+## 11. Konsole
+
+- Web-Terminal (xterm.js) zu einem Server über den Agent (PTY).
+- Nur für Server mit `HZ_AGENT_ALLOW_TERMINAL=1` und nur nach erneuter TOTP-Eingabe (gilt 15 Min).
+- Jede Sitzung wird protokolliert (wer, wann, Dauer; keine Tastenanschläge).
+
+## 12. Wandmodus
+
+- Route `/wall`, `data-theme="wall"`, nur Lesen, keine Navigation, Vollbild.
+- Ein Raster aus großen Kacheln (`Metric size="wall"`): Server-Status, Spieler online, Temperatur innen, Strom aktuell, offene Probleme.
+- Ein Problem färbt die ganze Kachel rot. Nachts (22–7 Uhr) wird auf 40 % gedimmt, nur `crit` bleibt hell.
+- Zugang über ein eigenes, nur lesendes Geräte-Token (QR-Code in den Einstellungen), damit das Tablet kein Admin-Login braucht.
+
+## 13. Einstellungen
+
+Konto (Passwort, TOTP, aktive Sessions), Server (Schwellen, Konsole erlaubt, entfernen), Agents (Tokens widerrufen), GitHub (Token, Repos, Deploy-Ziele), Checks, Push (Geräte, Ruhezeit, Testnachricht), Home Assistant, Wandmodus-Token, Share-Gateway (an/aus, öffentliche URL), Backup der Zentrale selbst (SQLite-Export).
+
+## 14. Nicht-Ziele
+
+- Keine Mehrbenutzerverwaltung (außer Benutzerlinks)
+- Kein Kubernetes
+- Kein eigenes Monitoring-Backend wie Prometheus. Die Zentrale speichert Messwerte selbst (Rohdaten 48 h, 5-Min-Mittel 30 Tage, Stundenmittel 1 Jahr).
+- Keine öffentliche Erreichbarkeit der Zentrale, auch nicht „nur kurz“
+
+## 15. Ideen für später (nicht in den Meilensteinen)
+
+Backups mit restic zwischen den Servern, Roblox-/Evelon-Statistiken, SoundOS-Steuerung, Morgen-Briefing (Wetter Wien und Attersee, Wiener Linien, Termine), Paket-Tracking, Pi-hole-Statistiken, Wake-on-LAN, KI-Befehle („Starte den Minecraft-Server“).
