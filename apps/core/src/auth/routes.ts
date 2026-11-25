@@ -138,6 +138,9 @@ export const authRoutes: FastifyPluginAsync<AuthRoutesOptions> = async (app, { a
   app.post('/auth/login', async (request, reply) => {
     enforceLimit(svc.loginLimiter, request.ip);
     const body = loginRequestSchema.parse(request.body);
+    // Count the attempt before the first await, so parallel requests cannot
+    // slip past the limit while argon2 runs. A success resets it below.
+    svc.loginLimiter.fail(request.ip);
     const user = svc.findUser(body.username);
     const passwordOk = await verifyPassword(
       user?.passwordHash ?? (await dummyPasswordHash()),
@@ -152,7 +155,6 @@ export const authRoutes: FastifyPluginAsync<AuthRoutesOptions> = async (app, { a
       }
     }
     if (!user || method === null) {
-      svc.loginLimiter.fail(request.ip);
       svc.audit({
         actor: 'anonymous',
         action: 'auth.login_failed',
@@ -219,8 +221,8 @@ export const authRoutes: FastifyPluginAsync<AuthRoutesOptions> = async (app, { a
     const auth = requireAuth(request);
     enforceLimit(svc.stepUpLimiter, request.ip);
     const body = changePasswordRequestSchema.parse(request.body);
+    svc.stepUpLimiter.fail(request.ip);
     if (!(await verifyPassword(auth.user.passwordHash, body.currentPassword))) {
-      svc.stepUpLimiter.fail(request.ip);
       svc.audit({
         actor: 'admin',
         action: 'auth.password_change_failed',
@@ -229,6 +231,7 @@ export const authRoutes: FastifyPluginAsync<AuthRoutesOptions> = async (app, { a
       });
       throw new HttpError(403, 'invalid_credentials');
     }
+    svc.stepUpLimiter.reset(request.ip);
     svc.setPassword(auth.user.id, await hashPassword(body.newPassword));
     const revoked = svc.sessions.revokeOthers(auth.user.id, auth.session.id);
     svc.audit({

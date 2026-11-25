@@ -45,6 +45,8 @@ export class FailureLimiter {
   fail(key: string): void {
     const now = this.now();
     let e = this.entries.get(key);
+    // While blocked, further failures neither count nor extend the block.
+    if (e && e.blockedUntil > now) return;
     if (e && now - e.lastActivity > this.opts.forgetMs) e = undefined;
     e ??= { failures: [], strikes: 0, blockedUntil: 0, lastActivity: now };
     e.failures = e.failures.filter((t) => now - t < this.opts.windowMs);

@@ -41,6 +41,27 @@ export function requestPath(url: string): string {
 }
 
 /**
+ * The path as the router sees it: percent-decoded once, like find-my-way does,
+ * so `/%61pi/...` cannot bypass the guard. Returns null for malformed encodings.
+ */
+export function decodedPath(url: string): string | null {
+  try {
+    return decodeURIComponent(requestPath(url));
+  } catch {
+    return null;
+  }
+}
+
+/** Decides with both the decoded URL and the matched route pattern. */
+function guardPath(request: FastifyRequest): { path: string; api: boolean } | null {
+  const decoded = decodedPath(request.url);
+  if (decoded === null) return null;
+  const route = request.routeOptions.url;
+  const api = isApiPath(decoded) || (typeof route === 'string' && isApiPath(route));
+  return { path: typeof route === 'string' && isApiPath(route) ? route : decoded, api };
+}
+
+/**
  * CSRF: a state-changing request needs an Origin whose host matches the Host
  * header (also true behind the Vite dev proxy, which keeps Host on :5173) or the
  * host of HZ_BASE_URL. The scheme is not compared, because `tailscale serve`
@@ -89,8 +110,10 @@ export function installAuthGuard(
   app.decorateRequest('auth', null);
 
   app.addHook('onRequest', async (request, reply) => {
-    const path = requestPath(request.url);
-    if (!isApiPath(path)) return;
+    const g = guardPath(request);
+    if (g === null) return sendError(reply, 400, 'invalid_input');
+    if (!g.api) return;
+    const path = g.path;
 
     const token = request.cookies[SESSION_COOKIE];
     request.auth = opts.sessions.resolve(token);
@@ -105,7 +128,7 @@ export function installAuthGuard(
   });
 
   app.addHook('onSend', async (request, reply) => {
-    if (isApiPath(requestPath(request.url))) void reply.header('cache-control', 'no-store');
+    if (guardPath(request)?.api) void reply.header('cache-control', 'no-store');
   });
 }
 

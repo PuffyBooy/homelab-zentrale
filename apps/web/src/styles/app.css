@@ -260,7 +260,7 @@ body,
 .hz-palette-opt[aria-selected='true'] {
   background: var(--bg-200);
   color: var(--ink);
-  box-shadow: inset 2px 0 0 var(--accent);
+  box-shadow: inset 2px 0 0 var(--line-strong);
 }
 .hz-palette-group {
   margin-left: auto;
