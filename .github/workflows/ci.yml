@@ -1,0 +1,77 @@
+name: CI
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  check:
+    name: check + build + e2e
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm check
+      - run: pnpm build
+      - run: pnpm exec playwright install --with-deps chromium
+      - run: pnpm e2e
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report
+          path: playwright-report/
+          retention-days: 7
+
+  audit:
+    name: pnpm audit --prod
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: pnpm audit --prod
+
+  docker:
+    name: docker image + health
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Build and start core
+        run: |
+          printf 'HZ_SECRET_KEY=%s\n' "$(openssl rand -base64 32)" > .env
+          docker compose -f deploy/docker-compose.core.yml up -d --build --wait
+      - name: Check /api/health
+        run: |
+          body="$(curl -fsS http://127.0.0.1:8080/api/health)"
+          echo "$body"
+          echo "$body" | jq -e '.ok == true'
+      - name: Logs on failure
+        if: failure()
+        run: docker compose -f deploy/docker-compose.core.yml logs
+      - name: Stop
+        if: always()
+        run: docker compose -f deploy/docker-compose.core.yml down -v

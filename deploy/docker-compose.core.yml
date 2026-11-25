@@ -1,0 +1,38 @@
+# Homelab-Zentrale core (serves the web app too).
+# Start: docker compose -f deploy/docker-compose.core.yml up -d --build
+# The port is bound to 127.0.0.1 only. Expose it in the tailnet with
+#   tailscale serve --bg --https=443 http://127.0.0.1:8080
+# Never forward this port on the router and never use tailscale funnel (docs/NETWORK.md).
+name: homelab-zentrale
+
+services:
+  core:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.core
+    image: homelab-zentrale/core:local
+    restart: unless-stopped
+    env_file:
+      - path: ../.env
+        required: false
+    environment:
+      # Inside the container the core must listen on all interfaces so the
+      # port mapping works; the host binding below keeps it on loopback.
+      HZ_HOST: 0.0.0.0
+      HZ_PORT: 8080
+      HZ_DATA_DIR: /data
+      HZ_WEB_DIR: /app/web
+    ports:
+      - '127.0.0.1:8080:8080'
+    volumes:
+      - hz-data:/data
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
+volumes:
+  hz-data:
