@@ -1,0 +1,64 @@
+name: CI
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: check + build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm check
+      - run: pnpm build
+
+  audit:
+    name: pnpm audit --prod
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm audit --prod
+
+  docker:
+    name: docker image + health
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build and start core
+        run: |
+          printf 'HZ_SECRET_KEY=%s\n' "$(openssl rand -base64 32)" > .env
+          docker compose -f deploy/docker-compose.core.yml up -d --build --wait
+      - name: Check /api/health
+        run: |
+          body="$(curl -fsS http://127.0.0.1:8080/api/health)"
+          echo "$body"
+          echo "$body" | jq -e '.ok == true'
+      - name: Logs on failure
+        if: failure()
+        run: docker compose -f deploy/docker-compose.core.yml logs
+      - name: Stop
+        if: always()
+        run: docker compose -f deploy/docker-compose.core.yml down -v
