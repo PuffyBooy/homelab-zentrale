@@ -33,9 +33,9 @@ docs/         Spezifikation, Architektur, Sicherheit, Netzwerk, Roadmap
 deploy/       Docker-Compose-Dateien und Install-Skripte
 ```
 
-## Für Coding-Agents
+## Bauen mit Claude Code
 
-Start: [`AGENTS.md`](AGENTS.md). Der Startprompt steht in [`PROMPT.md`](PROMPT.md).
+Gebaut wird mit **Claude Code** (am besten mit Projects). Start: [`PROMPT.md`](PROMPT.md). Regeln: [`AGENTS.md`](AGENTS.md), Sub-Agents: [`.claude/agents/`](.claude/agents/).
 
 ## Designsystem
 

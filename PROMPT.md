@@ -1,48 +1,54 @@
-# Startprompt für Codex / Claude Code
+# Start mit Claude Code Projects
 
-Kopiere den Block unten als ersten Auftrag in Codex (Projekt mit diesem Repo) oder in Claude Code. Danach reicht pro Meilenstein: „Weiter mit M<N>.“
+Dieses Repo ist für **Claude Code Projects** vorbereitet: Ein Koordinator verteilt die Arbeit auf Threads. Jeder Thread ist eine eigene Cloud-Sitzung mit eigenem Branch.
+
+## Einrichten
+1. claude.ai/code (oder Code-Tab in der Desktop-App) → Seitenleiste **Projects** → neues Projekt „Homelab-Zentrale“
+2. Repo `PuffyBooy/homelab-zentrale` hinzufügen
+3. Den Block unten als erste Nachricht an den Koordinator schicken
+
+Jeder Thread liest automatisch `CLAUDE.md`, und damit `AGENTS.md` und die Sub-Agents in `.claude/agents/`.
+
+> Achtung Verbrauch: Jeder Thread ist eine volle Claude-Code-Sitzung. Parallele Threads verbrauchen dein Limit entsprechend schneller. Der Prompt begrenzt sie deshalb auf höchstens 3 gleichzeitig.
 
 ---
 
 ```text
-Du baust die „Homelab-Zentrale“: mein privates Kontrollzentrum für alle meine Server,
-Docker-Container, Gameserver (mit Benutzerlinks für Freunde), mein GitHub-Konto mit Deploy,
-Website-Checks, Push-Meldungen und Home Assistant. Alles steht im Repo.
+Projekt: die „Homelab-Zentrale“ im Repo PuffyBooy/homelab-zentrale. Das ist mein privates
+Kontrollzentrum für alle meine Server, Docker-Container, Gameserver (mit Benutzerlinks für
+Freunde), mein GitHub-Konto mit Deploy, Website-Checks, Push-Meldungen und Home Assistant.
+Alles Nötige steht im Repo: AGENTS.md, docs/ und design/.
 
-1. Lies zuerst AGENTS.md vollständig und halte die Lesereihenfolge dort ein:
-   docs/SPEC.md → docs/ARCHITECTURE.md → docs/SECURITY.md → docs/NETWORK.md →
-   docs/ROADMAP.md → design/README.md.
-2. Die festen Entscheidungen in AGENTS.md (Stack, kein Tailwind/UI-Kit, nie öffentlich
-   erreichbar, Agent-Allowlist) sind verbindlich. Weich nicht davon ab. Wenn etwas fehlt
-   oder sich widerspricht, trag es in docs/QUESTIONS.md ein und nimm die sicherste,
-   einfachste Variante.
-3. Arbeite die Meilensteine aus docs/ROADMAP.md der Reihe nach ab, beginnend mit M0.
-   Pro Meilenstein: eigener Branch m<N>-<name>, kleine Commits (Conventional Commits),
-   am Ende ein PR auf main mit Zusammenfassung, Screenshots (falls UI) und abgehakten
-   Abnahmekriterien.
-4. Setz Sub-Agents nur für die Arbeitspakete ein, die in der Roadmap mit ∥ markiert sind.
-   Jeder Sub-Agent arbeitet nur in seinem Besitzer-Ordner. packages/shared (Schemas)
-   wird zuerst fertig gemacht, bevor die parallelen Pakete starten.
-5. Jede Oberfläche entsteht aus design/: Tokens aus design/tokens.css, Styles aus
-   design/components.css, Komponenten als TSX-Port von design/reference/bundle.js mit den
-   Props aus design/reference/index.d.ts. design/reference/previews/Dashboard.html ist die
-   Vorlage für die Startseite. Prüf deine UI per Playwright-Screenshot gegen die Previews,
-   in allen drei Themes (dark, light, wall).
-6. Ein Meilenstein ist erst fertig, wenn `pnpm check` und die Playwright-Smoke-Tests grün
-   sind und jede Regel aus docs/SECURITY.md eingehalten ist. Ohne grüne Checks nicht
-   weitermachen.
-7. Am Ende jedes Meilensteins: docs/CHANGELOG.md ergänzen und mir in 5–10 Zeilen sagen,
-   was fertig ist, was ich selbst tun muss (z. B. Tailscale, Deco, Tokens eintragen) und
-   was als Nächstes kommt.
+Deine Rolle als Koordinator:
+1. Lies AGENTS.md, docs/ROADMAP.md und docs/SPEC.md. Die festen Entscheidungen in AGENTS.md
+   (Stack, kein Tailwind/UI-Kit, nie öffentlich erreichbar, Agent-Allowlist) sind verbindlich.
+2. Arbeite die Meilensteine aus docs/ROADMAP.md der Reihe nach ab, beginnend mit M0.
+   Der nächste Meilenstein startet erst, wenn der vorige gemergt ist.
+3. Pro Meilenstein:
+   - Zuerst ein Thread für das Arbeitspaket „Schema“ (packages/shared), falls es eines gibt.
+   - Danach ein eigener Thread pro Arbeitspaket, das in der Roadmap mit ∥ markiert ist.
+     Höchstens 3 Threads gleichzeitig. Jeder Thread arbeitet nur in seinem Besitzer-Ordner.
+   - Pakete ohne ∥ laufen nacheinander in einem Thread.
+   - Jeder Thread: eigener Branch m<N>-<paket>, kleine Commits, `pnpm check` grün, PR auf main.
+4. Wenn alle Pakete eines Meilensteins fertig sind: ein Review-Thread mit dem Sub-Agent
+   `reviewer` (siehe .claude/agents/). Erst wenn er „kann gemergt werden“ sagt, ist der
+   Meilenstein fertig.
+5. Frag mich nur, wenn eine Entscheidung nicht rückgängig zu machen ist oder etwas meine
+   Zugangsdaten bzw. Geräte braucht (Tailscale, Tokens, Ports). Alles andere entscheidest du
+   nach den Docs. Offene Punkte kommen in docs/QUESTIONS.md.
+6. Nach jedem Meilenstein schick mir ein kurzes Update: was fertig ist, welche PRs ich mergen
+   soll, was ich selbst tun muss (Tabelle unten in PROMPT.md) und was als Nächstes kommt.
 
-Starte jetzt mit M0.
+Starte mit M0.
 ```
 
 ---
 
-## Was du selbst vorbereiten musst
+## Ohne Projects (normales Claude Code)
 
-Diese Dinge kann kein Agent für dich machen. Du brauchst sie spätestens beim jeweiligen Meilenstein:
+Im geklonten Repo `claude` starten und schreiben: „Lies CLAUDE.md und starte mit M0 aus docs/ROADMAP.md.“ Claude setzt dann für parallele Pakete die Sub-Agents aus `.claude/agents/` ein. Danach pro Meilenstein: „Weiter mit M<N>.“
+
+## Was du selbst vorbereiten musst
 
 | Wann | Was |
 | --- | --- |
