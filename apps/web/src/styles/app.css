@@ -1,0 +1,483 @@
+/*
+ * App layout glue and the proposed components that design/components.css does not have yet
+ * (Field, Dialog, CommandPalette, BottomBar; see docs/QUESTIONS.md). Only tokens, no colours.
+ */
+html,
+body,
+#root {
+  height: 100%;
+}
+
+/* ---------- Shell ---------- */
+.app-shell {
+  min-height: 100%;
+}
+
+.app-rail {
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.app-rail > .hz-nav {
+  flex: 1;
+  overflow-y: auto;
+}
+.app-rail-foot {
+  width: 210px;
+  box-sizing: border-box;
+  padding: var(--space-3);
+  background: var(--bg-100);
+  border-right: 1px solid var(--line);
+  border-top: 1px solid var(--line);
+  display: grid;
+  gap: 1px;
+}
+.app-rail-foot .hz-nav-item {
+  width: 100%;
+  box-sizing: border-box;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  font-weight: 500;
+  cursor: pointer;
+  text-align: left;
+}
+.app-rail-foot .hz-nav-active {
+  background: var(--accent-soft);
+}
+.app-rail-hint {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--ink-faint);
+}
+
+.app-main {
+  padding-bottom: var(--space-6);
+}
+.app-top-switch {
+  align-self: flex-end;
+}
+
+.app-empty {
+  color: var(--ink-muted);
+  margin: 0;
+  max-width: 60ch;
+}
+
+@media (max-width: 699px) {
+  .app-shell.hz-page {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .app-rail {
+    display: none;
+  }
+  .app-main.hz-page-main {
+    padding: var(--space-4);
+    padding-bottom: calc(64px + var(--space-4) + env(safe-area-inset-bottom));
+  }
+}
+
+/* ---------- BottomBar (proposed) ---------- */
+.hz-bottombar {
+  display: none;
+}
+@media (max-width: 699px) {
+  .hz-bottombar {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 10;
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: 2px;
+    padding: var(--space-1) var(--space-1) calc(var(--space-1) + env(safe-area-inset-bottom));
+    background: var(--bg-100);
+    border-top: 1px solid var(--line);
+  }
+}
+.hz-bottombar-item {
+  font: inherit;
+  font-size: 11px;
+  line-height: 16px;
+  font-weight: 500;
+  min-height: 52px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  border: 0;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--ink-muted);
+  text-decoration: none;
+  cursor: pointer;
+  position: relative;
+}
+.hz-bottombar-item .hz-icon {
+  color: var(--ink-faint);
+}
+.hz-bottombar-item[aria-current='page'] {
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+}
+.hz-bottombar-item[aria-current='page'] .hz-icon {
+  color: var(--accent-ink);
+}
+
+/* ---------- Dialog (proposed) ---------- */
+.hz-dialog {
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-lg);
+  background: var(--bg-100);
+  color: var(--ink);
+  box-shadow: var(--raise);
+  width: min(440px, calc(100vw - 2 * var(--space-4)));
+  max-height: calc(100vh - 2 * var(--space-6));
+  box-sizing: border-box;
+}
+.hz-dialog::backdrop {
+  background: color-mix(in srgb, var(--bg-000) 72%, transparent);
+}
+.hz-dialog-head {
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--line);
+  font-weight: 600;
+  font-size: 14px;
+  line-height: 20px;
+  margin: 0;
+}
+.hz-dialog-body {
+  padding: var(--space-4);
+  display: grid;
+  gap: var(--space-4);
+}
+.hz-dialog-text {
+  margin: 0;
+  color: var(--ink-muted);
+  font-size: 13px;
+}
+.hz-dialog-foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+@media (max-width: 699px) {
+  .hz-dialog-sheet {
+    margin: auto 0 0;
+    width: 100vw;
+    max-width: 100vw;
+    border-bottom-left-radius: 0;
+    border-bottom-right-radius: 0;
+  }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .hz-dialog[open] {
+    animation: hz-dialog-in 0.12s ease-out;
+  }
+}
+@keyframes hz-dialog-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
+
+.app-sheet-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 1px;
+}
+.app-sheet-list .hz-nav-item {
+  height: 40px;
+  width: 100%;
+  box-sizing: border-box;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  font-weight: 500;
+  cursor: pointer;
+  text-align: left;
+}
+
+/* ---------- CommandPalette (proposed) ---------- */
+.hz-palette {
+  margin-top: 15vh;
+  width: min(560px, calc(100vw - 2 * var(--space-4)));
+}
+.hz-palette-input {
+  width: 100%;
+  box-sizing: border-box;
+  height: 48px;
+  padding: 0 var(--space-4);
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  font-size: 16px;
+}
+.hz-palette-input:focus {
+  outline: none;
+}
+.hz-palette-input:focus-visible {
+  box-shadow: inset 0 -2px 0 var(--accent-ink);
+}
+.hz-palette-input::placeholder {
+  color: var(--ink-faint);
+}
+.hz-palette-list {
+  list-style: none;
+  margin: 0;
+  padding: var(--space-1);
+  max-height: 50vh;
+  overflow-y: auto;
+}
+.hz-palette-opt {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  height: 36px;
+  padding: 0 var(--space-3);
+  border-radius: var(--radius-md);
+  color: var(--ink-muted);
+  cursor: pointer;
+}
+.hz-palette-opt .hz-icon {
+  color: var(--ink-faint);
+}
+.hz-palette-opt[aria-selected='true'] {
+  background: var(--bg-200);
+  color: var(--ink);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+.hz-palette-group {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--ink-faint);
+}
+.hz-palette-empty {
+  padding: var(--space-3);
+  color: var(--ink-muted);
+  font-size: 13px;
+}
+.hz-palette-foot {
+  display: flex;
+  gap: var(--space-4);
+  padding: var(--space-2) var(--space-4);
+  border-top: 1px solid var(--line);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--ink-faint);
+}
+
+.hz-kbd {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 16px;
+  min-width: 16px;
+  padding: 0 4px;
+  box-sizing: border-box;
+  display: inline-flex;
+  justify-content: center;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  color: var(--ink-muted);
+}
+
+/* ---------- Field (proposed) ---------- */
+.hz-form {
+  display: grid;
+  gap: var(--space-4);
+}
+.hz-field {
+  display: grid;
+  gap: var(--space-1);
+  min-width: 0;
+}
+.hz-field-label {
+  font-size: 13px;
+  line-height: 20px;
+  font-weight: 600;
+  color: var(--ink);
+}
+.hz-input {
+  font: inherit;
+  font-size: 14px;
+  height: 36px;
+  padding: 0 var(--space-3);
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--line-strong);
+  background: var(--bg-200);
+  color: var(--ink);
+}
+.hz-input::placeholder {
+  color: var(--ink-faint);
+}
+.hz-input:focus {
+  outline: none;
+}
+.hz-input:focus-visible {
+  box-shadow: var(--focus-ring);
+}
+.hz-input[aria-invalid='true'] {
+  border-color: var(--crit);
+}
+.hz-input-mono {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.08em;
+}
+.hz-field-hint {
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--ink-faint);
+}
+.hz-field-error {
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--crit);
+}
+.hz-form-actions {
+  display: flex;
+  gap: var(--space-2);
+  justify-content: flex-end;
+  flex-wrap: wrap;
+}
+
+/* ---------- Auth screens ---------- */
+.app-auth {
+  min-height: 100%;
+  box-sizing: border-box;
+  display: grid;
+  place-items: center;
+  padding: var(--space-5) var(--space-4);
+}
+.app-auth-col {
+  width: min(420px, 100%);
+  display: grid;
+  gap: var(--space-4);
+}
+.app-auth-wide {
+  width: min(520px, 100%);
+}
+.app-brand {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-family: var(--font-mono);
+  font-weight: 600;
+  font-size: 13px;
+}
+.app-auth-title {
+  margin: 0;
+}
+.app-steps {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+.app-text {
+  margin: 0;
+  color: var(--ink-muted);
+  font-size: 13px;
+}
+.app-qr {
+  justify-self: center;
+  padding: var(--space-3);
+  background: var(--bg-100);
+  border-radius: var(--radius-md);
+  line-height: 0;
+}
+.app-qr img {
+  width: 200px;
+  height: 200px;
+  display: block;
+}
+.app-secret {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+.app-secret code {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  word-break: break-all;
+  color: var(--ink);
+}
+.app-codes {
+  list-style: none;
+  margin: 0;
+  padding: var(--space-3);
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-2) var(--space-4);
+  background: var(--bg-200);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  font-family: var(--font-mono);
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+}
+.app-codes li {
+  display: flex;
+  gap: var(--space-2);
+}
+.app-codes-n {
+  color: var(--ink-faint);
+  min-width: 2ch;
+  text-align: right;
+}
+
+/* ---------- Settings ---------- */
+.app-settings {
+  display: grid;
+  gap: var(--space-4);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: start;
+}
+@media (max-width: 1199px) {
+  .app-settings {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+.app-kv {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: var(--space-2) var(--space-4);
+  margin: 0;
+  font-size: 13px;
+}
+.app-kv dt {
+  color: var(--ink-faint);
+}
+.app-kv dd {
+  margin: 0;
+  font-family: var(--font-mono);
+}
+
+.app-icon-gap {
+  width: 14px;
+  height: 14px;
+}
+.app-pad {
+  padding: var(--space-3);
+}

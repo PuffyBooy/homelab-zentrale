@@ -6,16 +6,16 @@ export interface NavItem {
   id: string;
   label: string;
   icon: IconName;
-  href?: string;
-  count?: number;
+  href?: string | undefined;
+  count?: number | undefined;
   /** Shortcut shown left of the label. Defaults to the 1-based position (reference bundle). */
-  key?: string;
+  key?: string | undefined;
 }
 
 export interface NavRailProps {
   items: NavItem[];
-  active?: string;
-  title?: string;
+  active?: string | undefined;
+  title?: string | undefined;
 }
 
 /** 1:1 port of NavRail from design/reference/bundle.js. */

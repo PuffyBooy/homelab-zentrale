@@ -77,8 +77,9 @@ design/                   Designsystem (nicht von Hand ändern, siehe design/REA
 
 | Tabelle | Wichtige Spalten |
 | --- | --- |
-| `users` | id, username, password_hash (argon2id), totp_secret_enc, created_at |
-| `sessions` | id (zufällig), user_id, created_at, expires_at, last_seen, user_agent, step_up_until |
+| `users` | id, username, password_hash (argon2id), totp_secret_enc, totp_last_step (gegen TOTP-Replay), created_at, updated_at |
+| `sessions` | id (zufällig, öffentlich), token_hash (SHA-256 des Cookie-Werts), user_id, created_at, expires_at, last_seen, user_agent, step_up_until |
+| `recovery_codes` | id, user_id, code_hash (SHA-256), created_at, used_at |
 | `device_tokens` | id, kind (`wall`), token_hash, label, created_at, revoked_at |
 | `servers` | id, name (unique), location, arch, os, tailscale_ip, public_ip, thresholds_json, allow_terminal, created_at, last_seen |
 | `agent_tokens` | id, server_id, token_hash, created_at, revoked_at |
@@ -98,8 +99,9 @@ design/                   Designsystem (nicht von Hand ändern, siehe design/REA
 | `cert_status` | check_id, ssl_expires_at, domain_expires_at, checked_at |
 | `alerts` | id, key (dedupe), level, title, body, server_id, source, state, opened_at, acked_at, resolved_at |
 | `push_subscriptions` | id, endpoint, keys_json, label, created_at |
-| `settings` | key, value_json (HA-URL, HA-Token verschlüsselt, Ruhezeit, GitHub-Token verschlüsselt …) |
-| `audit_log` | id, ts, actor (`admin`, `share:<id>`, `system`), action, target, details_json |
+| `settings` | key, value_json, updated_at (HA-URL, HA-Token verschlüsselt, Ruhezeit, GitHub-Token verschlüsselt …) |
+| `audit_log` | id, ts, actor (`admin`, `anonymous`, `share:<id>`, `system`), action, target, details_json |
+| `schema_migrations` | version, name, applied_at (Migrationen in `apps/core/src/db/migrations.ts`, beim Start angewendet) |
 
 ## Agent-Protokoll
 

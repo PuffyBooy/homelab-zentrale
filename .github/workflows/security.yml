@@ -1,0 +1,97 @@
+name: Security
+
+# Security scans that work on a private repo without GitHub Advanced Security.
+# CodeQL and dependency-review need GHAS on private repos, see docs/OFFENE-FRAGEN-UND-IDEEN.md.
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+  schedule:
+    # Mondays 05:17 UTC, catches new CVEs without a push.
+    - cron: '17 5 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: security-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  security-tests:
+    name: security tests (vitest)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # Every test file whose name contains "security" (auth, headers, allowlist, path checks, secrets in logs ...).
+      - run: pnpm exec vitest run security
+
+  semgrep:
+    name: semgrep (SAST)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    container:
+      image: semgrep/semgrep:1.187.0
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Scan
+        run: >
+          semgrep scan --metrics=off --error
+          --config p/typescript --config p/nodejs --config p/react
+          --config p/secrets --config p/dockerfile --config p/github-actions
+          --exclude design/reference --exclude '**/*.test.ts' --exclude '**/*.test.tsx'
+
+  gitleaks:
+    name: gitleaks (secrets in history)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Scan full history
+        run: >
+          docker run --rm -v "$PWD:/repo" ghcr.io/gitleaks/gitleaks:v8.28.0
+          git /repo --redact --no-banner --exit-code 1
+
+  trivy:
+    name: trivy (deps, config, image)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Filesystem scan (lockfile, Dockerfiles, compose)
+        uses: aquasecurity/trivy-action@0.33.1
+        with:
+          scan-type: fs
+          scanners: vuln,misconfig,secret
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: '1'
+          skip-dirs: design
+      - name: Build core image
+        run: docker build -f deploy/Dockerfile.core -t hz-core:scan .
+      - name: Image scan
+        uses: aquasecurity/trivy-action@0.33.1
+        with:
+          scan-type: image
+          image-ref: hz-core:scan
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: '1'

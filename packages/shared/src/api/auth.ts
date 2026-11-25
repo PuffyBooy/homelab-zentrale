@@ -69,6 +69,9 @@ export const loginRequestSchema = z.strictObject({
   code: secondFactorSchema,
 });
 export type LoginRequest = z.infer<typeof loginRequestSchema>;
+/** Successful login answers with the new auth state (and sets the session cookie). */
+export const loginResponseSchema = authStateSchema;
+export type LoginResponse = AuthState;
 
 // POST /api/auth/step-up
 export const stepUpRequestSchema = z.strictObject({ code: totpCodeSchema });

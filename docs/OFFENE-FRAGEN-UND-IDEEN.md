@@ -1,0 +1,81 @@
+# Offene Fragen, To-dos für Alex und Ideen
+
+Diese Datei wird bei jedem Meilenstein aktualisiert. Technische Detailfragen der Agents stehen zusätzlich in `docs/QUESTIONS.md`.
+
+## Was Alex selbst tun muss
+
+Alles hier braucht deine Zugänge oder ist nicht rückgängig zu machen. Bis dahin läuft der Code mit Platzhaltern bzw. Demo-Daten (`HZ_DEMO=1`).
+
+1. **Core auf dem Heimserver starten:** `.env` aus `.env.example` anlegen, `HZ_SECRET_KEY` mit `openssl rand -base64 32` erzeugen und sicher aufheben (ohne ihn sind alle gespeicherten Secrets verloren), dann `docker compose -f deploy/docker-compose.core.yml up -d --build`.
+2. **Tailscale serve einrichten:** `tailscale serve --bg --https=443 http://127.0.0.1:8080` auf dem Heimserver, MagicDNS und HTTPS-Zertifikate im Tailscale-Admin aktivieren. `HZ_BASE_URL` auf `https://heimserver.<tailnet>.ts.net` setzen.
+3. **Erstes Setup:** Den einmaligen Setup-Link aus `docker compose logs core` öffnen, Konto anlegen, TOTP in der Authenticator-App einrichten, die 10 Wiederherstellungscodes offline sichern.
+
+## Offene Fragen
+
+- **Branch-Namen:** AGENTS.md wünscht pro Meilenstein einen Branch `m<N>-<name>`. Diese Sitzung darf technisch nur auf einen festen Branch pushen. Annahme: Jeder Meilenstein ist trotzdem ein eigener PR mit Titel `M<N>: …`, der Branch wird nach jedem Merge neu von `main` gestartet. Soll ich künftig `m<N>-…`-Branches verwenden?
+- **CodeQL / Dependency-Review:** Das Repo ist privat. GitHubs CodeQL-Code-Scanning und die Dependency-Review-Action brauchen dafür „GitHub Code Security“ (kostenpflichtig). Annahme: Stattdessen laufen Semgrep (SAST), Gitleaks (Secrets in der ganzen Git-Historie), Trivy (Abhängigkeiten, Dockerfiles, Image) und `pnpm audit` in `.github/workflows/security.yml`. Wenn du Code Security aktivierst oder das Repo öffentlich machst, ergänze ich CodeQL in 5 Minuten.
+
+## Annahmen
+
+- Sicherheitstests liegen in Dateien mit `security` im Namen und laufen zusätzlich als eigener Job `security tests` in GitHub Actions.
+
+## Zukunftsideen
+
+Sortiert nach Bereich. Nichts davon ist in den Meilensteinen, alles wäre ein eigener kleiner Ausbau.
+
+### Server und Betrieb
+- Backups mit restic zwischen den Servern (Heimserver ↔ Oracle), mit Wiederherstellungstest pro Woche und Anzeige „letztes geprüftes Backup vor 3 Tagen“.
+- Wake-on-LAN für Rechner im Heimnetz über den Agent am Heimserver.
+- Automatische Sicherheitsupdates (unattended-upgrades) pro Server ein-/ausschalten und das Ergebnis anzeigen.
+- Geplante Neustarts („Sonntag 04:00, wenn Neustart nötig“).
+- SMART-Werte der Festplatten, ZFS/btrfs-Scrub-Status, RAID-Zustand.
+- USV-Anbindung (NUT): Akkustand und automatisches Herunterfahren.
+- Prognose „Disk voll in 23 Tagen“ aus dem Verlauf.
+- Docker-Volumes und ihre Größe pro Container.
+- Mehrere Zentralen-Instanzen als Hot-Standby auf Oracle (SQLite-Replikation mit Litestream).
+
+### Container und Deploy
+- Watchtower-artige Update-Hinweise: neue Image-Version verfügbar, mit Changelog-Link.
+- Preview-Deploys pro Branch unter eigenem Pfad im Tailnet.
+- Deploy-Freigabe per Push-Nachricht („Deploy von soundos auf soundos-pi freigeben?“).
+- Secrets-Verwaltung für `.env`-Dateien der Apps (verschlüsselt im Core, beim Deploy geschrieben).
+- GitHub-App statt Token, damit Rechte feiner sind.
+- Release-Notes automatisch aus Commits beim Deploy.
+
+### Gameserver
+- Mod-/Plugin-Verwaltung für Paper und Fabric (Modrinth-API).
+- Welt-Downloads für Freunde als Link (zeitlich begrenzt).
+- Geplante Neustarts und Backups pro Gameserver, Discord-Webhook „Server ist online“.
+- Spielerstatistik (Spielzeit pro Freund, Spitzenzeiten).
+- Mehr Vorlagen: Satisfactory, Factorio, Enshrouded, Project Zomboid, ARK, Rust, V Rising.
+- Auto-Start beim ersten Verbindungsversuch (Proxy, der den Server weckt).
+- Whitelist-Anfragen: Freund trägt seinen Namen ein, Alex bestätigt per Push.
+
+### Websites und Meldungen
+- ntfy als zweiter Push-Kanal (selbst gehostet), E-Mail als dritter.
+- Statusseite nur fürs Tailnet oder öffentlich über das Share-Gateway.
+- Check für DNS-Einträge (erwarteter A-Record = Heim-IP), für DDNS-Ausfälle.
+- Lighthouse-Werte der eigenen Websites wöchentlich.
+- Wartungsfenster: Meldungen für einen Server für 2 h stummschalten.
+- Eskalation: crit 15 Min unbestätigt → zweite Push oder Anruf über Home Assistant.
+
+### Wohnung
+- Morgen-Briefing auf dem Wandtablet: Wetter Wien und Attersee, Wiener Linien Abfahrten, Termine, Müllabfuhr.
+- Stromverbrauch pro Server (Shelly-Steckdosen) und Kosten pro Gameserver im Monat.
+- Szenen („Gaming-Abend“: Licht dimmen, Minecraft starten).
+- Anwesenheit: Gameserver stoppen, wenn niemand online ist und Alex nicht zu Hause.
+
+### Bedienung
+- KI-Befehle in der Befehlspalette („Starte den Minecraft-Server“, „Warum ist oracle-a1 langsam?“).
+- Sprachsteuerung über Home Assistant Assist.
+- iOS/Android-Widgets über die PWA-Shortcuts.
+- Tastatur-Makros und eigene Aktionen in der Palette.
+- Dunkles Wandmodus-Layout für den Echo Show.
+
+### Sonstiges
+- Roblox-/Evelon-Statistiken.
+- SoundOS-Steuerung (FastAPI auf dem Pi): Status, Neustart, Logs.
+- Paket-Tracking (Post, DHL) als Kachel.
+- Pi-hole/AdGuard-Statistiken.
+- Tailscale-Geräteliste mit „zuletzt online“ und Ablauf der Schlüssel.
+- Zertifikats- und Domain-Übersicht für alle Domains an einem Ort.

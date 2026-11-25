@@ -45,4 +45,24 @@ describe('loadConfig', () => {
     const c = loadConfig({ HZ_SECRET_KEY: key, HZ_HOST: '0.0.0.0', HZ_PORT: '9000', HZ_DEMO: '1' });
     expect(c).toMatchObject({ host: '0.0.0.0', port: 9000, demo: true });
   });
+
+  it('accepts HZ_SETUP_TOKEN only with NODE_ENV=test', () => {
+    const token = 'e2e-setup-token-0123456789abcdef';
+    expect(
+      loadConfig({ HZ_SECRET_KEY: key, NODE_ENV: 'test', HZ_SETUP_TOKEN: token }).setupToken,
+    ).toBe(token);
+    for (const env of ['production', 'development', undefined]) {
+      expect(() =>
+        loadConfig({
+          HZ_SECRET_KEY: key,
+          HZ_SETUP_TOKEN: token,
+          ...(env ? { NODE_ENV: env } : {}),
+        }),
+      ).toThrow(/HZ_SETUP_TOKEN/);
+    }
+    expect(() =>
+      loadConfig({ HZ_SECRET_KEY: key, NODE_ENV: 'test', HZ_SETUP_TOKEN: 'short' }),
+    ).toThrow(/HZ_SETUP_TOKEN/);
+    expect(loadConfig({ HZ_SECRET_KEY: key }).setupToken).toBeUndefined();
+  });
 });
