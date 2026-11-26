@@ -25,6 +25,11 @@ export const configSchema = z.object({
   HZ_BASE_URL: z.url().optional(),
   HZ_WEB_DIR: z.string().min(1).optional(),
   HZ_DEMO: boolFlag,
+  // Fixed setup token, only for automated tests (e2e). Rejected unless NODE_ENV=test.
+  HZ_SETUP_TOKEN: z
+    .string()
+    .regex(/^[A-Za-z0-9_-]{22,128}$/, 'HZ_SETUP_TOKEN: 22-128 Zeichen [A-Za-z0-9_-]')
+    .optional(),
   NODE_ENV: z.enum(['development', 'production', 'test']).default('production'),
 });
 
@@ -37,6 +42,8 @@ export interface Config {
   webDir: string | undefined;
   demo: boolean;
   env: 'development' | 'production' | 'test';
+  /** Only set with NODE_ENV=test. */
+  setupToken: string | undefined;
 }
 
 export function isLoopback(host: string): boolean {
@@ -62,6 +69,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     );
   }
   const c = parsed.data;
+  if (c.HZ_SETUP_TOKEN !== undefined && c.NODE_ENV !== 'test') {
+    throw new ConfigError(['HZ_SETUP_TOKEN: nur mit NODE_ENV=test erlaubt']);
+  }
   return {
     secretKey: Buffer.from(c.HZ_SECRET_KEY, 'base64'),
     dataDir: c.HZ_DATA_DIR,
@@ -71,5 +81,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     webDir: c.HZ_WEB_DIR,
     demo: c.HZ_DEMO,
     env: c.NODE_ENV,
+    setupToken: c.HZ_SETUP_TOKEN,
   };
 }

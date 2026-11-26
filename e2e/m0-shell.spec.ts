@@ -6,29 +6,37 @@ test('core answers /api/health', async ({ request }) => {
   expect(await res.json()).toEqual({ ok: true });
 });
 
-test('web app shows the empty page with NavRail and design tokens', async ({ page }) => {
-  await page.goto('/');
-  const nav = page.getByRole('navigation', { name: 'Hauptnavigation' });
-  await expect(nav).toBeVisible();
-  await expect(nav.getByRole('link')).toHaveCount(9);
-  await expect(nav.getByRole('link', { name: /Übersicht/ })).toHaveAttribute(
-    'aria-current',
-    'page',
-  );
-  await expect(page.getByRole('heading', { level: 1 })).toHaveText('Übersicht');
+test('web app loads design tokens and self-hosted fonts behind the login', async ({ page }) => {
+  const foreign: string[] = [];
+  page.on('request', (req) => {
+    const url = new URL(req.url());
+    if (url.protocol.startsWith('http') && url.host !== '127.0.0.1:8099') foreign.push(req.url());
+  });
 
-  // components.css is loaded (NavRail width) and tokens resolve (accent-soft on the active item).
-  await expect(nav).toHaveCSS('width', '210px');
-  await expect(nav.locator('.hz-nav-active')).not.toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
+  await page.goto('/');
+  // Since M1 the overview needs a session: a fresh core asks for setup, otherwise for login.
+  await expect(page).toHaveURL(/\/(setup|login)$/);
+  await expect(page.getByRole('heading', { level: 1 })).toBeVisible();
+
+  // tokens.css resolves (bg-000 on body) and fonts come from /fonts, not Google.
+  await expect(page.locator('body')).not.toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
+  await expect(page.locator('body')).toHaveCSS('font-family', /Space Grotesk/);
+  await page.evaluate('document.fonts.ready');
+  expect(foreign).toEqual([]);
 });
 
-test('deep links fall back to the SPA and mark the nav item', async ({ page }) => {
+test('deep links fall back to the SPA and keep the guard', async ({ page }) => {
   await page.goto('/servers');
-  await expect(page.getByRole('heading', { level: 1 })).toHaveText('Server');
-  await expect(
-    page
-      .getByRole('navigation')
-      .getByRole('link', { name: /Server/ })
-      .first(),
-  ).toHaveAttribute('aria-current', 'page');
+  await expect(page).toHaveURL(/\/(setup|login)$/);
+});
+
+test('manifest and service worker are served', async ({ request }) => {
+  const manifest = await request.get('/manifest.webmanifest');
+  expect(manifest.status()).toBe(200);
+  const json = (await manifest.json()) as { name: string; short_name: string; icons: unknown[] };
+  expect(json.name).toBe('Homelab-Zentrale');
+  expect(json.short_name).toBe('Zentrale');
+  expect(json.icons.length).toBeGreaterThanOrEqual(3);
+  expect((await request.get('/sw.js')).status()).toBe(200);
+  expect((await request.get('/icons/icon-512.png')).status()).toBe(200);
 });

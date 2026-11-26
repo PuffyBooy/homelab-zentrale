@@ -10,7 +10,7 @@ docker compose -f deploy/docker-compose.core.yml up -d --build
 curl http://127.0.0.1:8080/api/health   # {"ok":true}
 ```
 
-- Der Port ist nur an `127.0.0.1:8080` gebunden. Im Container lauscht der Core auf `0.0.0.0`, damit die Portzuordnung funktioniert; von außen ist er trotzdem nicht erreichbar.
+- Der Core-Container nutzt das Host-Netz (`network_mode: host`) und lauscht nur auf `127.0.0.1:8080`. `tailscale serve` erreicht ihn über Loopback, dadurch stimmen auch die Client-IPs (X-Forwarded-For) fürs Login-Rate-Limit.
 - Die SQLite-Daten liegen im Volume `hz-data` (im Container `/data`).
 - Der Container läuft als Benutzer `node`, mit schreibgeschütztem Dateisystem, ohne Capabilities und mit `no-new-privileges`.
 

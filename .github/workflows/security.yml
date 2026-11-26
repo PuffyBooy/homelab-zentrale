@@ -1,0 +1,90 @@
+name: Security
+
+# Security scans that work on a private repo without GitHub Advanced Security.
+# CodeQL and dependency-review need GHAS on private repos, see docs/OFFENE-FRAGEN-UND-IDEEN.md.
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+  schedule:
+    # Mondays 05:17 UTC, catches new CVEs without a push.
+    - cron: '17 5 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: security-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  security-tests:
+    name: security tests (vitest)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # Every test file whose name contains "security" (auth, headers, allowlist, path checks, secrets in logs ...).
+      - run: pnpm exec vitest run security
+
+  semgrep:
+    name: semgrep (SAST)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    container:
+      image: semgrep/semgrep:1.187.0
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - name: Scan
+        run: >
+          semgrep scan --metrics=off --error
+          --config p/typescript --config p/nodejs --config p/react
+          --config p/secrets --config p/dockerfile --config p/github-actions
+          --exclude design/reference --exclude '**/*.test.ts' --exclude '**/*.test.tsx'
+
+  gitleaks:
+    name: gitleaks (secrets in history)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Scan full history
+        run: >
+          docker run --rm -v "$PWD:/repo" ghcr.io/gitleaks/gitleaks:v8.28.0
+          git /repo --redact --no-banner --exit-code 1
+
+  trivy:
+    name: trivy (deps, config, image)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      # Trivy as a plain container (no third-party action).
+      - name: Filesystem scan (lockfile, Dockerfiles, compose)
+        run: >
+          docker run --rm -v "$PWD:/src" -v trivy-cache:/root/.cache aquasec/trivy:0.65.0
+          fs --scanners vuln,misconfig,secret --severity HIGH,CRITICAL --ignore-unfixed
+          --skip-dirs /src/design --exit-code 1 /src
+      - name: Build core image
+        run: docker build -f deploy/Dockerfile.core -t hz-core:scan .
+      - name: Image scan
+        run: >
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v trivy-cache:/root/.cache
+          aquasec/trivy:0.65.0 image --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 hz-core:scan

@@ -1,6 +1,0 @@
-/* Only layout glue the design system leaves to the app. No colours or sizes outside tokens. */
-html,
-body,
-#root {
-  height: 100%;
-}

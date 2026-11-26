@@ -1,6 +1,8 @@
 import { mkdirSync } from 'node:fs';
+import { join } from 'node:path';
 import { buildApp } from './app.js';
 import { ConfigError, isLoopback, loadConfig } from './config.js';
+import { openDatabase } from './db/index.js';
 
 async function main(): Promise<void> {
   let config;
@@ -15,7 +17,9 @@ async function main(): Promise<void> {
   }
 
   mkdirSync(config.dataDir, { recursive: true });
-  const app = await buildApp(config);
+  const db = openDatabase(join(config.dataDir, 'hz.sqlite'));
+  const app = await buildApp(config, { db });
+  app.log.info({ migrationsApplied: db.applied }, 'database ready');
 
   const shutdown = (signal: string): void => {
     app.log.info({ signal }, 'shutting down');
