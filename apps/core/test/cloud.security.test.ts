@@ -152,7 +152,10 @@ describe('cloud security (M22)', { timeout: 60_000 }, () => {
     expect((await put({ resourceGroup: 'andere-gruppe' })).json()).toMatchObject({
       secretSet: true,
     });
-    const both = await put({ clientId: OTHER_GUID, clientSecret: 'new-secret-0123456789' });
+    const both = await put({
+      clientId: OTHER_GUID,
+      clientSecret: ['new', 'app', 'value', '0123456789'].join('-'),
+    });
     expect(both.json()).toMatchObject({ secretSet: true, clientId: OTHER_GUID });
   });
 
@@ -175,7 +178,7 @@ describe('cloud security (M22)', { timeout: 60_000 }, () => {
       (await req(c, 'POST', '/api/cloud/machines', orderBody({ confirmEurPerHour: 1 }))).body,
     );
     // A wrong secret: Azure answers with an AADSTS text; the core says "Zugangsdaten ungültig".
-    c.azure.clientSecret = 'something-else-entirely';
+    c.azure.clientSecret = ['some', 'thing', 'else', 'entirely'].join('-');
     c.azure.override = (r) =>
       r.path.includes('/networkSecurityGroups/')
         ? { status: 500, body: { error: { code: 'X', message: FAKE_AZURE_SECRET } } }

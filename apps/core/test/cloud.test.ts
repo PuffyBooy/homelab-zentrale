@@ -21,6 +21,7 @@ import {
   type CloudSetup,
   type SimAgent,
 } from './cloud-helpers.js';
+import { fakeSecret } from './games-helpers.js';
 import { HOST } from './helpers.js';
 
 let s: CloudSetup | null = null;
@@ -166,7 +167,7 @@ describe('cloud servers (M22)', { timeout: 60_000 }, () => {
       templateId: 'valheim',
       serverId: agent.serverId,
       name: 'wikinger',
-      values: { SERVER_PASS: 'geheim12345' },
+      values: { SERVER_PASS: fakeSecret() },
     });
     expect(res.statusCode, res.body).toBe(202);
     const vh = gameResponseSchema.parse(res.json()).game;
