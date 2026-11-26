@@ -877,7 +877,9 @@ export const SERVICE_DENYLIST = [
 
 /** True when `unit` (e.g. "sshd.service", "getty@tty1.service") is on SERVICE_DENYLIST. */
 export function isDeniedServiceUnit(unit: string): boolean {
-  const base = unit.replace(/\.service$/, '').replace(/@.*$/, '');
+  const noSuffix = unit.endsWith('.service') ? unit.slice(0, -'.service'.length) : unit;
+  const at = noSuffix.indexOf('@');
+  const base = at === -1 ? noSuffix : noSuffix.slice(0, at);
   return (SERVICE_DENYLIST as readonly string[]).includes(base) || base.startsWith('systemd-');
 }
 

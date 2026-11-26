@@ -1,4 +1,5 @@
-import { rm, writeFile } from 'node:fs/promises';
+import { constants } from 'node:fs';
+import { open, rm } from 'node:fs/promises';
 
 /**
  * M17: the agent image's Docker health check (apps/agent/Dockerfile) is healthy
@@ -9,8 +10,19 @@ import { rm, writeFile } from 'node:fs/promises';
  */
 export const CONNECTED_FILE = '/tmp/hz-connected';
 
-export function markConnected(file = CONNECTED_FILE): Promise<void> {
-  return writeFile(file, `${new Date().toISOString()}\n`, { mode: 0o644 }).catch(() => undefined);
+/** Recreates the marker exclusively (O_EXCL, 0600, never through a planted symlink). */
+export async function markConnected(file = CONNECTED_FILE): Promise<void> {
+  try {
+    await rm(file, { force: true });
+    const fh = await open(file, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL, 0o600);
+    try {
+      await fh.writeFile(`${new Date().toISOString()}\n`);
+    } finally {
+      await fh.close();
+    }
+  } catch {
+    // health stays unhealthy; the agent keeps working
+  }
 }
 
 export function markDisconnected(file = CONNECTED_FILE): Promise<void> {

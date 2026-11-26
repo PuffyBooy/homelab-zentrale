@@ -1,9 +1,9 @@
 import {
-  chmodSync,
   closeSync,
-  existsSync,
+  fchmodSync,
   openSync,
   readdirSync,
+  rmSync,
   statSync,
   unlinkSync,
 } from 'node:fs';
@@ -53,12 +53,16 @@ export function backupBeforeMigration(
 ): string {
   const file = join(dir, `backup-before-migration-${from}-to-${to}.sqlite`);
   // A failed earlier attempt with the same versions: replace it.
-  if (existsSync(file)) unlinkSync(file);
+  rmSync(file, { force: true });
   // Created empty with 0600 first (VACUUM INTO accepts an empty file), so the copy
-  // is never readable by others, whatever the umask.
-  closeSync(openSync(file, 'wx', 0o600));
-  sqlite.prepare('VACUUM INTO ?').run(file);
-  chmodSync(file, 0o600);
+  // is never readable by others, whatever the umask. The handle is kept for fchmod.
+  const fd = openSync(file, 'wx', 0o600);
+  try {
+    sqlite.prepare('VACUUM INTO ?').run(file);
+    fchmodSync(fd, 0o600);
+  } finally {
+    closeSync(fd);
+  }
   // Newest first; the backup just written always stays.
   const others = readdirSync(dir)
     .filter((n) => BACKUP_NAME.test(n))
