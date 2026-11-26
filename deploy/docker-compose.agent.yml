@@ -15,6 +15,7 @@
 #                               nsenter and the host file view (/host/proc/1/root) need.
 # - network_mode: host          host network counters, listening ports (ss), tailscale IP, and
 #                               checks/pings from this server's own network.
+#                               Also wol.send: Wake-on-LAN broadcasts must leave on the host LAN.
 # - /proc -> /host/proc:ro      host mount table and network counters, read-only.
 # - /sys -> /host/sys:ro        hardware sensors (systeminformation also reads /sys), read-only.
 # - /opt/homelab (same path)    the only directory actions may write to (compose.write, games).

@@ -67,6 +67,10 @@ const MODULE_PREFIXES: Record<ModuleId, readonly string[]> = {
   github: ['/api/github'],
   homeassistant: ['/api/ha'],
   games: ['/api/games', '/api/shares', '/api/settings/share-gateway', '/api/share-gateway', '/s'],
+  proxmox: ['/api/proxmox'],
+  dnsfilter: ['/api/dnsfilter'],
+  fritzbox: ['/api/fritzbox'],
+  uptimekuma: ['/api/uptimekuma'],
 };
 
 function under(path: string, prefix: string): boolean {

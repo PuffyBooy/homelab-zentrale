@@ -97,7 +97,15 @@ describe('setup', () => {
       setupRequired: false,
       authenticated: true,
       username: USERNAME,
-      modules: { github: true, homeassistant: true, games: true },
+      modules: {
+        github: true,
+        homeassistant: true,
+        games: true,
+        proxmox: false,
+        dnsfilter: false,
+        fritzbox: false,
+        uptimekuma: false,
+      },
       timeZone: 'Europe/Vienna',
     });
     expect(actions(t)).toContain('setup.complete');
@@ -160,7 +168,15 @@ describe('login', () => {
       setupRequired: false,
       authenticated: true,
       username: USERNAME,
-      modules: { github: true, homeassistant: true, games: true },
+      modules: {
+        github: true,
+        homeassistant: true,
+        games: true,
+        proxmox: false,
+        dnsfilter: false,
+        fritzbox: false,
+        uptimekuma: false,
+      },
       timeZone: 'Europe/Vienna',
     });
     const cookie = sessionCookie(res);
