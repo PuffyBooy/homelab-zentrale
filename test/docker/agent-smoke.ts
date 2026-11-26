@@ -684,9 +684,17 @@ async function gameChecks(serverId: string): Promise<void> {
     // f. stop and delete
     await json(await api('POST', `/api/games/${game.id}/stop`), 'games/:id/stop');
     await waitGame(game.id, 'game off', 180, (g) => g.status === 'off', false);
-    const running = docker(['inspect', '--format', '{{.State.Running}}', GAME_CONTAINER]).trim();
-    if (running !== 'false')
-      throw new Error(`game container still running after stop (${running})`);
+    // compose down removes the container, so "gone" counts as stopped too.
+    const state = docker([
+      'ps',
+      '-a',
+      '--filter',
+      `name=^${GAME_CONTAINER}$`,
+      '--format',
+      '{{.State}}',
+    ]).trim();
+    if (state !== '' && state !== 'exited')
+      throw new Error(`game container still running after stop (${state})`);
     log('game stopped');
 
     await ensureStepUp();

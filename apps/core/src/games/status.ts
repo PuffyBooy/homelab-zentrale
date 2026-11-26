@@ -77,8 +77,9 @@ export function gameState(i: GameStateInput): GameState {
     case 'paused':
       return off('Pausiert');
     case 'created':
-    case 'removing':
       return { status: 'busy', statusText: 'Startet', live: false };
+    case 'removing':
+      return { status: 'busy', statusText: 'Wird gestoppt', live: false };
     case 'running':
       break;
   }
