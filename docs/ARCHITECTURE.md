@@ -158,6 +158,7 @@ Die erste Nachricht muss innerhalb von 10 s ein gültiges `hello` sein. Danach a
 | `game.wake.arm` / `game.wake.disarm` | `{gameId, mode, ports, motd}` / `{gameId}`: Wake-Listener eines gestoppten Gameservers nur auf seinen veröffentlichten Ports (M12, Schlafmodus) |
 | `game.mods.list` / `install` / `remove` | `{gameId, kind}` / `+ url, fileName, sha512, sizeBytes` / `+ fileName`: Jars in `data/plugins` bzw. `data/mods`, Download nur von `cdn.modrinth.com` mit sha512 (M12) |
 | `game.restore` | `{gameId, fileName}` → Stream: Backup nach `data/` zurückspielen (Spiel gestoppt, jeder Eintrag geprüft, alte Daten bleiben bei Fehler) (M12) |
+| `backup.target.status` / `backup.target.sync` / `backup.target.store` | M13b NAS als Backup-Ziel: Zustand von `/opt/homelab/backup-target` (nur ein eigener, beschreibbarer Mount zählt); Gameserver-Backups dorthin kopieren (geprüft, neueste N); Stream, in dem der Core einen Datenbank-Schnappschuss sendet (`packages/shared/src/agent-backup-target.ts`) |
 | `game.backups.purge` | `{gameId, olderThanDays}` → löscht eigene Backup-Archive dieses Gameservers unter `/opt/homelab/backups/<id>/`, die älter sind (für gelöschte Gameserver nach 30 Tagen) |
 | `deploy.run` | `{dir, repoUrl, sha, method, keyName?}` → Stream |
 | `deploy.key` | `{name}` → `{publicKey}` (ed25519, privater Schlüssel bleibt auf dem Server) |

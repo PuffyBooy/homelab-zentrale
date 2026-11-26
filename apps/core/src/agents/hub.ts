@@ -604,9 +604,10 @@ export class AgentHub {
     opts: { timeoutMs?: number; onTransfer?: TransferHandler } = {},
   ): RpcStream {
     if (!streamingActions.includes(action)) throw new RpcError('invalid_params', 'use call()');
-    const transferAction = action === 'game.export' || action === 'game.import';
+    const transferAction =
+      action === 'game.export' || action === 'game.import' || action === 'backup.target.store';
     if (transferAction !== (opts.onTransfer !== undefined)) {
-      throw new RpcError('invalid_params', 'onTransfer only with game.export / game.import');
+      throw new RpcError('invalid_params', 'onTransfer only with transfer actions');
     }
     const { conn, params: p } = this.prepare(serverId, action, params);
     const id = randomToken(12);
