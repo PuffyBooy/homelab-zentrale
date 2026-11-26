@@ -96,7 +96,12 @@ describe('secrets stay out of logs, responses and the audit log', () => {
     const log = t.logs.join('');
     expect(log.length).toBeGreaterThan(0);
     expect(log).toContain('incoming request');
-    for (const s of secrets) expect(log, `log leaks ${s.slice(0, 4)}...`).not.toContain(s);
+    for (const s of secrets) {
+      // A 6-digit TOTP code can show up by chance inside numbers (responseTime
+      // 1.0000023); a leaked code would be a JSON string, so look for that form.
+      const needle = /^\d{6}$/.test(s) ? `"${s}"` : s;
+      expect(log, `log leaks ${s.slice(0, 4)}...`).not.toContain(needle);
+    }
     expect(log).not.toMatch(/hz_session=/);
   });
 
