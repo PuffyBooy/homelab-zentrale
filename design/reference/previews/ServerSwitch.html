@@ -6,7 +6,7 @@
 <div id="root" class="hz-demo"></div>
 <script>
   var Z = window.HZ, h = React.createElement;
-  function D(){var s=React.useState('home');return h(Z.ServerSwitch,{active:s[0],onChange:s[1],servers:[{id:'all',name:'Alle',icon:'cpu'},{id:'home',name:'heimserver',where:'Wien'},{id:'oci',name:'oracle-a1',icon:'cloud',where:'Frankfurt',status:'warn'},{id:'pi',name:'soundos-pi',where:'Studio',status:'off'}]});}
+  function D(){var s=React.useState('home');return h(Z.ServerSwitch,{active:s[0],onChange:s[1],servers:[{id:'all',name:'Alle',icon:'cpu'},{id:'home',name:'heimserver',where:'Zuhause'},{id:'oci',name:'oracle-a1',icon:'cloud',where:'Frankfurt',status:'warn'},{id:'pi',name:'pi',where:'Studio',status:'off'}]});}
   ReactDOM.createRoot(document.getElementById('root')).render(h(D));
 </script>
 </body>

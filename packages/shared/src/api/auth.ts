@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { modulesSchema } from './modules.js';
 
 /** Shared limits so web and core validate the same way. */
 export const USERNAME_RE = /^[a-z0-9][a-z0-9._-]{1,31}$/;
@@ -31,6 +32,10 @@ export const authStateSchema = z.strictObject({
   username: z.string().optional(),
   /** ISO time until step-up is valid, if active. */
   stepUpUntil: z.iso.datetime().optional(),
+  /** Only when authenticated: which optional modules are on (hide nav items and tiles). */
+  modules: modulesSchema.optional(),
+  /** Only when authenticated: IANA zone of the core (HZ_TIMEZONE), e.g. "Europe/Vienna". */
+  timeZone: z.string().max(64).optional(),
 });
 export type AuthState = z.infer<typeof authStateSchema>;
 
@@ -147,6 +152,8 @@ export const errorCodeSchema = z.enum([
   'github_error',
   /** Home Assistant is not connected or refused/timed out the service call (502). */
   'ha_error',
+  /** The optional module (github, homeassistant, games) is switched off (404). */
+  'module_disabled',
 ]);
 export type ErrorCode = z.infer<typeof errorCodeSchema>;
 export const errorResponseSchema = z.strictObject({

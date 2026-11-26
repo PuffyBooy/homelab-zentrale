@@ -2,7 +2,14 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { STEP_UP_MINUTES } from '@hz/shared';
 import { RpcError } from '../src/agents/hub.js';
 import { PUBLIC_API_ROUTES } from '../src/auth/guard.js';
-import { enrollAgent, helloMsg, listen, stepUp, WsClient } from './agent-helpers.js';
+import {
+  createEnrollToken,
+  enrollAgent,
+  helloMsg,
+  listen,
+  stepUp,
+  WsClient,
+} from './agent-helpers.js';
 import { authHeaders, completeSetup, makeApp, type TestApp } from './helpers.js';
 
 let t: TestApp | undefined;
@@ -17,15 +24,10 @@ async function withAgent(capabilities = { terminal: false, docker: true }) {
   t = await makeApp();
   const admin = await completeSetup(t);
   const url = await listen(t);
-  const res = await t.app.inject({
-    method: 'POST',
-    url: '/api/servers/enroll',
-    headers: authHeaders(admin.cookie),
-    payload: { name: 'heimserver' },
-  });
+  const token = await createEnrollToken(t, admin.cookie);
   const agent = await WsClient.connect(`${url}/agent`);
   clients.push(agent);
-  agent.send(helloMsg(res.json<{ token: string }>().token, { capabilities }));
+  agent.send(helloMsg(token, { capabilities }));
   const enrolled = await agent.nextOfType('enrolled');
   await agent.nextOfType('welcome');
   return { t, url, ...admin, agent, serverId: enrolled.serverId as string };

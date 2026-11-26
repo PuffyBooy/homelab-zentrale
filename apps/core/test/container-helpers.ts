@@ -37,7 +37,7 @@ export function insertServer(t: TestApp, name = 'heimserver'): string {
     .values({
       id,
       name,
-      location: 'Wien',
+      location: 'Zuhause',
       arch: 'x64',
       os: 'Ubuntu',
       tailscaleIp: null,

@@ -23,14 +23,14 @@ afterEach(async () => {
   t = undefined;
 });
 
-/** Repo alex/blog with one green commit, tracked, with a compose target on the agent. */
+/** Repo admin/blog with one green commit, tracked, with a compose target on the agent. */
 async function blogSetup(over: Record<string, unknown> = {}) {
   const s = await withGithub(clients, { token: true });
   t = s.t;
-  s.gh.addRepo('alex/blog');
-  const first = s.gh.push('alex/blog', 'Initial commit');
+  s.gh.addRepo('admin/blog');
+  const first = s.gh.push('admin/blog', 'Initial commit');
   s.gh.ci(first, 'success');
-  const repo = await addRepo(s, 'alex/blog');
+  const repo = await addRepo(s, 'admin/blog');
   const tg = await addTarget(s, repo.id, over);
   return { s, repo, tg, first };
 }
@@ -63,7 +63,7 @@ describe('M5 acceptance', () => {
     const rpc = s.rpcs.find((r) => r.action === 'deploy.run');
     expect(rpc?.params).toEqual({
       dir: '/opt/homelab/apps/blog',
-      repoUrl: 'https://github.com/alex/blog.git',
+      repoUrl: 'https://github.com/admin/blog.git',
       sha: first,
       method: 'compose',
     });
@@ -114,7 +114,7 @@ describe('M5 acceptance', () => {
     const alert = s.t.app.hzCore.alerts.list({ state: 'all', limit: 5, source: 'github' })[0];
     expect(alert).toMatchObject({
       level: 'info',
-      title: `alex/blog auf heimserver deployt (${first.slice(0, 7)})`,
+      title: `admin/blog auf heimserver deployt (${first.slice(0, 7)})`,
     });
   });
 
@@ -123,7 +123,7 @@ describe('M5 acceptance', () => {
     await deployAndWait(s, tg.id);
     expect(target(s, repo.id, tg.id).behind).toBe(0);
 
-    const second = s.gh.push('alex/blog', 'Fix typo');
+    const second = s.gh.push('admin/blog', 'Fix typo');
     await pollOnce(s);
     const after = s.t.app.hzCore.github.summary(repo.id);
     expect(after?.targets[0]?.behind).toBe(1);
@@ -135,7 +135,7 @@ describe('M5 acceptance', () => {
   it('rollback restores the previous commit', async () => {
     const { s, repo, tg, first } = await blogSetup();
     await deployAndWait(s, tg.id);
-    const second = s.gh.push('alex/blog', 'Break everything');
+    const second = s.gh.push('admin/blog', 'Break everything');
     s.gh.ci(second, 'success');
     await pollOnce(s);
     await deployAndWait(s, tg.id);
@@ -160,7 +160,7 @@ describe('M5 acceptance', () => {
 
   it('red CI: 409 ci_not_green and no deploy is started', async () => {
     const { s, repo, tg } = await blogSetup();
-    const red = s.gh.push('alex/blog', 'Tests fail');
+    const red = s.gh.push('admin/blog', 'Tests fail');
     s.gh.ci(red, 'failure');
     await pollOnce(s);
     expect(s.t.app.hzCore.github.summary(repo.id)?.ci).toBe('crit');
@@ -176,7 +176,7 @@ describe('M5 acceptance', () => {
 
   it('CI off (no workflow runs) may be deployed by hand, busy may not; auto-deploy only on ok', async () => {
     const { s, repo, tg } = await blogSetup();
-    const running = s.gh.push('alex/blog', 'Still testing');
+    const running = s.gh.push('admin/blog', 'Still testing');
     s.gh.ci(running, 'in_progress');
     await pollOnce(s);
     expect(s.t.app.hzCore.github.summary(repo.id)?.ci).toBe('busy');
@@ -184,7 +184,7 @@ describe('M5 acceptance', () => {
     expect(busy.statusCode).toBe(409);
     expect(busy.json()).toEqual({ ok: false, error: 'ci_not_green' });
 
-    const noCi = s.gh.push('alex/blog', 'Docs only, no workflow');
+    const noCi = s.gh.push('admin/blog', 'Docs only, no workflow');
     await pollOnce(s);
     expect(s.t.app.hzCore.github.summary(repo.id)?.ci).toBe('off');
     const d = await deployAndWait(s, tg.id);
@@ -204,7 +204,7 @@ describe('M5 acceptance', () => {
       },
     });
     expect(put.statusCode).toBe(200);
-    s.gh.push('alex/blog', 'Another commit without CI');
+    s.gh.push('admin/blog', 'Another commit without CI');
     await pollOnce(s);
     await pollOnce(s);
     expect(s.t.app.hzCore.github.deployList({ limit: 10 })).toHaveLength(1);
@@ -219,7 +219,7 @@ describe('M5 acceptance', () => {
     expect(firstDeploys).toHaveLength(1);
     expect(firstDeploys[0]).toMatchObject({ trigger: 'auto', status: 'ok' });
 
-    const next = s.gh.push('alex/blog', 'New feature');
+    const next = s.gh.push('admin/blog', 'New feature');
     s.gh.ci(next, 'in_progress');
     await pollOnce(s);
     expect(s.t.app.hzCore.github.deployList({ limit: 10 })).toHaveLength(1);
@@ -233,7 +233,7 @@ describe('M5 acceptance', () => {
     expect(target(s, repo.id, tg.id)).toMatchObject({ liveSha: next, behind: 0 });
 
     // A failed auto-deploy is not retried for the same sha.
-    const third = s.gh.push('alex/blog', 'Broken compose');
+    const third = s.gh.push('admin/blog', 'Broken compose');
     s.gh.ci(third, 'success');
     s.behaviour.deploy = { kind: 'fail', code: 1 };
     await pollOnce(s);
@@ -248,7 +248,7 @@ describe('M5 acceptance', () => {
     const crit = s.t.app.hzCore.alerts.active(`deploy:${tg.id}:failed`);
     expect(crit).toMatchObject({
       level: 'crit',
-      title: 'Deploy von alex/blog auf heimserver fehlgeschlagen',
+      title: 'Deploy von admin/blog auf heimserver fehlgeschlagen',
     });
     expect(target(s, repo.id, tg.id).liveSha).toBe(next);
   });

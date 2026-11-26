@@ -1,6 +1,6 @@
 import { eq } from 'drizzle-orm';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { shareStatusResponseSchema } from '@hz/shared';
+import { shareStatusResponseSchema, STEP_UP_MINUTES } from '@hz/shared';
 import type * as passwordModule from '../src/auth/password.js';
 import { verifyPassword } from '../src/auth/password.js';
 import { gameServers, shareAudit, shareLinks } from '../src/db/schema.js';
@@ -256,38 +256,49 @@ describe('core share limiter has a hard key cap (N1)', () => {
   });
 });
 
-describe('links with console_write need step-up (N4)', () => {
-  it('refuses console_write without step-up; other links and invalid input as usual', async () => {
+describe('creating and revoking links need step-up (N4, decision 2026-11-26)', () => {
+  it('refuses every new link without step-up; invalid input is still 403 first', async () => {
     const s = await setup();
     const g = await readyGame(s);
     const url = `/api/games/${g.id}/shares`;
-    for (const perms of [['console_write'], ['console_read', 'console_write']]) {
+    for (const perms of [
+      ['power'],
+      ['console_read'],
+      ['console_write'],
+      ['console_write', 'root'],
+    ]) {
       const res = await gameRequest(s, 'POST', url, { person: 'Max', perms, expires: '7d' });
       expect(res.statusCode).toBe(403);
       expect(res.json()).toEqual({ ok: false, error: 'step_up_required' });
     }
     expect(s.t.db.db.select().from(shareLinks).all()).toHaveLength(0);
 
-    const read = await gameRequest(s, 'POST', url, {
-      person: 'Max',
-      perms: ['power', 'restart', 'console_read'],
-      expires: '7d',
-    });
-    expect(read.statusCode).toBe(201);
+    await stepUp(s.t, s.secret, s.cookie);
     const bad = await gameRequest(s, 'POST', url, {
       person: 'Max',
       perms: ['console_write', 'root'],
       expires: '7d',
     });
     expect(bad.statusCode).toBe(400);
-
-    await stepUp(s.t, s.secret, s.cookie);
-    const ok = await gameRequest(s, 'POST', url, {
-      person: 'Max',
-      perms: ['console_write'],
-      expires: '7d',
-    });
-    expect(ok.statusCode).toBe(201);
+    for (const perms of [['power', 'restart', 'console_read'], ['console_write']]) {
+      const ok = await gameRequest(s, 'POST', url, { person: 'Max', perms, expires: '7d' });
+      expect(ok.statusCode).toBe(201);
+    }
     expect(s.t.db.db.select().from(shareLinks).all()).toHaveLength(2);
+  });
+
+  it('revoking needs step-up; without it the link stays active and usable', async () => {
+    const s = await setup();
+    const g = await readyGame(s);
+    const link = await createShare(s, g.id);
+    // createShare stepped up; let it expire.
+    s.t.clock.advance(STEP_UP_MINUTES * 60_000 + 1000);
+    const res = await gameRequest(s, 'POST', `/api/shares/${link.id}/revoke`);
+    expect(res.statusCode).toBe(403);
+    expect(res.json()).toEqual({ ok: false, error: 'step_up_required' });
+    expect(s.t.db.db.select().from(shareLinks).all()[0]?.revokedAt).toBeNull();
+    await stepUp(s.t, s.secret, s.cookie);
+    expect((await gameRequest(s, 'POST', `/api/shares/${link.id}/revoke`)).statusCode).toBe(200);
+    expect(s.t.db.db.select().from(shareLinks).all()[0]?.revokedAt).not.toBeNull();
   });
 });

@@ -22,6 +22,7 @@ import { ConsoleTile } from './ConsoleTile.js';
 import { DeleteGameDialog } from './DeleteGameDialog.js';
 import { ForwardHint } from './ForwardHint.js';
 import { GameTile } from './GameTile.js';
+import { PortsTile } from './PortsTile.js';
 import { SettingsTile } from './SettingsTile.js';
 import { ShareAuditTile, ShareLinksTile } from './ShareLinksTile.js';
 import { SetupTile } from './SetupTile.js';
@@ -144,6 +145,7 @@ function Detail({ game }: { game: GameSummary }): ReactElement {
       <ShareAuditTile game={game} now={now} />
       <BackupsTile game={game} now={now} />
       <SettingsTile game={game} tpl={tpl} />
+      <PortsTile game={game} tpl={tpl} />
       <Tile title="Von außen erreichbar" icon="globe" span={2}>
         <ForwardHint ports={ports} server={server} />
       </Tile>

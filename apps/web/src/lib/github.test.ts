@@ -32,12 +32,12 @@ const NOW = new Date('2026-11-25T22:04:00.000Z');
 
 describe('repo labels', () => {
   it('shortens names, joins targets and caps behind at 30', () => {
-    expect(repoShortName('PuffyBooy/soundos')).toBe('soundos');
+    expect(repoShortName('PuffyBooy/my-app')).toBe('my-app');
     const r = repo({
       targets: [
         target({ serverName: 'heimserver', behind: 2 }),
         target({ serverName: 'oracle-a1', behind: 45 }),
-        target({ serverName: 'soundos-pi', liveSha: null, behind: 3 }),
+        target({ serverName: 'pi', liveSha: null, behind: 3 }),
       ],
     });
     expect(repoBehind(r)).toBe(30);
@@ -53,12 +53,12 @@ describe('repo labels', () => {
   });
 
   it('builds the deploy key link and the default path', () => {
-    expect(deployKeyUrl('PuffyBooy/soundos')).toBe(
-      'https://github.com/PuffyBooy/soundos/settings/keys/new',
+    expect(deployKeyUrl('PuffyBooy/my-app')).toBe(
+      'https://github.com/PuffyBooy/my-app/settings/keys/new',
     );
-    expect(emptyTargetForm({ fullName: 'PuffyBooy/soundos', defaultBranch: 'dev' })).toEqual({
+    expect(emptyTargetForm({ fullName: 'PuffyBooy/my-app', defaultBranch: 'dev' })).toEqual({
       serverId: '',
-      path: '/opt/homelab/apps/soundos',
+      path: '/opt/homelab/apps/my-app',
       branch: 'dev',
       method: 'compose',
       autoDeploy: false,
@@ -153,16 +153,16 @@ describe('sortRepos', () => {
 describe('sentences', () => {
   it('names red CI first', () => {
     const s = githubSentence([
-      repo({ fullName: 'a/soundos', ci: 'crit' }),
+      repo({ fullName: 'a/my-app', ci: 'crit' }),
       repo({ targets: [target({ behind: 1 })] }),
     ]);
-    expect(s).toEqual({ em: 'CI rot bei soundos', rest: ' · 2 Repos' });
+    expect(s).toEqual({ em: 'CI rot bei my-app', rest: ' · 2 Repos' });
   });
 
   it('reports waiting commits and the quiet state', () => {
     expect(
-      githubSentence([repo({ fullName: 'a/soundos', targets: [target({ behind: 2 })] }), repo()]),
-    ).toEqual({ em: null, rest: 'soundos: 2 neu · 2 Repos' });
+      githubSentence([repo({ fullName: 'a/my-app', targets: [target({ behind: 2 })] }), repo()]),
+    ).toEqual({ em: null, rest: 'my-app: 2 neu · 2 Repos' });
     expect(githubSentence([repo()])).toEqual({ em: null, rest: 'Alles aktuell · 1 Repo' });
     expect(githubSentence([])).toEqual({ em: null, rest: 'Noch keine Repos.' });
   });
@@ -192,26 +192,21 @@ describe('sentences', () => {
 describe('target form', () => {
   const base = {
     serverId: 'srv-home0001',
-    path: '/opt/homelab/apps/soundos',
+    path: '/opt/homelab/apps/my-app',
     branch: 'main',
     method: 'compose' as const,
     autoDeploy: true,
   };
 
   it('accepts a valid target', () => {
-    expect(formToTarget({ ...base, path: ' /opt/homelab/apps/soundos ' })).toEqual({
+    expect(formToTarget({ ...base, path: ' /opt/homelab/apps/my-app ' })).toEqual({
       ok: true,
       body: base,
     });
   });
 
   it('rejects paths outside /opt/homelab, traversal and bad branches', () => {
-    for (const path of [
-      '/etc/soundos',
-      '/opt/homelab/../etc',
-      '/opt/homelab//x',
-      '/opt/homelab/',
-    ]) {
+    for (const path of ['/etc/my-app', '/opt/homelab/../etc', '/opt/homelab//x', '/opt/homelab/']) {
       const res = formToTarget({ ...base, path });
       expect(res.ok).toBe(false);
     }
@@ -266,9 +261,9 @@ describe('deploy log and result', () => {
   it('writes the result alert: what + where, then commit and duration', () => {
     const d = deploy({ sha: 'a3f9c21'.padEnd(40, '0') });
     expect(deployDuration(d)).toBe('42 s');
-    expect(deployResult(d, 'soundos', 'soundos-pi')).toEqual({
+    expect(deployResult(d, 'my-app', 'pi')).toEqual({
       tone: 'ok',
-      title: 'soundos auf soundos-pi deployt',
+      title: 'my-app auf pi deployt',
       body: 'a3f9c21 · nach 42 s',
     });
     const failed = deployResult(
@@ -277,11 +272,11 @@ describe('deploy log and result', () => {
         summary: 'compose up fehlgeschlagen (Exit 1)',
         trigger: 'rollback',
       }),
-      'soundos',
+      'my-app',
       'heimserver',
     );
     expect(failed.tone).toBe('crit');
-    expect(failed.title).toBe('Rollback von soundos auf heimserver fehlgeschlagen');
+    expect(failed.title).toBe('Rollback von my-app auf heimserver fehlgeschlagen');
     expect(failed.body).toContain('compose up fehlgeschlagen (Exit 1)');
     expect(
       deployDuration(

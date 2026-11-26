@@ -70,7 +70,7 @@ describe('GameTile', () => {
     expect(out).toContain('hz-status hz-status-ok');
     expect(out).toContain('>UP<');
     expect(out).toContain('title="Adresse kopieren"');
-    expect(out).toContain('<span>mc.hoebe.at:25565</span>');
+    expect(out).toContain('<span>mc.example.org:25565</span>');
     expect(out).toContain('>5,8 / 8 GB<');
     expect(out).toContain('>19,8<');
     expect(out).not.toContain('disabled=""');

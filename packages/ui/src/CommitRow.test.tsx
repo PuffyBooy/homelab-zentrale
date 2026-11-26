@@ -5,10 +5,10 @@ import { html } from './test-utils.js';
 describe('CommitRow', () => {
   it('shortens the hash and shows repo/branch and time', () => {
     const out = html(
-      <CommitRow message="Lyrics" repo="soundos" hash="a3f9c21e" time="vor 2 Std" live />,
+      <CommitRow message="Lyrics" repo="my-app" hash="a3f9c21e" time="vor 2 Std" live />,
     );
     expect(out).toContain('<code class="hz-hash">a3f9c21</code>');
-    expect(out).toContain('<span class="hz-row-sub">soundos/main · vor 2 Std</span>');
+    expect(out).toContain('<span class="hz-row-sub">my-app/main · vor 2 Std</span>');
     expect(out).toContain('<span class="hz-badge hz-badge-accent">LIVE</span>');
     expect(out).toContain('>UP<');
   });

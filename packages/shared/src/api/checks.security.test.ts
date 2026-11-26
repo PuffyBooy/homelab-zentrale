@@ -6,7 +6,7 @@ describe('check host validation', () => {
     'heimserver',
     'mc.hoebe.at',
     'mc.hoebe.at.',
-    '192.168.1.1',
+    '192.0.2.1',
     '::1',
     '[fd7a:115c::1]',
     'a-b.example',

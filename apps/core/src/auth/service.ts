@@ -1,4 +1,5 @@
 import { and, count, eq, isNull, lt, or } from 'drizzle-orm';
+import type { Modules } from '@hz/shared';
 import type { Clock } from '../clock.js';
 import type { SecretBox } from '../crypto.js';
 import { writeAudit, type AuditEntry } from '../db/audit.js';
@@ -29,6 +30,8 @@ export class AuthService {
   readonly now: Clock;
   /** Wall cookie lookup for DEVICE_API_ROUTES (set by the wall module). */
   wallDevices: WallDeviceResolver | null = null;
+  /** Extra fields of /api/auth/state for a signed-in admin (installed by app.ts). */
+  bootstrap: (() => { modules: Modules; timeZone: string }) | null = null;
   private readonly db: Db;
   private readonly box: SecretBox;
 

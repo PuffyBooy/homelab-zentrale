@@ -104,7 +104,9 @@ test('first setup: account, TOTP with QR, recovery codes, overview', async () =>
   await expect(page).toHaveURL(`${ORIGIN}/`);
   await expect(page.getByRole('heading', { level: 1 })).toHaveText('Noch nichts verbunden.');
   const nav = page.getByRole('navigation', { name: 'Hauptnavigation' });
-  await expect(nav.getByRole('link')).toHaveCount(9);
+  // Fresh install: GitHub and Home Assistant are optional modules and start off.
+  await expect(nav.getByRole('link')).toHaveCount(7);
+  await expect(nav.getByRole('link', { name: /GitHub/ })).toHaveCount(0);
   await expect(nav.getByRole('link', { name: /Übersicht/ })).toHaveAttribute(
     'aria-current',
     'page',

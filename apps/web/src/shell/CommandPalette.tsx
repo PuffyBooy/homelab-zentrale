@@ -2,6 +2,7 @@ import type {
   ContainerSummary,
   GameSummary,
   HaState,
+  Modules,
   RepoSummary,
   ServerSummary,
 } from '@hz/shared';
@@ -18,6 +19,7 @@ import { findGameContainer, gameAction, gamesKey, isGameRunning } from '../lib/g
 import { reposKey, startDeploy } from '../lib/github.js';
 import { haStateKey, isOn, itemUsable, withPending } from '../lib/ha.js';
 import { pendingToggles, runToggle } from '../lib/haActions.js';
+import { ALL_MODULES_ON, visibleNavItems } from '../lib/modules.js';
 import { showErrorToast } from './AlertToasts.js';
 import { navItems, settingsItem, shortcutLabel } from '../nav.js';
 
@@ -42,17 +44,22 @@ export interface PaletteCommand {
   hint?: string | undefined;
 }
 
-/** Pages: always listed, also with an empty query. */
-export const paletteCommands: PaletteCommand[] = [
-  ...navItems.map((it, i) => ({
-    id: it.id,
-    label: it.label,
-    to: it.href ?? '/',
-    icon: it.icon,
-    hint: shortcutLabel(it, i),
-  })),
-  { id: settingsItem.id, label: settingsItem.label, to: settingsItem.href },
-];
+/** Pages: always listed, also with an empty query. Switched-off modules are left out. */
+export function pageCommands(modules: Modules = ALL_MODULES_ON): PaletteCommand[] {
+  return [
+    ...visibleNavItems(navItems, modules).map((it, i) => ({
+      id: it.id,
+      label: it.label,
+      to: it.href ?? '/',
+      icon: it.icon,
+      hint: shortcutLabel(it, i),
+    })),
+    { id: settingsItem.id, label: settingsItem.label, to: settingsItem.href },
+  ];
+}
+
+/** All pages with every module on. */
+export const paletteCommands: PaletteCommand[] = pageCommands();
 
 /** Fixed actions that only show up while searching. */
 export const staticActions: PaletteCommand[] = [
@@ -205,7 +212,7 @@ function repoName(fullName: string): string {
   return fullName.split('/').pop() ?? fullName;
 }
 
-/** "soundos deployen" (one target) or "soundos auf heimserver deployen". */
+/** "my-app deployen" (one target) or "my-app auf heimserver deployen". */
 export function repoCommands(qc: QueryClient, repos: readonly RepoSummary[]): PaletteCommand[] {
   return repos.flatMap((r) => {
     const name = repoName(r.fullName);
@@ -262,19 +269,30 @@ export interface CommandPaletteProps {
   open: boolean;
   onClose: () => void;
   onRun: (to: string) => void;
+  /** Optional modules; pages and actions of switched-off ones are left out. */
+  modules?: Modules | undefined;
 }
 
-export function CommandPalette({ open, onClose, onRun }: CommandPaletteProps): ReactElement {
+export function CommandPalette({
+  open,
+  onClose,
+  onRun,
+  modules = ALL_MODULES_ON,
+}: CommandPaletteProps): ReactElement {
   return (
     <Dialog open={open} onClose={onClose} label="Befehlspalette" className="hz-palette">
-      <PaletteBody onClose={onClose} onRun={onRun} />
+      <PaletteBody onClose={onClose} onRun={onRun} modules={modules} />
     </Dialog>
   );
 }
 
 const MAX_RESULTS = 50;
 
-function PaletteBody({ onClose, onRun }: Omit<CommandPaletteProps, 'open'>): ReactElement {
+function PaletteBody({
+  onClose,
+  onRun,
+  modules,
+}: Omit<CommandPaletteProps, 'open' | 'modules'> & { modules: Modules }): ReactElement {
   const [query, setQuery] = useState('');
   const [index, setIndex] = useState(0);
   const [confirm, setConfirm] = useState<PaletteCommand | null>(null);
@@ -282,32 +300,34 @@ function PaletteBody({ onClose, onRun }: Omit<CommandPaletteProps, 'open'>): Rea
   const [error, setError] = useState<string | null>(null);
   const listId = useId();
   const qc = useQueryClient();
-  const [ha] = useState(() => haCommands(qc, qc.getQueryData<HaState>(haStateKey)));
+  const [ha] = useState(() =>
+    modules.homeassistant ? haCommands(qc, qc.getQueryData<HaState>(haStateKey)) : [],
+  );
   // Loaded while the palette is open, so "minecraft neu starten" works from any page.
   const servers = useServers();
   const containers = useContainers();
-  const games = useGames();
-  const repos = useRepos();
+  const games = useGames(modules.games);
+  const repos = useRepos(modules.github);
+  const pages = useMemo(() => pageCommands(modules), [modules]);
+  const gameList = modules.games ? games.data : undefined;
+  const repoList = modules.github ? repos.data : undefined;
 
   const actions = useMemo(
     () => [
       ...staticActions,
       ...serverCommands(servers.data ?? []),
-      ...gameCommands(qc, games.data ?? []),
-      ...repoCommands(qc, repos.data ?? []),
+      ...gameCommands(qc, gameList ?? []),
+      ...repoCommands(qc, repoList ?? []),
       // Game containers are listed as games.
-      ...containerCommands(qc, withoutGames(containers.data ?? [], games.data ?? [])),
+      ...containerCommands(qc, withoutGames(containers.data ?? [], gameList ?? [])),
       ...ha,
     ],
-    [qc, servers.data, containers.data, games.data, repos.data, ha],
+    [qc, servers.data, containers.data, gameList, repoList, ha],
   );
   const results = useMemo(
     () =>
-      filterCommands(
-        query.trim() ? [...paletteCommands, ...actions] : paletteCommands,
-        query,
-      ).slice(0, MAX_RESULTS),
-    [query, actions],
+      filterCommands(query.trim() ? [...pages, ...actions] : pages, query).slice(0, MAX_RESULTS),
+    [query, actions, pages],
   );
   const current = Math.min(index, Math.max(results.length - 1, 0));
   const active = results[current];

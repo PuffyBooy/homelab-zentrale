@@ -4,12 +4,10 @@ import { html } from './test-utils.js';
 
 describe('RepoRow', () => {
   it('shows branch, target, CI label and "aktuell"', () => {
-    const out = html(
-      <RepoRow repo="soundos" commit="a3f9c21 Lyrics" ci="ok" deployedTo="soundos-pi" />,
-    );
+    const out = html(<RepoRow repo="my-app" commit="a3f9c21 Lyrics" ci="ok" deployedTo="pi" />);
     expect(out).toContain('class="hz-row hz-repo"');
-    expect(out).toContain('soundos<span class="hz-repo-branch">main</span>');
-    expect(out).toContain('<span class="hz-repo-target"> → soundos-pi</span>');
+    expect(out).toContain('my-app<span class="hz-repo-branch">main</span>');
+    expect(out).toContain('<span class="hz-repo-target"> → pi</span>');
     expect(out).toContain('>CI ✓<');
     expect(out).toContain('<span class="hz-badge hz-badge-ok">aktuell</span>');
   });

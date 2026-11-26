@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { wallStateSchema, type ServerSummary } from '@hz/shared';
 import { DEVICE_API_ROUTES, PUBLIC_API_ROUTES } from '../src/auth/guard.js';
-import { fromVienna } from '../src/calendar.js';
+import { fromLocal } from '../src/calendar.js';
 import { isNight, maskAddresses, wallSentence } from '../src/wall/service.js';
 import {
   WsClient,
@@ -50,6 +50,20 @@ async function createDevice(
   const body = res.json<{ device: { id: string }; url: string }>();
   const token = new URL(body.url).searchParams.get('t') ?? '';
   return { id: body.device.id, token, url: body.url };
+}
+
+/** Exchanges the one-time link token; returns the device session secret of the cookie. */
+async function pair(e: Env, token: string, headers: Record<string, string> = SAME_ORIGIN) {
+  const res = await e.t.app.inject({
+    method: 'POST',
+    url: '/api/wall/session',
+    headers,
+    payload: { token },
+  });
+  expect(res.statusCode).toBe(200);
+  const c = res.cookies.find((x) => x.name === 'hz_wall');
+  if (!c) throw new Error('no wall cookie');
+  return c.value;
 }
 
 function wallCookie(token: string): Record<string, string> {
@@ -105,7 +119,15 @@ describe('wall devices (admin)', () => {
     expect(list.statusCode).toBe(200);
     expect(list.body).not.toContain(d.token);
     expect(list.json()).toEqual({
-      devices: [{ id: d.id, name: 'Tablet Flur', createdAt: expect.any(String), lastSeenAt: null }],
+      devices: [
+        {
+          id: d.id,
+          name: 'Tablet Flur',
+          createdAt: expect.any(String),
+          lastSeenAt: null,
+          paired: false,
+        },
+      ],
     });
     const row = e.t.db.sqlite.prepare('SELECT * FROM wall_devices').get() as Record<
       string,
@@ -120,14 +142,15 @@ describe('wall devices (admin)', () => {
   it('delete revokes at once; unknown id 404, bad id 400, no session 401', async () => {
     const e = await setup();
     const d = await createDevice(e);
-    expect((await getState(e, wallCookie(d.token))).statusCode).toBe(200);
+    const session = await pair(e, d.token);
+    expect((await getState(e, wallCookie(session))).statusCode).toBe(200);
     const del = await e.t.app.inject({
       method: 'DELETE',
       url: `/api/settings/wall-devices/${d.id}`,
       headers: authHeaders(e.cookie),
     });
     expect(del.statusCode).toBe(200);
-    expect((await getState(e, wallCookie(d.token))).statusCode).toBe(401);
+    expect((await getState(e, wallCookie(session))).statusCode).toBe(401);
     const again = await e.t.app.inject({
       method: 'DELETE',
       url: `/api/settings/wall-devices/${d.id}`,
@@ -162,8 +185,10 @@ describe('POST /api/wall/session', () => {
     expect(res.statusCode).toBe(200);
     expect(res.json()).toEqual({ ok: true });
     const c = res.cookies.find((x) => x.name === 'hz_wall');
+    // The cookie carries a new random session secret, never the link token.
+    expect(c?.value).toMatch(/^[A-Za-z0-9_-]{43}$/);
+    expect(c?.value).not.toBe(d.token);
     expect(c).toMatchObject({
-      value: d.token,
       httpOnly: true,
       secure: true,
       sameSite: 'Strict',
@@ -205,6 +230,7 @@ describe('POST /api/wall/session', () => {
   it('is rate limited to 10 per minute and IP', async () => {
     const e = await setup();
     const d = await createDevice(e);
+    const d2 = await createDevice(e, 'Tablet Küche');
     const post = (token: string, ip = '100.64.0.9') =>
       e.t.app.inject({
         method: 'POST',
@@ -220,21 +246,137 @@ describe('POST /api/wall/session', () => {
     // Another IP is not affected.
     expect((await post(d.token, '100.64.0.10')).statusCode).toBe(200);
     e.t.clock.advance(60_000);
-    expect((await post(d.token)).statusCode).toBe(200);
+    expect((await post(d2.token)).statusCode).toBe(200);
   });
 
   it('never logs the token (also not on the /wall?t= page request)', async () => {
     const e = await setup({ captureLogs: true });
     const d = await createDevice(e);
     await e.t.app.inject({ method: 'GET', url: `/wall?t=${d.token}` });
-    await e.t.app.inject({
+    const session = await pair(e, d.token);
+    await getState(e, wallCookie(session));
+    expect(e.t.logs.join('')).not.toContain(d.token);
+    expect(e.t.logs.join('')).not.toContain(session);
+  });
+});
+
+describe('one-time link (decision 2026-11-26)', () => {
+  const post = (e: Env, token: string, cookie?: string) =>
+    e.t.app.inject({
       method: 'POST',
       url: '/api/wall/session',
-      headers: SAME_ORIGIN,
-      payload: { token: d.token },
+      headers: { ...SAME_ORIGIN, ...(cookie ? { cookie: `hz_wall=${cookie}` } : {}) },
+      payload: { token },
     });
-    await getState(e, wallCookie(d.token));
-    expect(e.t.logs.join('')).not.toContain(d.token);
+
+  it('a second exchange of the same token is 401; only hashes are stored', async () => {
+    const e = await setup();
+    const d = await createDevice(e);
+    const session = await pair(e, d.token);
+    const again = await post(e, d.token);
+    expect(again.statusCode).toBe(401);
+    expect(again.cookies).toEqual([]);
+    const row = e.t.db.sqlite.prepare('SELECT * FROM wall_devices').get() as Record<
+      string,
+      unknown
+    >;
+    expect(row.token_hash).toBeNull();
+    expect(row.session_hash).toMatch(/^[0-9a-f]{64}$/);
+    const dump = JSON.stringify([row, e.t.db.sqlite.prepare('SELECT * FROM audit_log').all()]);
+    expect(dump).not.toContain(d.token);
+    expect(dump).not.toContain(session);
+    const list = await e.t.app.inject({
+      method: 'GET',
+      url: '/api/settings/wall-devices',
+      headers: authHeaders(e.cookie),
+    });
+    expect(list.json<{ devices: { paired: boolean }[] }>().devices[0]?.paired).toBe(true);
+  });
+
+  it('a kiosk reload with its valid cookie and the used token is 200 and keeps the cookie', async () => {
+    const e = await setup();
+    const d = await createDevice(e);
+    const other = await createDevice(e, 'Tablet Küche');
+    const session = await pair(e, d.token);
+    const reload = await post(e, d.token, session);
+    expect(reload.statusCode).toBe(200);
+    expect(reload.cookies).toEqual([]);
+    expect((await getState(e, wallCookie(session))).statusCode).toBe(200);
+    // The cookie of another device does not make a used token pass.
+    const otherSession = await pair(e, other.token);
+    expect((await post(e, d.token, otherSession)).statusCode).toBe(401);
+    // A forged cookie does not either.
+    expect((await post(e, d.token, 'A'.repeat(43))).statusCode).toBe(401);
+  });
+
+  it('a revoked (deleted) device: neither the token nor the cookie work', async () => {
+    const e = await setup();
+    const d = await createDevice(e);
+    const unused = await createDevice(e, 'Tablet Küche');
+    const session = await pair(e, d.token);
+    for (const id of [d.id, unused.id]) {
+      const del = await e.t.app.inject({
+        method: 'DELETE',
+        url: `/api/settings/wall-devices/${id}`,
+        headers: authHeaders(e.cookie),
+      });
+      expect(del.statusCode).toBe(200);
+    }
+    expect((await post(e, d.token, session)).statusCode).toBe(401);
+    expect((await post(e, unused.token)).statusCode).toBe(401);
+    expect((await getState(e, wallCookie(session))).statusCode).toBe(401);
+  });
+
+  it('relink (step-up) issues a fresh link; the old cookie and the old link stop working', async () => {
+    const e = await setup();
+    const d = await createDevice(e);
+    const unusedOld = await createDevice(e, 'Tablet Küche');
+    const session = await pair(e, d.token);
+    const relink = (id: string) =>
+      e.t.app.inject({
+        method: 'POST',
+        url: `/api/settings/wall-devices/${id}/link`,
+        headers: authHeaders(e.cookie),
+        payload: {},
+      });
+    // Without step-up: 403, nothing changes.
+    e.t.clock.advance(16 * 60_000);
+    const noStep = await relink(d.id);
+    expect(noStep.statusCode).toBe(403);
+    expect(noStep.json()).toMatchObject({ error: 'step_up_required' });
+    expect((await getState(e, wallCookie(session))).statusCode).toBe(200);
+
+    await stepUp(e.t, e.secret, e.cookie);
+    const res = await relink(d.id);
+    expect(res.statusCode).toBe(200);
+    const body = res.json<{ device: { id: string; paired: boolean }; url: string }>();
+    expect(body.device).toMatchObject({ id: d.id, paired: false });
+    const fresh = new URL(body.url).searchParams.get('t') ?? '';
+    expect(fresh).toMatch(/^[A-Za-z0-9_-]{43}$/);
+    expect(fresh).not.toBe(d.token);
+    // Old cookie dead, also as "repeat" with the old token.
+    expect((await getState(e, wallCookie(session))).statusCode).toBe(401);
+    expect((await post(e, d.token, session)).statusCode).toBe(401);
+    const newSession = await pair(e, fresh);
+    expect((await getState(e, wallCookie(newSession))).statusCode).toBe(200);
+    // Relinking an unpaired device also invalidates its old link.
+    const r2 = await relink(unusedOld.id);
+    expect(r2.statusCode).toBe(200);
+    expect((await post(e, unusedOld.token)).statusCode).toBe(401);
+    // Unknown id 404, bad id 400, no session 401.
+    expect((await relink('AAAAAAAAAAAAAAAAAAAAAA')).statusCode).toBe(404);
+    expect((await relink('a.b')).statusCode).toBe(400);
+    const anon = await e.t.app.inject({
+      method: 'POST',
+      url: `/api/settings/wall-devices/${d.id}/link`,
+      headers: SAME_ORIGIN,
+      payload: {},
+    });
+    expect(anon.statusCode).toBe(401);
+    const actions = e.t.db.sqlite
+      .prepare("SELECT action FROM audit_log WHERE action = 'wall.device_relinked'")
+      .all();
+    expect(actions).toHaveLength(2);
   });
 });
 
@@ -242,8 +384,9 @@ describe('the wall cookie is read-only', () => {
   it('works for GET /api/wall/state and nothing else under /api', async () => {
     const e = await setup();
     const d = await createDevice(e);
+    const session = await pair(e, d.token);
     expect(DEVICE_API_ROUTES).toEqual(['/api/wall/state']);
-    expect((await getState(e, wallCookie(d.token))).statusCode).toBe(200);
+    expect((await getState(e, wallCookie(session))).statusCode).toBe(200);
 
     const routes = e.t.app.hzRoutes.filter(
       (r) =>
@@ -257,21 +400,21 @@ describe('the wall cookie is read-only', () => {
       const res = await e.t.app.inject({
         method: r.method as 'GET',
         url,
-        headers: wallCookie(d.token),
+        headers: wallCookie(session),
         ...(r.method === 'GET' || r.method === 'HEAD' ? {} : { payload: {} }),
       });
       expect(res.statusCode, `${r.method} ${r.url}`).toBe(401);
     }
     // Unknown paths under /api/wall/ are not public either.
     for (const url of ['/api/wall', '/api/wall/', '/api/wall/state/x', '/api/wall/devices']) {
-      const res = await e.t.app.inject({ method: 'GET', url, headers: wallCookie(d.token) });
+      const res = await e.t.app.inject({ method: 'GET', url, headers: wallCookie(session) });
       expect(res.statusCode, url).toBe(401);
     }
     // POST to the state route with the cookie is not allowed either.
     const post = await e.t.app.inject({
       method: 'POST',
       url: '/api/wall/state',
-      headers: wallCookie(d.token),
+      headers: wallCookie(session),
       payload: {},
     });
     expect(post.statusCode).toBe(401);
@@ -280,9 +423,10 @@ describe('the wall cookie is read-only', () => {
   it('opens neither /live nor /console', async () => {
     const e = await setup();
     const d = await createDevice(e);
+    const session = await pair(e, d.token);
     const url = await listen(e.t);
-    expect(await WsClient.status(`${url}/live`, wallCookie(d.token))).toBe(401);
-    expect(await WsClient.status(`${url}/console?serverId=x`, wallCookie(d.token))).toBe(401);
+    expect(await WsClient.status(`${url}/live`, wallCookie(session))).toBe(401);
+    expect(await WsClient.status(`${url}/console?serverId=x`, wallCookie(session))).toBe(401);
   });
 
   it('without any cookie the state is 401; an admin session may read it', async () => {
@@ -296,22 +440,25 @@ describe('the wall cookie is read-only', () => {
   it('updates lastSeenAt at most once per minute', async () => {
     const e = await setup();
     const d = await createDevice(e);
+    const session = await pair(e, d.token);
+    // Pairing counts as seen; the first state read a minute later refreshes it.
+    e.t.clock.advance(60_000);
     const seen = () =>
       (
         e.t.db.sqlite.prepare('SELECT last_seen_at FROM wall_devices').get() as {
           last_seen_at: number | null;
         }
       ).last_seen_at;
-    const r1 = await getState(e, wallCookie(d.token));
+    const r1 = await getState(e, wallCookie(session));
     const first = seen();
     expect(first).toBe(e.t.clock.t);
     expect(r1.cookies.some((c) => c.name === 'hz_wall')).toBe(true);
     e.t.clock.advance(30_000);
-    const r2 = await getState(e, wallCookie(d.token));
+    const r2 = await getState(e, wallCookie(session));
     expect(seen()).toBe(first);
     expect(r2.cookies).toEqual([]);
     e.t.clock.advance(30_000);
-    await getState(e, wallCookie(d.token));
+    await getState(e, wallCookie(session));
     expect(seen()).toBe(e.t.clock.t);
     // Admin reads do not count as the device.
     e.t.clock.advance(120_000);
@@ -341,7 +488,7 @@ describe('GET /api/wall/state', () => {
     );
     e.t.app.hzCore.servers.refreshAll();
     const d = await createDevice(e);
-    const res = await getState(e, wallCookie(d.token));
+    const res = await getState(e, wallCookie(await pair(e, d.token)));
     expect(res.statusCode).toBe(200);
     const state = wallStateSchema.parse(res.json());
     expect(state.tiles.map((x) => x.id)).toEqual([
@@ -411,11 +558,11 @@ describe('GET /api/wall/state', () => {
 
   it('night flag follows Vienna time (route)', async () => {
     const e = await setup();
-    e.t.clock.t = fromVienna(2026, 11, 26, 22, 0);
+    e.t.clock.t = fromLocal(2026, 11, 26, 22, 0);
     expect(wallStateSchema.parse((await getState(e, authHeaders(e.cookie))).json()).night).toBe(
       true,
     );
-    e.t.clock.t = fromVienna(2026, 11, 27, 7, 0);
+    e.t.clock.t = fromLocal(2026, 11, 27, 7, 0);
     const day = await getState(e, authHeaders(e.cookie));
     // The session may have slid; it is still valid (30 days).
     expect(wallStateSchema.parse(day.json()).night).toBe(false);
@@ -445,7 +592,7 @@ describe('wall helpers', () => {
       [2026, 10, 25, 21, 59, false],
     ];
     for (const [y, mo, d, h, mi, night] of cases) {
-      expect(isNight(fromVienna(y, mo, d, h, mi)), `${y}-${mo}-${d} ${h}:${mi}`).toBe(night);
+      expect(isNight(fromLocal(y, mo, d, h, mi)), `${y}-${mo}-${d} ${h}:${mi}`).toBe(night);
     }
     // In UTC terms: 21:00Z is 22:00 in winter but 23:00 in summer.
     expect(isNight(Date.UTC(2026, 0, 15, 20, 59))).toBe(false);

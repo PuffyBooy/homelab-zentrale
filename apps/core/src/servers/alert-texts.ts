@@ -129,6 +129,16 @@ function okText(
 }
 
 /**
+ * Alert level of a reason. "Sicherheitsupdates offen" and "Neustart nötig" are
+ * `info` alerts (no push, decision 2026-11-26), although the server status still
+ * shows WARN for them (SPEC 5.1).
+ */
+export function alertLevelOf(cat: ServerAlertCategory, r: EvaluatedReason): AlertLevel {
+  if (cat === 'updates' || cat === 'reboot') return 'info';
+  return r.level as AlertLevel;
+}
+
+/**
  * Turns the status of one server into alerts: one per category, raised while
  * the reason exists, resolved with an OK alert once it is gone.
  *
@@ -151,7 +161,7 @@ export function syncServerAlerts(
     const r = byCat.get(cat);
     if (r) {
       const { title, body } = alertText(r, c);
-      alerts.raise(key, r.level as AlertLevel, title, body, c.serverId, 'server');
+      alerts.raise(key, alertLevelOf(cat, r), title, body, c.serverId, 'server');
       continue;
     }
     if (cat !== 'offline' && (offline || result.status === 'off')) continue;

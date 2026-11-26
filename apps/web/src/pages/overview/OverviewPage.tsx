@@ -18,6 +18,7 @@ import { repoOnServer } from '../../lib/github.js';
 import { isHaConfigured } from '../../lib/ha.js';
 import { useHaView } from '../../lib/haActions.js';
 import { useLiveTopic } from '../../lib/live.js';
+import { useModules } from '../../lib/useModules.js';
 import { ALL_SERVERS } from '../../lib/servers.js';
 import { ContainersTile } from '../containers/ContainersTile.js';
 import { GamesTile } from '../games/GamesTile.js';
@@ -32,6 +33,7 @@ const MAX_ALERTS = 3;
  * Overview after design/reference/previews/Dashboard.html: Statussatz (shell header),
  * open crit alerts, ServerList over the full width, then the pairs (SPEC 4):
  * Gameserver/Websites and GitHub/Container, then "Wohnung" when Home Assistant is set up.
+ * Tiles of switched-off modules (Einstellungen → Module) are left out.
  */
 export function OverviewPage(): ReactElement | null {
   const servers = useServers();
@@ -40,13 +42,18 @@ export function OverviewPage(): ReactElement | null {
   const containers = useContainers();
   useLiveTopic('checks');
   const checks = useChecks();
-  useLiveTopic('github');
-  useLiveTopic('games');
-  const games = useGames();
-  const repos = useRepos();
-  const github = useGithubSettings();
-  useLiveTopic('ha');
-  const ha = useHaView();
+  const modules = useModules();
+  useLiveTopic(modules.github ? 'github' : null);
+  useLiveTopic(modules.games ? 'games' : null);
+  const gamesQuery = useGames(modules.games);
+  const reposQuery = useRepos(modules.github);
+  const github = useGithubSettings(modules.github);
+  useLiveTopic(modules.homeassistant ? 'ha' : null);
+  const haQuery = useHaView(modules.homeassistant);
+  // Cached data of a module switched off meanwhile is not shown.
+  const games = { data: modules.games ? gamesQuery.data : undefined };
+  const repos = { data: modules.github ? reposQuery.data : undefined };
+  const ha = { view: modules.homeassistant ? haQuery.view : undefined };
   const [filter] = useServerFilter();
   const navigate = useNavigate();
 

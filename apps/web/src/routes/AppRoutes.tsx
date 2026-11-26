@@ -1,3 +1,4 @@
+import type { ModuleId } from '@hz/shared';
 import { lazy, Suspense, type ComponentType, type ReactElement } from 'react';
 import { Route, Routes } from 'react-router';
 import { navItems } from '../nav.js';
@@ -15,6 +16,7 @@ import { CheckDetailPage } from '../pages/websites/CheckDetailPage.js';
 import { WebsitesPage } from '../pages/websites/WebsitesPage.js';
 import { Shell } from '../shell/Shell.js';
 import { AuthGate } from './AuthGate.js';
+import { ModuleGate } from './ModuleGate.js';
 
 /** Code-split page: `pick` names the export, so pages keep their named exports. */
 function page<M>(load: () => Promise<M>, pick: (m: M) => ComponentType): ComponentType {
@@ -68,6 +70,15 @@ function L({ c: C }: { c: ComponentType }): ReactElement {
     <Suspense fallback={<Loading />}>
       <C />
     </Suspense>
+  );
+}
+
+/** Lazy page of an optional module: "Modul ausgeschaltet" while it is off. */
+function G({ m, c }: { m: ModuleId; c: ComponentType }): ReactElement {
+  return (
+    <ModuleGate module={m}>
+      <L c={c} />
+    </ModuleGate>
   );
 }
 
@@ -139,14 +150,21 @@ export function AppRoutes(): ReactElement {
         <Route path="servers/:id" element={<ServerDetailPage />} />
         <Route path="containers" element={<ContainersPage />} />
         <Route path="containers/:id/logs" element={<ContainerLogsPage />} />
-        <Route path="games" element={<L c={GamesPage} />} />
-        <Route path="games/new" element={<L c={GameCreatePage} />} />
-        <Route path="games/:id" element={<L c={GameDetailPage} />} />
-        <Route path="github" element={<L c={GithubPage} />} />
-        <Route path="github/:id" element={<L c={RepoDetailPage} />} />
+        <Route path="games" element={<G m="games" c={GamesPage} />} />
+        <Route path="games/new" element={<G m="games" c={GameCreatePage} />} />
+        <Route path="games/:id" element={<G m="games" c={GameDetailPage} />} />
+        <Route path="github" element={<G m="github" c={GithubPage} />} />
+        <Route path="github/:id" element={<G m="github" c={RepoDetailPage} />} />
         <Route path="websites" element={<WebsitesPage />} />
         <Route path="websites/:id" element={<CheckDetailPage />} />
-        <Route path="home" element={<HomePage />} />
+        <Route
+          path="home"
+          element={
+            <ModuleGate module="homeassistant">
+              <HomePage />
+            </ModuleGate>
+          }
+        />
         <Route path="alerts" element={<AlertsPage />} />
         <Route path="console" element={<L c={ConsolePage} />} />
         {navItems

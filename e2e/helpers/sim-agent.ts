@@ -170,7 +170,7 @@ export class SimAgent {
   }
 
   private prompt(): string {
-    return `alex@${this.o.name}:~$ `;
+    return `admin@${this.o.name}:~$ `;
   }
 
   /** pty.* RPCs; false when the action is not one of them. */

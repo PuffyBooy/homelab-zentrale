@@ -329,7 +329,7 @@ function CreateForm({
               mono
               value={draft.externalAddress}
               onChange={(e) => set('externalAddress', e.target.value)}
-              placeholder="mc.hoebe.at"
+              placeholder="mc.example.org"
               hint="DDNS-Name oder öffentliche IP für Freunde. Leer: Tailscale-IP."
               error={errors.externalAddress}
               maxLength={253}

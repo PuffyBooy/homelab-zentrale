@@ -37,7 +37,7 @@ const GB = 1024 ** 3;
 export const DEMO_SERVERS: readonly DemoServer[] = [
   {
     name: 'heimserver',
-    location: 'Wien',
+    location: 'Zuhause',
     tailscaleIp: '100.64.0.20',
     arch: 'x64',
     os: 'Ubuntu 24.04 LTS',
@@ -64,7 +64,7 @@ export const DEMO_SERVERS: readonly DemoServer[] = [
     diskTotal: 200 * GB,
   },
   {
-    name: 'soundos-pi',
+    name: 'raspi',
     location: 'Studio',
     tailscaleIp: '100.64.0.42',
     arch: 'arm64',
@@ -160,7 +160,7 @@ export const DEMO_CONTAINERS: Readonly<Record<string, readonly DemoContainer[]>>
       memMb: 52,
     },
   ],
-  'soundos-pi': [
+  raspi: [
     {
       name: 'homelab-agent',
       image: 'homelab-zentrale/agent:local',

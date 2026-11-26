@@ -6,7 +6,7 @@
 
 ## Gegebenheiten
 
-- Zu Hause: TP-Link **Deco** Mesh, eigene öffentliche **IPv4**, **DDNS-Name** vorhanden
+- Zu Hause: ein Router mit eigener öffentlicher **IPv4** und **DDNS-Name** (Beispiel-Setup)
 - Oracle Cloud: reservierte öffentliche IP
 - Alle Server sind im selben Tailnet
 
@@ -14,7 +14,7 @@
 
 1. Der Core lauscht auf `127.0.0.1:8080` (`HZ_HOST=127.0.0.1`).
 2. Auf dem Heimserver gibt `tailscale serve --bg --https=443 http://127.0.0.1:8080` den Core als `https://heimserver.<tailnet>.ts.net` im Tailnet frei, mit gültigem HTTPS-Zertifikat von Tailscale. Das braucht die PWA für Web-Push und den Service Worker.
-3. MagicDNS ist im Tailnet aktiv, dadurch heißen alle Server einfach `heimserver`, `oracle-a1`, `soundos-pi`. Eigene DNS-Einträge im Deco sind nicht nötig.
+3. MagicDNS ist im Tailnet aktiv, dadurch heißen alle Server einfach `heimserver`, `oracle-a1`, `pi`. Eigene DNS-Einträge im Router sind nicht nötig.
 4. **Nicht** `tailscale funnel` für den Core verwenden.
 
 ## Agents
@@ -22,9 +22,9 @@
 - Der Agent verbindet sich ausgehend zu `wss://heimserver.<tailnet>.ts.net/agent`.
 - Auf keinem Server wird ein Port für den Agent geöffnet.
 
-## Deco-Einstellungen
+## Router-Einstellungen
 
-- **Adressreservierung** (Deco-App → Mehr → Erweitert → Adressreservierung) für den Heimserver und jedes Gerät mit festen Diensten.
+- **Adressreservierung** (DHCP-Reservierung im Router) für den Heimserver und jedes Gerät mit festen Diensten.
 - **Portweiterleitung** nur für Gameserver, die zu Hause laufen und von außen erreichbar sein sollen. Die Zentrale zeigt beim Anlegen genau an, welche Ports (TCP/UDP) nötig sind.
 - **DDNS** wird nur für Gameserver-Adressen zu Hause verwendet (`<ddns-name>:25565`).
 
@@ -33,7 +33,7 @@
 | Wo läuft der Gameserver? | Adresse für Freunde | Nötig |
 | --- | --- | --- |
 | `oracle-a1` (empfohlen) | öffentliche Oracle-IP oder DDNS/DuckDNS-Name, Port | Ingress-Regel in der Oracle Security List und Firewall auf der VM (`iptables`/`ufw`) |
-| `heimserver` | DDNS-Name zu Hause, Port | Portweiterleitung im Deco |
+| `heimserver` | DDNS-Name zu Hause, Port | Portweiterleitung im Router |
 
 Die Zentrale speichert pro Gameserver die `external_address` und zeigt sie zum Kopieren an.
 

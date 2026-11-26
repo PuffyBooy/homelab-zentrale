@@ -1,0 +1,9 @@
+# Override: build the core image from this checkout instead of pulling it from GHCR.
+#   docker compose -f deploy/docker-compose.core.yml -f deploy/docker-compose.core.build.yml up -d --build
+services:
+  core:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.core
+    image: homelab-zentrale/core:local
+    pull_policy: build

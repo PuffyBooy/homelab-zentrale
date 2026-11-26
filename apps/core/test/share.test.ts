@@ -44,6 +44,7 @@ describe('share links: admin', () => {
   it('creates, lists, revokes and deletes links', async () => {
     const s = await setup();
     const g = await readyGame(s);
+    await stepUp(s.t, s.secret, s.cookie);
     const res = await gameRequest(s, 'POST', `/api/games/${g.id}/shares`, {
       person: 'Lena K.',
       perms: ['console_read', 'power', 'power'],
@@ -95,6 +96,7 @@ describe('share links: admin', () => {
   it('validates input and unknown ids', async () => {
     const s = await setup();
     const g = await readyGame(s);
+    await stepUp(s.t, s.secret, s.cookie);
     for (const payload of [
       { person: '<b>x</b>', perms: ['power'], expires: '7d' },
       { person: 'Max', perms: [], expires: '7d' },
@@ -188,7 +190,7 @@ describe('share links: friend API', () => {
         game: 'Minecraft Java',
         status: 'ok',
         address: `mc.example.at:${g.ports[0]?.port}`,
-        players: { online: 2, max: 20, names: ['alex', 'mia'] },
+        players: { online: 2, max: 20, names: ['steve', 'mia'] },
         whitelist: true,
       },
     });

@@ -13,7 +13,15 @@ updates:
     directory: /deploy
     schedule:
       interval: weekly
+    ignore:
+      # Stay on Node 22 LTS (AGENTS.md); odd majors have no better-sqlite3 prebuilds.
+      - dependency-name: node
+        update-types: ['version-update:semver-major']
   - package-ecosystem: docker
     directory: /apps/agent
     schedule:
       interval: weekly
+    ignore:
+      # Stay on Node 22 LTS (AGENTS.md); odd majors have no better-sqlite3 prebuilds.
+      - dependency-name: node
+        update-types: ['version-update:semver-major']

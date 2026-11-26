@@ -49,7 +49,7 @@ const TOKEN_AAD = 'settings.ha.token';
 const CONFIG_KEY = 'ha.config';
 const STATUS_KEY = 'ha.status';
 export const HA_ALERT_KEY = 'ha:unreachable';
-/** Default € per kWh until Alex sets his tariff. */
+/** Default € per kWh until the admin sets a tariff. */
 export const HA_DEFAULT_PRICE = 0.25;
 /** A toggle/press shows `pending` until HA reports the change, at most this long. */
 export const HA_PENDING_MS = 10_000;
@@ -198,6 +198,15 @@ export class HaService {
     for (const fn of this.listeners) fn();
   }
 
+  /** Module switch (settings/modules): off closes the websocket and stays off. */
+  private active = true;
+
+  setEnabled(on: boolean): void {
+    if (on === this.active) return;
+    this.active = on;
+    this.reconnect();
+  }
+
   start(): void {
     this.reconnect();
   }
@@ -324,11 +333,11 @@ export class HaService {
     this.pending.clear();
     this.haVersion = null;
     this.failed = false;
-    const url = this.stored().url;
-    const token = this.token();
+    const url = this.active ? this.stored().url : null;
+    const token = this.active ? this.token() : null;
     if (url === null || token === null) {
       this.status = 'off';
-      this.error = this.tokenSet() && token === null ? TOKEN_UNREADABLE : null;
+      this.error = this.active && this.tokenSet() && token === null ? TOKEN_UNREADABLE : null;
       this.downSince = null;
       // Switched off: the condition is gone, no "wieder erreichbar".
       const active = this.deps.alerts.active(HA_ALERT_KEY);

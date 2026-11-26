@@ -81,7 +81,8 @@ function EnrollBody({ onClose }: { onClose: () => void }): ReactElement {
     <form className="hz-dialog-body" onSubmit={submit} noValidate>
       <p className="hz-dialog-text">
         Der Agent läuft als Docker-Container auf dem Server und verbindet sich über Tailscale mit
-        der Zentrale. Danach steht der Server live in der Liste.
+        der Zentrale. Danach steht der Server live in der Liste. Das Token erzeugen braucht einen
+        frischen Code aus der App.
       </p>
       <Field
         label="Name"
@@ -101,10 +102,12 @@ function EnrollBody({ onClose }: { onClose: () => void }): ReactElement {
         label="Ort"
         value={location}
         onChange={(e) => setLocation(e.target.value)}
-        hint="Optional, z. B. Wien oder Frankfurt."
+        hint="Optional, z. B. Zuhause oder Frankfurt."
         maxLength={60}
       />
-      {enroll.error && !conflict ? <FormError title={errorText(enroll.error)} /> : null}
+      {enroll.error && !conflict && !isApiError(enroll.error, 'step_up_required') ? (
+        <FormError title={errorText(enroll.error)} />
+      ) : null}
       <div className="hz-dialog-foot">
         <Button onClick={onClose}>Abbrechen</Button>
         <Button variant="primary" type="submit" disabled={enroll.isPending}>

@@ -3,7 +3,7 @@
 ## Überblick
 
 ```
-                 Tailnet (WireGuard, nur Geräte von Alex)
+                 Tailnet (WireGuard, nur Geräte des Admins)
  ┌──────────────────────────────────────────────────────────────────┐
  │                                                                  │
  │  Handy/Laptop/Tablet ──HTTPS──▶ tailscale serve ──▶ core :8080   │
@@ -11,7 +11,7 @@
  │                                                        │ WebSocket /agent
  │        ┌──────────────────────┬────────────────────────┤
  │        ▼                      ▼                        ▼
- │   agent@heimserver      agent@oracle-a1          agent@soundos-pi
+ │   agent@heimserver      agent@oracle-a1          agent@raspi    
  │   (Docker-Socket)       (Docker-Socket)          (Docker-Socket)
  └──────────────────────────────────────────────────────────────────┘
                                 │ optional, öffentlich
@@ -131,6 +131,7 @@ Die erste Nachricht muss innerhalb von 10 s ein gültiges `hello` sein. Danach a
 | `game.backup` | `{gameDir}` → Stream |
 | `game.status` | `{gameDir, method, port, gamedigType?, tpsCommand?}` → Spieler, Version, TPS (RCON-Daten liest der Agent aus der `.env` im Ordner) |
 | `game.remove` | `{gameDir}` → `compose down` und Ordner löschen (nur unter `/opt/homelab/games/`) |
+| `game.backups.purge` | `{gameId, olderThanDays}` → löscht eigene Backup-Archive dieses Gameservers unter `/opt/homelab/backups/<id>/`, die älter sind (für gelöschte Gameserver nach 30 Tagen) |
 | `deploy.run` | `{dir, repoUrl, sha, method, keyName?}` → Stream |
 | `deploy.key` | `{name}` → `{publicKey}` (ed25519, privater Schlüssel bleibt auf dem Server) |
 | `system.cleanupPreview` / `system.cleanup` | `{}` |

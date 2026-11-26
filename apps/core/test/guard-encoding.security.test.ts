@@ -31,7 +31,7 @@ describe('guard cannot be bypassed with encoded paths', () => {
       method: 'POST',
       url: '/%61pi/auth/login',
       headers: { host: SAME_ORIGIN.host, origin: 'https://evil.example' },
-      payload: { username: 'alex', password: 'x', code: '000000' },
+      payload: { username: 'admin', password: 'x', code: '000000' },
     });
     expect(res.statusCode).toBe(403);
     expect(res.json()).toEqual({ ok: false, error: 'bad_origin' });

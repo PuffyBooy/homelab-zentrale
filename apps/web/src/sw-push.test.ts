@@ -102,14 +102,14 @@ describe('push event', () => {
     await sw.fire(
       'push',
       pushEvent({
-        title: 'lernen.hoebe.at ist offline',
+        title: 'lernen.example.org ist offline',
         body: 'Seit 23:02 HTTP 503. Container lernplattform prüfen.',
         level: 'crit',
         url: '/websites/chk-000001',
         tag: 'check:chk-000001:down',
       }),
     );
-    expect(sw.showNotification).toHaveBeenCalledWith('lernen.hoebe.at ist offline', {
+    expect(sw.showNotification).toHaveBeenCalledWith('lernen.example.org ist offline', {
       body: 'Seit 23:02 HTTP 503. Container lernplattform prüfen.',
       tag: 'check:chk-000001:down',
       renotify: true,

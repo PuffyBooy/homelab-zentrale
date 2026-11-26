@@ -226,7 +226,7 @@ export async function startFakePalworld(password: string): Promise<{
     }
     const body: Record<string, unknown> = {
       '/v1/api/info': { version: 'v0.6.1', servername: 'Homelab' },
-      '/v1/api/players': { players: [{ name: '§aAlex' }, { name: 'Bob' }] },
+      '/v1/api/players': { players: [{ name: '§aMia' }, { name: 'Bob' }] },
       '/v1/api/settings': {},
       '/v1/api/metrics': { currentplayernum: 2, maxplayernum: 16 },
     };

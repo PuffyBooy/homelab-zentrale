@@ -74,12 +74,12 @@ describe('CI status from workflow runs', () => {
 describe('GitHub client', () => {
   it('sends the token only as Bearer header to the API and parses commits', async () => {
     const { gh, client } = setup();
-    gh.addRepo('alex/blog');
-    const sha = gh.push('alex/blog', 'Hello world');
-    expect(await client.user()).toBe('alex-hz');
-    const commits = await client.commits('alex/blog', 'main');
+    gh.addRepo('admin/blog');
+    const sha = gh.push('admin/blog', 'Hello world');
+    expect(await client.user()).toBe('admin-hz');
+    const commits = await client.commits('admin/blog', 'main');
     expect(commits).toEqual([
-      { sha, message: 'Hello world', author: 'Alex', at: new Date(T0).toISOString() },
+      { sha, message: 'Hello world', author: 'Admin', at: new Date(T0).toISOString() },
     ]);
     for (const r of gh.requests) {
       expect(r.url.startsWith('https://api.github.com/')).toBe(true);
@@ -91,11 +91,11 @@ describe('GitHub client', () => {
 
   it('uses ETags: the second request is conditional and a 304 returns the cached data', async () => {
     const { gh, client, etags } = setup();
-    gh.addRepo('alex/blog');
-    gh.push('alex/blog', 'one');
-    const first = await client.commits('alex/blog', 'main');
+    gh.addRepo('admin/blog');
+    gh.push('admin/blog', 'one');
+    const first = await client.commits('admin/blog', 'main');
     const remaining = gh.remaining;
-    const second = await client.commits('alex/blog', 'main');
+    const second = await client.commits('admin/blog', 'main');
     expect(second).toEqual(first);
     const [a, b] = gh.requests;
     expect(a?.headers['if-none-match']).toBeUndefined();
@@ -105,43 +105,43 @@ describe('GitHub client', () => {
     expect(gh.remaining).toBe(remaining);
     expect(client.rate.remaining).toBe(remaining);
 
-    gh.push('alex/blog', 'two');
-    const third = await client.commits('alex/blog', 'main');
+    gh.push('admin/blog', 'two');
+    const third = await client.commits('admin/blog', 'main');
     expect(gh.requests.at(-1)?.status).toBe(200);
     expect(third.map((c) => c.message)).toEqual(['two', 'one']);
   });
 
   it('backs off when the rate limit is used up and resumes after the reset', async () => {
     const { gh, client, clock } = setup();
-    gh.addRepo('alex/blog');
+    gh.addRepo('admin/blog');
     gh.remaining = 1;
     gh.resetAt = Math.floor(clock.t / 1000) + 600;
-    await client.repo('alex/blog'); // the last request: remaining 0
+    await client.repo('admin/blog'); // the last request: remaining 0
     expect(client.rate.remaining).toBe(0);
     expect(client.rateLimitReason()).toBe('Rate-Limit bis 13:10');
     const before = gh.requests.length;
-    await expect(client.repo('alex/blog')).rejects.toMatchObject({ kind: 'rate_limited' });
+    await expect(client.repo('admin/blog')).rejects.toMatchObject({ kind: 'rate_limited' });
     // Held back in the core: GitHub was not asked.
     expect(gh.requests.length).toBe(before);
 
     clock.t += 601_000;
     gh.remaining = 5000;
-    await expect(client.repo('alex/blog')).resolves.toMatchObject({ fullName: 'alex/blog' });
+    await expect(client.repo('admin/blog')).resolves.toMatchObject({ fullName: 'admin/blog' });
     expect(client.rateLimitReason()).toBeNull();
   });
 
   it('a 403 rate-limit answer blocks until the reset header', async () => {
     const { gh, client, clock } = setup();
-    gh.addRepo('alex/blog');
+    gh.addRepo('admin/blog');
     gh.limited = true;
     gh.resetAt = Math.floor(clock.t / 1000) + 120;
-    await expect(client.repo('alex/blog')).rejects.toMatchObject({
+    await expect(client.repo('admin/blog')).rejects.toMatchObject({
       kind: 'rate_limited',
       reason: 'Rate-Limit bis 13:02',
     });
     gh.limited = false;
     const n = gh.requests.length;
-    await expect(client.repo('alex/blog')).rejects.toBeInstanceOf(GithubError);
+    await expect(client.repo('admin/blog')).rejects.toBeInstanceOf(GithubError);
     expect(gh.requests.length).toBe(n);
   });
 
@@ -152,7 +152,7 @@ describe('GitHub client', () => {
       reason: 'Token ungültig oder abgelaufen',
     });
     const { gh, client } = setup();
-    await expect(client.repo('alex/nope')).rejects.toMatchObject({
+    await expect(client.repo('admin/nope')).rejects.toMatchObject({
       kind: 'not_found',
       reason: 'Repo oder Branch nicht gefunden',
     });
@@ -184,7 +184,7 @@ describe('GitHub client', () => {
       fetch: f,
     });
     await expect(client.user()).rejects.toMatchObject({ kind: 'invalid' });
-    await expect(client.commits('alex/blog', 'main')).rejects.toMatchObject({ kind: 'invalid' });
+    await expect(client.commits('admin/blog', 'main')).rejects.toMatchObject({ kind: 'invalid' });
     await expect(client.user()).rejects.toMatchObject({
       kind: 'server',
       reason: 'GitHub-Fehler (HTTP 502)',
@@ -193,10 +193,10 @@ describe('GitHub client', () => {
 
   it('encodes branch names in the query', async () => {
     const { gh, client } = setup();
-    gh.addRepo('alex/blog');
-    await client.commits('alex/blog', 'feature/a+b').catch(() => undefined);
+    gh.addRepo('admin/blog');
+    await client.commits('admin/blog', 'feature/a+b').catch(() => undefined);
     expect(gh.requests.at(-1)?.path).toBe(
-      '/repos/alex/blog/commits?sha=feature%2Fa%2Bb&per_page=30',
+      '/repos/admin/blog/commits?sha=feature%2Fa%2Bb&per_page=30',
     );
   });
 });

@@ -661,7 +661,7 @@ export class ShareService {
         status: s.status,
         // Fixed texts only: agent errors and phase texts never reach the friend.
         statusText: friendStatusText(s.status, s.statusText, row.phase),
-        // Only what Alex entered for friends; never the Tailscale IP or server name.
+        // Only what the admin entered for friends; never the Tailscale IP or server name.
         // An external address that is itself a tailnet address is not shown either.
         address:
           ext === '' || hasTailnetAddress(ext) ? null : port === undefined ? ext : `${ext}:${port}`,

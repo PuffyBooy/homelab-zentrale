@@ -184,7 +184,7 @@ export function shortSha(sha: string): string {
   return sha.slice(0, 7);
 }
 
-/** "PuffyBooy/soundos" -> "soundos". */
+/** "PuffyBooy/my-app" -> "my-app". */
 export function repoShortName(fullName: string): string {
   const i = fullName.indexOf('/');
   return i === -1 ? fullName : fullName.slice(i + 1);
@@ -197,7 +197,7 @@ export function repoBehind(r: Pick<RepoSummary, 'targets'>): number {
   return Math.min(max, MAX_BEHIND);
 }
 
-/** "soundos-pi" or "heimserver, oracle-a1"; null when nothing runs anywhere. */
+/** "pi" or "heimserver, oracle-a1"; null when nothing runs anywhere. */
 export function deployedTo(r: Pick<RepoSummary, 'targets'>): string | null {
   const names = r.targets.filter((t) => t.liveSha).map((t) => t.serverName);
   return names.length ? [...new Set(names)].join(', ') : null;
@@ -381,7 +381,7 @@ export function deployKeyUrl(fullName: string): string {
   return `https://github.com/${enc(owner)}/${enc(name)}/settings/keys/new`;
 }
 
-/** "heimserver · /opt/homelab/apps/soundos · main". */
+/** "heimserver · /opt/homelab/apps/my-app · main". */
 export function targetLine(t: Pick<DeployTarget, 'serverName' | 'path' | 'branch'>): string {
   return `${t.serverName} · ${t.path} · ${t.branch}`;
 }

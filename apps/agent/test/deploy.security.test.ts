@@ -35,8 +35,8 @@ import { createLogger } from '../src/log.js';
 import { StreamManager } from '../src/streams.js';
 
 const SHA = 'a'.repeat(40);
-const URL_HTTPS = 'https://github.com/alex/site.git';
-const URL_SSH = 'git@github.com:alex/private.git';
+const URL_HTTPS = 'https://github.com/admin/site.git';
+const URL_SSH = 'git@github.com:admin/private.git';
 
 let base: string;
 let root: string;
@@ -235,7 +235,7 @@ describe('deploy.run params (schema + agent)', () => {
   it('accepts normal GitHub URLs', () => {
     for (const u of [
       URL_HTTPS,
-      'https://github.com/alex/site',
+      'https://github.com/admin/site',
       URL_SSH,
       'https://github.com/a.b/c_d-e',
     ]) {

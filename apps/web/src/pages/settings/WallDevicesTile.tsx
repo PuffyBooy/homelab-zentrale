@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useMemo, useState, type FormEvent, type ReactElement } from 'react';
-import { Alert, Button, Tile } from '@hz/ui';
+import { Alert, Badge, Button, Tile } from '@hz/ui';
 import { CopyBlock } from '../../components/CopyBlock.js';
 import { Dialog } from '../../components/Dialog.js';
 import { Field } from '../../components/Field.js';
@@ -13,6 +13,7 @@ import {
   createWallDevice,
   deleteWallDevice,
   fetchWallDevices,
+  relinkWallDevice,
   wallDevicesKey,
   type WallDevice,
   type WallDeviceCreated,
@@ -34,14 +35,29 @@ export function WallDevicesTile(): ReactElement {
   });
   const [name, setName] = useState('');
   const [nameError, setNameError] = useState<string | null>(null);
-  const [created, setCreated] = useState<WallDeviceCreated | null>(null);
+  const [created, setCreated] = useState<{ res: WallDeviceCreated; relinked: boolean } | null>(
+    null,
+  );
   const [remove, setRemove] = useState<WallDevice | null>(null);
+  const [relinkError, setRelinkError] = useState<string | null>(null);
   const create = useMutation({
     mutationFn: createWallDevice,
     onSuccess: (res) => {
-      setCreated(res);
+      setCreated({ res, relinked: false });
       setName('');
       void qc.invalidateQueries({ queryKey: wallDevicesKey });
+    },
+  });
+  const relink = useMutation({
+    mutationFn: (d: WallDevice) => relinkWallDevice(d.id),
+    onMutate: () => setRelinkError(null),
+    onSuccess: (res) => {
+      setCreated({ res, relinked: true });
+      void qc.invalidateQueries({ queryKey: wallDevicesKey });
+    },
+    onError: (err, d) => {
+      const text = shownError(err);
+      if (text) setRelinkError(`${d.name}: ${text}`);
     },
   });
 
@@ -78,7 +94,21 @@ export function WallDevicesTile(): ReactElement {
                       : 'noch nie verbunden'}
                   </span>
                 </div>
+                <div className="hz-row-meta">
+                  <Badge tone={d.paired ? 'ok' : 'neutral'}>
+                    {d.paired ? 'gekoppelt' : 'noch nicht gekoppelt'}
+                  </Badge>
+                </div>
                 <div className="hz-row-actions">
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    aria-label={`Neuen Link für ${d.name}`}
+                    disabled={relink.isPending}
+                    onClick={() => relink.mutate(d)}
+                  >
+                    Neuen Link
+                  </Button>
                   <Button
                     size="sm"
                     variant="ghost"
@@ -94,6 +124,7 @@ export function WallDevicesTile(): ReactElement {
         ) : devices.data ? (
           <p className="app-empty">Noch kein Gerät.</p>
         ) : null}
+        {relinkError ? <FormError title={relinkError} /> : null}
         <form className="hz-form" onSubmit={submit} noValidate>
           <Field
             label="Gerätename"
@@ -114,7 +145,13 @@ export function WallDevicesTile(): ReactElement {
           </div>
         </form>
       </Tile>
-      {created ? <CreatedDialog created={created} onClose={() => setCreated(null)} /> : null}
+      {created ? (
+        <CreatedDialog
+          created={created.res}
+          relinked={created.relinked}
+          onClose={() => setCreated(null)}
+        />
+      ) : null}
       {remove ? <RemoveDialog device={remove} onClose={() => setRemove(null)} /> : null}
     </>
   );
@@ -122,9 +159,11 @@ export function WallDevicesTile(): ReactElement {
 
 function CreatedDialog({
   created,
+  relinked,
   onClose,
 }: {
   created: WallDeviceCreated;
+  relinked: boolean;
   onClose: () => void;
 }): ReactElement {
   const qr = useMemo(() => {
@@ -138,10 +177,17 @@ function CreatedDialog({
   return (
     <Dialog open onClose={onClose} title={`Link für ${created.device.name}`} dismissable={false}>
       <div className="hz-dialog-body">
-        <Alert tone="warn" title="Der Link wird nur jetzt angezeigt.">
-          Auf dem Tablet öffnen oder den QR-Code scannen. Wer den Link hat, sieht den Wandmodus,
-          sonst nichts. Widerrufen geht jederzeit hier.
+        <Alert tone="warn" title="Der Link wird nur jetzt angezeigt und funktioniert einmal.">
+          Auf dem Tablet öffnen oder den QR-Code scannen. Danach merkt sich das Gerät die Kopplung,
+          der Link selbst gilt nicht mehr. Wer den Link vorher hat, sieht den Wandmodus, sonst
+          nichts. Widerrufen geht jederzeit hier.
         </Alert>
+        {relinked ? (
+          <Alert tone="info" title="Alter Link und alte Kopplung gelten nicht mehr.">
+            {created.device.name} zeigt „Gerät nicht verbunden.“, bis der neue Link dort geöffnet
+            ist.
+          </Alert>
+        ) : null}
         {qr ? (
           <div className="app-qr" data-theme="light">
             <svg

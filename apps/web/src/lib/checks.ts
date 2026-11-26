@@ -96,7 +96,7 @@ export function checkMatchesServer(c: Pick<CheckSummary, 'def'>, serverId: strin
   return c.def.serverId === serverId || c.def.runFrom === serverId;
 }
 
-/** What is checked, as shown in the row: "sc-ball.at", "sc-ball.at/api", "127.0.0.1:25565". */
+/** What is checked, as shown in the row: "example.at", "example.at/api", "127.0.0.1:25565". */
 export function checkTarget(def: CheckDef): string {
   if (def.kind === 'tcp') return `${def.host}:${def.port}`;
   if (def.kind === 'ping') return def.host;

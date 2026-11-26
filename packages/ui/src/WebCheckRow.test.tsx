@@ -4,7 +4,7 @@ import { html } from './test-utils.js';
 
 describe('WebCheckRow', () => {
   it('renders code, ms and ssl in neutral tone when fine', () => {
-    const out = html(<WebCheckRow url="sc-ball.at" status="ok" code={200} ms={312} sslDays={61} />);
+    const out = html(<WebCheckRow url="example.at" status="ok" code={200} ms={312} sslDays={61} />);
     expect(out).toContain('class="hz-row hz-web"');
     expect(out).toContain('<span class="hz-web-code">200</span>');
     expect(out).toContain('<span class="hz-web-ms">312 ms</span>');
@@ -30,7 +30,7 @@ describe('WebCheckRow', () => {
   });
 
   it('accepts non-HTTP codes', () => {
-    const out = html(<WebCheckRow url="mc.hoebe.at" code="TCP" ms={28} />);
+    const out = html(<WebCheckRow url="mc.example.org" code="TCP" ms={28} />);
     expect(out).toContain('<span class="hz-web-code">TCP</span>');
   });
 });

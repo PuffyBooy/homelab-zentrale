@@ -10,6 +10,7 @@ import {
 import { RpcError, type AgentHub } from '../agents/hub.js';
 import type { AlertService } from '../alerts/service.js';
 import { nextWallClock } from '../calendar.js';
+import { zonedFormat } from '../timezone.js';
 import type { Clock } from '../clock.js';
 import { randomToken } from '../crypto.js';
 import type { Db } from '../db/index.js';
@@ -97,12 +98,7 @@ function helpText(def: CheckDef): string {
   }
 }
 
-const dateFmt = new Intl.DateTimeFormat('de-AT', {
-  timeZone: 'Europe/Vienna',
-  day: '2-digit',
-  month: '2-digit',
-  year: 'numeric',
-});
+const dateFmt = zonedFormat('de-AT', { day: '2-digit', month: '2-digit', year: 'numeric' });
 
 export interface CheckServiceDeps {
   db: Db;
@@ -580,14 +576,14 @@ export class CheckService {
         key('ssl'),
         ev.ssl,
         `SSL-Zertifikat von ${name} läuft ab`,
-        `Läuft ${inDays(daysLeft(cert.sslExpiresAt, now))} ab, am ${dateFmt.format(cert.sslExpiresAt)}. Zertifikat erneuern.`,
+        `Läuft ${inDays(daysLeft(cert.sslExpiresAt, now))} ab, am ${dateFmt().format(cert.sslExpiresAt)}. Zertifikat erneuern.`,
         serverId,
         'check',
       );
     } else if (cert?.sslExpiresAt != null) {
       a.resolve(key('ssl'), {
         title: `SSL-Zertifikat von ${name} erneuert`,
-        body: `Gültig bis ${dateFmt.format(cert.sslExpiresAt)}.`,
+        body: `Gültig bis ${dateFmt().format(cert.sslExpiresAt)}.`,
       });
     }
     if (ev.domain && cert?.domainExpiresAt != null) {
@@ -595,14 +591,14 @@ export class CheckService {
         key('domain'),
         'warn',
         `Domain von ${name} läuft ab`,
-        `Läuft ${inDays(daysLeft(cert.domainExpiresAt, now))} ab, am ${dateFmt.format(cert.domainExpiresAt)}. Beim Registrar verlängern.`,
+        `Läuft ${inDays(daysLeft(cert.domainExpiresAt, now))} ab, am ${dateFmt().format(cert.domainExpiresAt)}. Beim Registrar verlängern.`,
         serverId,
         'check',
       );
     } else if (cert?.domainExpiresAt != null) {
       a.resolve(key('domain'), {
         title: `Domain von ${name} verlängert`,
-        body: `Registriert bis ${dateFmt.format(cert.domainExpiresAt)}.`,
+        body: `Registriert bis ${dateFmt().format(cert.domainExpiresAt)}.`,
       });
     }
   }

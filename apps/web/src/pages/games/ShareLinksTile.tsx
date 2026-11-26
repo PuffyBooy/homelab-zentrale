@@ -5,6 +5,7 @@ import { Link } from 'react-router';
 import { Button, StatusDot, Tile } from '@hz/ui';
 import { Dialog } from '../../components/Dialog.js';
 import { FormError } from '../../components/FormError.js';
+import { isApiError } from '../../lib/api.js';
 import { errorText } from '../../lib/errors.js';
 import { plural } from '../../lib/format.js';
 import {
@@ -162,7 +163,9 @@ export function ShareLinksTile({ game, now }: ShareTilesProps): ReactElement {
               Der Link hört sofort auf zu funktionieren. {revoking.person} sieht dann „Link
               widerrufen“. Das Protokoll bleibt.
             </p>
-            {revoke.error ? <FormError title={errorText(revoke.error)} /> : null}
+            {revoke.error && !isApiError(revoke.error, 'step_up_required') ? (
+              <FormError title={errorText(revoke.error)} />
+            ) : null}
             <div className="hz-dialog-foot">
               <Button onClick={() => setRevoking(null)} data-autofocus="">
                 Abbrechen

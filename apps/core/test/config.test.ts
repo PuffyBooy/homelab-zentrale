@@ -13,6 +13,17 @@ describe('loadConfig', () => {
     expect(c.secretKey.length).toBe(32);
   });
 
+  it('HZ_TIMEZONE: default Europe/Vienna, any IANA zone, unknown zones refused', () => {
+    expect(loadConfig({ HZ_SECRET_KEY: key }).timeZone).toBe('Europe/Vienna');
+    expect(loadConfig({ HZ_SECRET_KEY: key, HZ_TIMEZONE: '' }).timeZone).toBe('Europe/Vienna');
+    expect(loadConfig({ HZ_SECRET_KEY: key, HZ_TIMEZONE: 'Europe/Berlin' }).timeZone).toBe(
+      'Europe/Berlin',
+    );
+    expect(() => loadConfig({ HZ_SECRET_KEY: key, HZ_TIMEZONE: 'Mars/Olympus' })).toThrow(
+      ConfigError,
+    );
+  });
+
   it('refuses to start without HZ_SECRET_KEY', () => {
     expect(() => loadConfig({})).toThrow(ConfigError);
   });

@@ -202,6 +202,48 @@ export type GameSummary = z.infer<typeof gameSummarySchema>;
 export const gameListResponseSchema = z.strictObject({ games: z.array(gameSummarySchema) });
 export const gameResponseSchema = z.strictObject({ game: gameSummarySchema });
 
+// PATCH /api/games/:id/ports (step-up) { ports } -> GamePortsUpdateResponse
+// Changes host ports after setup (decision 2026-11-26). Validated like on create
+// (1024–65535, consecutive ranges, conflicts with other games and known ports of the
+// server: 409 conflict). Rewrites compose.yml/.env and recreates a running game.
+// Friends' port forwarding must then be adjusted by hand (see forwardingHint).
+export const gamePortsUpdateRequestSchema = z.strictObject({
+  /** New start port per template port name; names not given keep their port. */
+  ports: z
+    .record(z.string().regex(/^[a-z][a-z0-9]{0,15}$/), z.number().int().min(1024).max(65535))
+    .refine((p) => Object.keys(p).length >= 1 && Object.keys(p).length <= 5, {
+      message: '1 to 5 ports',
+    }),
+});
+export const gamePortChangeSchema = z.strictObject({
+  name: z.string(),
+  protocol: portProtocolSchema,
+  /** Consecutive ports (Valheim: 3). */
+  count: z.number().int(),
+  from: z.number().int(),
+  to: z.number().int(),
+  /** 127.0.0.1 only: no forwarding needed. */
+  local: z.boolean(),
+});
+export const gamePortsUpdateResponseSchema = z.strictObject({
+  game: gameSummarySchema,
+  /** All host ports of the game after the change (local ones included). */
+  ports: z.array(
+    z.strictObject({
+      name: z.string(),
+      port: z.number().int(),
+      protocol: portProtocolSchema,
+      count: z.number().int(),
+      local: z.boolean(),
+    }),
+  ),
+  /** Only ports whose value changed. */
+  changed: z.array(gamePortChangeSchema),
+  /** German, e.g. "Portweiterleitung anpassen: game 25565 → 25570 (TCP)"; null if no public port changed. */
+  forwardingHint: z.string().nullable(),
+});
+export type GamePortsUpdateResponse = z.infer<typeof gamePortsUpdateResponseSchema>;
+
 // POST /api/games/:id/start|stop|restart|backup -> { game }
 export const gameActionParamsSchema = z.strictObject({
   id: idSchema,

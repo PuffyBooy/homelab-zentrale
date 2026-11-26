@@ -46,6 +46,7 @@ describe('agent protocol allowlist', () => {
         'game.status',
         'game.remove',
         'game.backup',
+        'game.backups.purge',
         'game.rcon',
         'pty.close',
         'pty.input',
@@ -193,7 +194,7 @@ describe('deploy schemas', () => {
     for (const u of [
       'https://github.com/puffybooy/homelab-zentrale',
       'https://github.com/puffybooy/homelab-zentrale.git',
-      'git@github.com:puffybooy/sc-ball.at.git',
+      'git@github.com:puffybooy/beispiel.at.git',
     ]) {
       expect(repoUrlSchema.safeParse(u).success, u).toBe(true);
     }
@@ -211,5 +212,37 @@ describe('deploy schemas', () => {
     ]) {
       expect(repoUrlSchema.safeParse(u).success, u).toBe(false);
     }
+  });
+});
+
+describe('game.backups.purge', () => {
+  const rpc = (params: unknown) =>
+    parseRpc({ type: 'rpc', id: 'abcdefgh', action: 'game.backups.purge', params });
+
+  it('accepts a game folder name and a day count', () => {
+    expect(rpc({ gameId: 'mc-1', olderThanDays: 30 }).ok).toBe(true);
+    expect(rpc({ gameId: 'ab', olderThanDays: 1 }).ok).toBe(true);
+    expect(rpc({ gameId: 'ab', olderThanDays: 3650 }).ok).toBe(true);
+  });
+
+  it('rejects path tricks, bad day counts and extra params', () => {
+    for (const gameId of [
+      '..',
+      '../etc',
+      'mc/..',
+      '/opt/homelab/backups/mc',
+      'MC',
+      '-mc',
+      'a',
+      'mc\0',
+      ' mc',
+    ]) {
+      expect(rpc({ gameId, olderThanDays: 30 }).ok, gameId).toBe(false);
+    }
+    for (const olderThanDays of [0, -1, 1.5, 3651, '30']) {
+      expect(rpc({ gameId: 'mc', olderThanDays }).ok).toBe(false);
+    }
+    expect(rpc({ gameId: 'mc', olderThanDays: 30, path: '/etc' }).ok).toBe(false);
+    expect(rpc({ gameId: 'mc' }).ok).toBe(false);
   });
 });

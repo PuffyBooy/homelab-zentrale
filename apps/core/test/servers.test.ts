@@ -137,9 +137,29 @@ describe('GET /api/servers, /:id, /:id/history', () => {
   });
 });
 
+describe('inventory alerts', () => {
+  it('"Sicherheitsupdates offen" and "Neustart nötig" are info alerts (no push), status stays WARN', async () => {
+    const { t, agent, serverId } = await withAgent();
+    agent.send(metricsMsg());
+    agent.send(inventoryMsg({ updates: { total: 5, security: 2 }, rebootRequired: true }));
+    await until(() => t.app.hzCore.alerts.active(`server:${serverId}:reboot`) !== null);
+    await until(() => t.app.hzCore.alerts.active(`server:${serverId}:updates`) !== null);
+    expect(t.app.hzCore.alerts.active(`server:${serverId}:reboot`)?.level).toBe('info');
+    expect(t.app.hzCore.alerts.active(`server:${serverId}:updates`)?.level).toBe('info');
+    expect(t.app.hzCore.servers.summary(serverId)?.status).toBe('warn');
+    // An older warn alert of the same category is lowered to info.
+    agent.send(inventoryMsg({ updates: { total: 0, security: 0 }, rebootRequired: false }));
+    await until(() => t.app.hzCore.alerts.active(`server:${serverId}:reboot`) === null);
+    expect(alerts(t).filter((a) => a.level === 'warn')).toEqual([]);
+  });
+});
+
 describe('POST /api/servers/enroll', () => {
   it('returns a one-time token with docker run and compose snippets (tailnet URL)', async () => {
-    const { t, cookie } = await setup({ HZ_BASE_URL: 'https://heimserver.tail1234.ts.net' });
+    const { t, cookie, secret } = await setup({
+      HZ_BASE_URL: 'https://heimserver.tail1234.ts.net',
+    });
+    await stepUp(t, secret, cookie);
     const res = await post(t, cookie, '/api/servers/enroll', {
       name: 'oracle-a1',
       location: 'Frankfurt',
@@ -153,20 +173,22 @@ describe('POST /api/servers/enroll', () => {
     expect(body.dockerRun).toContain('--name homelab-agent');
     expect(body.dockerRun).toContain('-e HZ_AGENT_HOST_EXEC=nsenter');
     expect(body.dockerRun).toContain('--cap-drop ALL');
-    expect(body.dockerRun.endsWith(' homelab-zentrale/agent:local')).toBe(true);
+    expect(body.dockerRun.endsWith(' ghcr.io/puffybooy/homelab-agent:latest')).toBe(true);
     expect(body.compose).toContain("HZ_CORE_URL: 'wss://heimserver.tail1234.ts.net/agent'");
     expect(body.compose).toContain(`HZ_AGENT_TOKEN: '${body.token}'`);
     expect(body.compose).toContain('container_name: homelab-agent');
   });
 
   it('uses ws://127.0.0.1:<port>/agent without HZ_BASE_URL', async () => {
-    const { t, cookie } = await setup({ HZ_PORT: '8099' });
+    const { t, cookie, secret } = await setup({ HZ_PORT: '8099' });
+    await stepUp(t, secret, cookie);
     const body = (await post(t, cookie, '/api/servers/enroll', { name: 'pi' })).json();
     expect(body.dockerRun).toContain('HZ_CORE_URL=ws://127.0.0.1:8099/agent');
   });
 
   it('rejects invalid names', async () => {
-    const { t, cookie } = await setup();
+    const { t, cookie, secret } = await setup();
+    await stepUp(t, secret, cookie);
     for (const name of ['', 'Heimserver', 'a b', '-x', 'x;rm -rf /', 'a'.repeat(64)]) {
       const res = await post(t, cookie, '/api/servers/enroll', { name });
       expect(res.statusCode, name).toBe(400);
@@ -186,6 +208,16 @@ describe('POST /api/servers/enroll', () => {
     });
     expect(res.statusCode).toBe(403);
     expect(res.json()).toEqual({ ok: false, error: 'bad_origin' });
+  });
+
+  it('needs a step-up (fresh TOTP)', async () => {
+    const { t, cookie, secret } = await setup();
+    const res = await post(t, cookie, '/api/servers/enroll', { name: 'pi' });
+    expect(res.statusCode).toBe(403);
+    expect(res.json()).toEqual({ ok: false, error: 'step_up_required' });
+    expect(t.db.sqlite.prepare('SELECT COUNT(*) n FROM enroll_tokens').get()).toEqual({ n: 0 });
+    await stepUp(t, secret, cookie);
+    expect((await post(t, cookie, '/api/servers/enroll', { name: 'pi' })).statusCode).toBe(200);
   });
 });
 

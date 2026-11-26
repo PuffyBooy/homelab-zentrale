@@ -39,7 +39,8 @@ function tailnetBase(request: FastifyRequest, baseUrl: string | undefined): stri
 /**
  * Admin side of share links (session + Origin from the global guard). Changing
  * the gateway settings and its token needs step-up (SECURITY.md: tokens), and so
- * does a link with `console_write` (full RCON for the friend).
+ * do creating and revoking a link. Deleting a link is only possible once it is
+ * revoked or expired (409 otherwise), so it needs no step-up.
  */
 export const shareRoutes: FastifyPluginAsync<ShareRoutesOptions> = async (app, o) => {
   const stepUp = requireStepUp(o.now);
@@ -64,15 +65,11 @@ export const shareRoutes: FastifyPluginAsync<ShareRoutesOptions> = async (app, o
     return shareListResponseSchema.parse({ shares: s.list(game.id) });
   });
 
-  app.post('/games/:id/shares', async (request, reply) => {
+  // Creating and revoking a link needs step-up (decision 2026-11-26); this also
+  // covers console_write (full RCON for the friend, SPEC 6.4).
+  app.post('/games/:id/shares', { preHandler: stepUp }, async (request, reply) => {
     const game = gameOf(request.params);
     const body = shareCreateRequestSchema.parse(request.body);
-    // console_write gives the friend full RCON (SPEC 6.4), so it needs step-up like the console.
-    if (body.perms.includes('console_write')) {
-      // The reply is thenable, so `await` does not give it back; check `sent` instead.
-      await stepUp(request, reply);
-      if (reply.sent) return reply;
-    }
     const { share, token } = await s.create(game.id, body);
     audit('share.created', share.id, {
       gameId: game.id,
@@ -94,7 +91,7 @@ export const shareRoutes: FastifyPluginAsync<ShareRoutesOptions> = async (app, o
     );
   });
 
-  app.post('/shares/:id/revoke', async (request) => {
+  app.post('/shares/:id/revoke', { preHandler: stepUp }, async (request) => {
     const row = shareOf(request.params);
     const share = s.revoke(row.id);
     audit('share.revoked', row.id, { gameId: row.gameId, person: row.person });

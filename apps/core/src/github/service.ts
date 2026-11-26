@@ -190,6 +190,15 @@ export class GithubService {
     return { etags, logs };
   }
 
+  /** Module switch (settings/modules): off stops polling; on polls at once. */
+  private active = true;
+
+  setEnabled(on: boolean): void {
+    if (on === this.active) return;
+    this.active = on;
+    if (on && this.token() !== null) this.track(this.poll());
+  }
+
   /** Fails deploys that were running before a restart; registers polling and timeouts. */
   start(): void {
     this.deployer.recoverAfterRestart();
@@ -197,7 +206,7 @@ export class GithubService {
     s.every('github.poll', GITHUB_POLL_MS, () => this.poll());
     s.every('github.deployTimeouts', 10_000, () => this.deployer.checkTimeouts());
     s.every('github.prune', 60 * 60_000, () => void this.prune());
-    if (this.token() !== null) this.track(this.poll());
+    if (this.active && this.token() !== null) this.track(this.poll());
   }
 
   async idle(): Promise<void> {
@@ -546,7 +555,7 @@ export class GithubService {
   }
 
   private async pollAll(): Promise<void> {
-    if (this.token() === null) return;
+    if (!this.active || this.token() === null) return;
     if (this.status().login === null) {
       // Token stored while GitHub was unreachable: check it first.
       try {

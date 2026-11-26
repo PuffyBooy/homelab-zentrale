@@ -1,7 +1,14 @@
 import { mkdirSync } from 'node:fs';
 import AxeBuilder from '@axe-core/playwright';
 import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
-import { answerStepUp, ORIGIN, signIn, type Totp } from './helpers/auth.js';
+import {
+  answerStepUp,
+  enrollServer,
+  ORIGIN,
+  setModules,
+  signIn,
+  type Totp,
+} from './helpers/auth.js';
 import { hexId, imageId, SimAgent, type SimContainer } from './helpers/sim-agent.js';
 
 /**
@@ -136,15 +143,20 @@ async function newPage(browser: Browser, colorScheme: 'dark' | 'light' = 'dark')
 }
 
 test.beforeAll(async ({ browser }) => {
-  // Hooks default to 30 s; signIn may wait ~26 s for a fresh TOTP window.
-  test.setTimeout(120_000);
+  // Hooks default to 30 s; signIn and the step-up for the enrollment may each wait
+  // ~26 s for a fresh TOTP window, then the game setup polls up to 120 s.
+  test.setTimeout(240_000);
   ({ ctx: context, p: page } = await newPage(browser));
   totp = await signIn(page);
-  const enroll = await apiCall<{ token: string }>('POST', '/api/servers/enroll', {
-    name: NAME,
-    location: 'Wien',
-  });
+  // Enrollment needs step-up; it then also covers the share link and the modules below.
+  const enroll = await enrollServer(page, totp, NAME, 'Zuhause');
   expect(enroll.status).toBe(200);
+  // Every module on, so GitHub and Wohnung are real pages in the screenshots.
+  await setModules(page, totp, { github: true, homeassistant: true, games: true });
+  // m8 leaves a Home Assistant behind that is gone (fake HA stopped). Without a token
+  // Wohnung is the plain "nicht verbunden" state, independent of the spec order.
+  const ha = await apiCall<{ tokenSet?: boolean }>('GET', '/api/ha/settings');
+  if (ha.data?.tokenSet) expect((await apiCall('DELETE', '/api/ha/token')).status).toBe(200);
   agent = new SimAgent({
     url: AGENT_URL,
     name: NAME,

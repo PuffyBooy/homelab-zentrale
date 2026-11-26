@@ -1,6 +1,6 @@
 # Homelab-Zentrale
 
-Die Homelab-Zentrale ist Alex' eigenes Kontrollzentrum. Auf einer Oberfläche sieht und steuert er alle Server (Heimserver in Wien, Oracle Cloud, SoundOS-Pi, weitere VPS), Docker-Container, Gameserver mit Benutzerlinks für Freunde, das GitHub-Konto mit Deploys, alle Websites und die Wohnung. Das Designsystem folgt der Idee einer **Kommandozentrale**: dunkel, ruhig und präzise. Bernstein leuchtet nur dort, wo etwas zu tun ist.
+Die Homelab-Zentrale ist ein privates Kontrollzentrum für einen Admin. Auf einer Oberfläche sieht und steuert man alle Server (Heimserver, Cloud-VM, Raspberry Pi, weitere VPS), Docker-Container, Gameserver mit Benutzerlinks für Freunde, das GitHub-Konto mit Deploys, alle Websites und die Wohnung. Das Designsystem folgt der Idee einer **Kommandozentrale**: dunkel, ruhig und präzise. Bernstein leuchtet nur dort, wo etwas zu tun ist.
 
 **Grundsatz: Wenn alles läuft, ist der Bildschirm still.** Farbe ist ein Signal und keine Deko. Ein Blick muss reichen, um zu wissen, ob es irgendwo ein Problem gibt.
 
@@ -8,10 +8,10 @@ Die Homelab-Zentrale ist Alex' eigenes Kontrollzentrum. Auf einer Oberfläche si
 
 Die Oberfläche spricht wie ein guter Techniker am Funk: kurz, sachlich, mit echten Zahlen. Sie duzt.
 
-- **Status zuerst, dann Details.** „sc-ball.at ist offline“ und nicht „Es gibt ein Problem mit einer Website“.
+- **Status zuerst, dann Details.** „example.at ist offline“ und nicht „Es gibt ein Problem mit einer Website“.
 - **Echte Werte statt Adjektive.** „RAM 92 %“ statt „RAM fast voll“. „vor 4 Min“ statt „kürzlich“.
 - **Zahlen im österreichischen Format.** Komma als Dezimaltrennzeichen, ein Leerzeichen vor der Einheit: `7,8 GB`, `38 W`, `21,4 °C`. Uhrzeiten im 24-h-Format: `23:04`.
-- **Technische Namen bleiben technisch.** Container, Hosts und Repos stehen in Kleinschreibung und so, wie sie im System heißen: `homeassistant`, `oracle-a1`, `soundos`.
+- **Technische Namen bleiben technisch.** Container, Hosts und Repos stehen in Kleinschreibung und so, wie sie im System heißen: `homeassistant`, `oracle-a1`, `my-app`.
 - **Buttons:** Verb im Infinitiv, ohne Ausrufezeichen: „Starten“, „Neu deployen“, „Backup jetzt“.
 - **Meldungen:** Titel = Was + Wo, Text = Seit wann + was hilft. „Speicher auf heimserver bei 81 %. Aufräumen gibt ca. 40 GB frei.“
 - **Nie:** Emojis, „Ups!“, Marketing-Sprache oder Ausrufezeichen bei Fehlern.
@@ -24,7 +24,7 @@ Es gibt drei Themes, die dieselben Token-Namen teilen:
 | --- | --- | --- |
 | **Dunkel** (Standard) | Desktop, Handy, abends | Kontrollraum-Gefühl, Zahlen leuchten |
 | **Hell** | Tagsüber, draußen am Handy | Warmes Papierweiß statt grellem Weiß |
-| **Wandmodus** | Altes Tablet oder Echo Show an der Wand | Echtes Schwarz (OLED, nachts kaum Licht), etwas kräftigere Statusfarben |
+| **Wandmodus** | Altes Tablet oder Smart Display an der Wand | Echtes Schwarz (OLED, nachts kaum Licht), etwas kräftigere Statusfarben |
 
 **Flächen** stufen sich in vier Ebenen ab: `bg-000` (Seite) → `bg-100` (Kachel) → `bg-200` (Hover, Eingabe) → `bg-300` (gedrückt, Schienen). Getrennt wird über `line`-Haarlinien, nie über Schatten.
 

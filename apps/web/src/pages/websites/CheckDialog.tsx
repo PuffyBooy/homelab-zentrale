@@ -128,7 +128,7 @@ function CheckFormBody({ onClose, servers, check, onSaved }: CheckDialogProps): 
           inputMode="url"
           value={form.url}
           onChange={(e) => set('url', e.target.value)}
-          placeholder="https://sc-ball.at"
+          placeholder="https://example.at"
           autoComplete="off"
           spellCheck={false}
           error={errors.url}
@@ -140,7 +140,7 @@ function CheckFormBody({ onClose, servers, check, onSaved }: CheckDialogProps): 
             mono
             value={form.host}
             onChange={(e) => set('host', e.target.value)}
-            placeholder={form.kind === 'tcp' ? 'mc.hoebe.at' : '192.168.1.20'}
+            placeholder={form.kind === 'tcp' ? 'mc.example.org' : '192.168.1.20'}
             autoComplete="off"
             autoCapitalize="none"
             spellCheck={false}
@@ -166,7 +166,7 @@ function CheckFormBody({ onClose, servers, check, onSaved }: CheckDialogProps): 
           label="Name"
           value={form.name}
           onChange={(e) => set('name', e.target.value)}
-          placeholder={defaultName(form) || 'sc-ball.at'}
+          placeholder={defaultName(form) || 'example.at'}
           hint="Leer lassen, dann gilt der Host."
           maxLength={80}
           autoComplete="off"

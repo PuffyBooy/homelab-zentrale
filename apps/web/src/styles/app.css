@@ -1170,6 +1170,13 @@ body,
 .app-ha-stale {
   opacity: 0.45;
 }
+/* Stale numbers stay readable (WCAG contrast): muted ink instead of transparency. */
+.hz-metric.app-ha-stale {
+  opacity: 1;
+}
+.hz-metric.app-ha-stale .hz-num {
+  color: var(--ink-muted);
+}
 .app-ha-section {
   display: grid;
   gap: var(--space-3);

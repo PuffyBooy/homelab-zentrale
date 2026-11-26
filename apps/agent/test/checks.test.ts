@@ -59,7 +59,7 @@ describe('check.http', () => {
         res.writeHead(200);
         return res.end();
       }
-      res.end('Hallo Wien, grüß Gott');
+      res.end('Hallo Zuhause, grüß Gott');
     });
     await new Promise<void>((r) => s.listen(0, '127.0.0.1', r));
     track(s);
@@ -118,7 +118,7 @@ describe('check.http', () => {
   });
 
   it('follows http redirects and reports the final response', async () => {
-    expect(await checkHttp({ ...http0, url: `${base}/moved`, contains: 'Wien' })).toMatchObject({
+    expect(await checkHttp({ ...http0, url: `${base}/moved`, contains: 'Zuhause' })).toMatchObject({
       ok: true,
       code: 200,
     });

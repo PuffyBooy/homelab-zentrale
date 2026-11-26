@@ -92,6 +92,28 @@ Arbeite die Meilensteine **in dieser Reihenfolge** ab. Jeder Meilenstein bekommt
 
 ---
 
+## M10: Prioritäten und automatisches Drosseln
+- Priorität pro Container/Gameserver (`wichtig`, `normal`, `niedrig`, „darf gestoppt werden“), Einstellungen pro Server (Schwellen, Automatik an/aus)
+- Agent-Aktion `container.limit` (nur `docker update --cpus`, nie für `hz.role`-Container)
+- Core-Regelwerk: drosseln, stoppen, aufheben, `wichtig` neu starten, Meldungen und Protokoll
+- **Zeitpläne pro Stufe:** z. B. „niedrig“ Mo–Fr 18–23 Uhr ohne Drosselung bzw. mit höherem CPU-Anteil (Zeitzone `HZ_TIMEZONE`)
+- **RAM-Reserve für „wichtig“:** pro Server wird RAM für die wichtigen Container freigehalten; ein Gameserver startet (von Hand, per Link oder automatisch) nur, wenn sein RAM-Limit in den freien RAM minus Reserve passt, sonst „Zu wenig RAM, X GB frei“
+- **Kachel „Wer frisst gerade?“:** Top 3 Container nach CPU und RAM über alle Server, mit Drosseln/Stoppen (Stoppen fragt nach)
+- Web: Priorität im Container- und Gameserver-Detail, Hinweis „gedrosselt“ in der Liste, Einstellungen
+
+**Abnahme:** Ein simulierter Server über der Schwelle drosselt den `niedrig`-Container, nach weiteren 5 Min wird er gestoppt (wenn erlaubt), ein gestoppter `wichtig`-Container läuft binnen 1 Min wieder; im Zeitfenster wird nicht gedrosselt; ein Gameserver ohne Platz startet nicht. Sicherheitstests: kein Eingriff an Core/Agent, keine Aktion ohne Admin, Grenzen für `--cpus`, Benutzerlinks können die RAM-Reserve nicht umgehen.
+
+---
+
+## M11: Server anbinden, Lastverschiebung, Port-Abgleich
+- **Server anbinden in einem Schritt:** „Server hinzufügen“ zeigt einen Code (8 Zeichen, 15 Min, einmalig) und einen Einzeiler `curl -fsSL https://<zentrale>/install.sh | sudo sh -s -- <code>`. Das Skript (vom Core ausgeliefert, nur im Tailnet erreichbar) prüft Docker und Tailscale, holt das Agent-Image (GHCR oder eigene Registry aus `HZ_AGENT_IMAGE`) und startet den Agent; die Seite zeigt live „verbunden“. Code-Tausch mit Rate-Limit, Code nie im Log.
+- **Lastverschiebung:** Gameserver per Knopf auf einen anderen Server umziehen: Backup → Übertragung über die Zentrale (gestreamt, Größenlimit, Prüfsumme) → Restore → Start am Ziel → alter gestoppt; Ports am Ziel neu vorgeschlagen, Hinweis zur Portweiterleitung. Bricht etwas ab, bleibt der alte Server unverändert.
+- **Port-Abgleich:** pro Server eine Soll-Liste offener Ports (aus dem ersten Inventar übernehmen, von Hand pflegbar); ein neuer lauschender Port auf `0.0.0.0`/öffentlich ergibt eine `warn`-Meldung „Neuer offener Port 8081 (nginx)“ mit „Erlauben“.
+
+**Abnahme:** Ein neuer Sim-Agent kommt nur mit Code und Einzeiler online; ein Gameserver zieht zwischen zwei Sim-Servern um und läuft danach am Ziel; ein neuer Port meldet sich. Sicherheitstests: Code nur einmal, abgelaufen, Brute-Force-Grenze, `install.sh` enthält kein Secret, Umzug nur mit Step-up, kein Pfad außerhalb der Spielordner.
+
+---
+
 ## Definition of Done (für jeden PR)
 - Code, Tests und Doku sind aktuell (`docs/` mitpflegen, wenn sich etwas ändert)
 - Keine `any`, keine auskommentierten Blöcke, keine TODOs ohne Issue

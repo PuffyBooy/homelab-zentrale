@@ -112,7 +112,7 @@ function SettingsForm({ game, tpl }: { game: GameSummary; tpl: TemplateInfo }): 
             setDraft((d) => ({ ...d, externalAddress: v }));
             clear('externalAddress');
           }}
-          placeholder="mc.hoebe.at"
+          placeholder="mc.example.org"
           hint="Leer: die Tailscale-IP des Servers. Für Freunde: DDNS-Name oder öffentliche IP."
           error={errors.externalAddress}
           maxLength={253}

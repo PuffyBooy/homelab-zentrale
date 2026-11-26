@@ -51,7 +51,7 @@ describe('setup', () => {
       method: 'POST',
       url: '/api/setup/start',
       headers: SAME_ORIGIN,
-      payload: { setupToken: SETUP_TOKEN, username: 'Alex', password: PASSWORD },
+      payload: { setupToken: SETUP_TOKEN, username: 'Admin', password: PASSWORD },
     });
     expect(start.statusCode).toBe(200);
     const s = setupStartResponseSchema.parse(start.json());
@@ -76,7 +76,7 @@ describe('setup', () => {
     for (const c of codes) expect(c).toMatch(/^[a-z2-7]{5}-[a-z2-7]{5}$/);
 
     const [user] = t.db.db.select().from(users).all();
-    expect(user?.username).toBe('alex');
+    expect(user?.username).toBe('admin');
     expect(user?.passwordHash).toMatch(/^\$argon2id\$v=19\$m=19456,t=2,p=1\$/);
     expect(user?.totpSecretEnc).toMatch(/^v1:/);
     expect(user?.totpSecretEnc).not.toContain(s.secret);
@@ -93,7 +93,13 @@ describe('setup', () => {
       url: '/api/auth/state',
       headers: authHeaders(sessionCookie(confirm)),
     });
-    expect(state.json()).toEqual({ setupRequired: false, authenticated: true, username: 'alex' });
+    expect(state.json()).toEqual({
+      setupRequired: false,
+      authenticated: true,
+      username: USERNAME,
+      modules: { github: true, homeassistant: true, games: true },
+      timeZone: 'Europe/Vienna',
+    });
     expect(actions(t)).toContain('setup.complete');
   });
 
@@ -150,7 +156,13 @@ describe('login', () => {
     const { secret } = await completeSetup(t);
     const res = await login(t, totpCode(secret, t.clock.t));
     expect(res.statusCode).toBe(200);
-    expect(res.json()).toEqual({ setupRequired: false, authenticated: true, username: 'alex' });
+    expect(res.json()).toEqual({
+      setupRequired: false,
+      authenticated: true,
+      username: USERNAME,
+      modules: { github: true, homeassistant: true, games: true },
+      timeZone: 'Europe/Vienna',
+    });
     const cookie = sessionCookie(res);
     const state = await t.app.inject({
       method: 'GET',
@@ -164,7 +176,7 @@ describe('login', () => {
   it('accepts the username case-insensitively', async () => {
     t = await makeApp();
     const { secret } = await completeSetup(t);
-    const res = await login(t, totpCode(secret, t.clock.t), { username: 'ALEX' });
+    const res = await login(t, totpCode(secret, t.clock.t), { username: 'ADMIN' });
     expect(res.statusCode).toBe(200);
   });
 

@@ -1,13 +1,13 @@
 import { mkdirSync } from 'node:fs';
 import { expect, test, type BrowserContext, type Page } from '@playwright/test';
-import { ORIGIN, signIn } from './helpers/auth.js';
+import { answerStepUp, login, ORIGIN, pageFetch, signIn, type Totp } from './helpers/auth.js';
 import { SimAgent } from './helpers/sim-agent.js';
 
 /**
  * M2 acceptance (docs/ROADMAP.md): enrollment through the dialog, two simulated agents
  * appear live (no reload), the detail page shows their values, a stopped agent turns
  * DOWN and raises a crit alert. The offline threshold is lowered to 30 s via PATCH so
- * the run stays short.
+ * the run stays short. "Token erzeugen" needs step-up (decision 2026-11-26).
  */
 
 const SHOTS = 'docs/screenshots/m2';
@@ -19,6 +19,7 @@ let context: BrowserContext;
 let page: Page;
 const agents: SimAgent[] = [];
 let navigations = 0;
+let totp: Totp;
 
 async function shot(name: string): Promise<void> {
   mkdirSync(SHOTS, { recursive: true });
@@ -74,6 +75,8 @@ function serverRow(name: string) {
 }
 
 test.beforeAll(async ({ browser }) => {
+  // signIn may wait for a fresh TOTP window (hooks have their own 30-s default).
+  test.setTimeout(120_000);
   // The core writes alert texts in Vienna time; the browser shows the same.
   context = await browser.newContext({
     baseURL: ORIGIN,
@@ -84,7 +87,7 @@ test.beforeAll(async ({ browser }) => {
   page.on('framenavigated', (f) => {
     if (f === page.mainFrame()) navigations++;
   });
-  await signIn(page);
+  totp = await signIn(page);
 });
 
 test.afterAll(async () => {
@@ -115,9 +118,11 @@ test('enroll through the dialog, agent appears live', async () => {
   await expect(dialog.getByText(/Name ungültig/)).toBeVisible();
 
   await dialog.getByLabel('Name').fill('heimserver');
-  await dialog.getByLabel('Ort').fill('Wien');
+  await dialog.getByLabel('Ort').fill('Zuhause');
   await themes('enroll-form');
   await dialog.getByRole('button', { name: 'Token erzeugen' }).click();
+  // Enrollment needs a fresh code; the dialog asks and the request is retried.
+  await answerStepUp(page, totp);
 
   await expect(dialog.getByText(/Warte auf heimserver/)).toBeVisible();
   await expect(dialog.getByText('Einzeiler (docker run)')).toBeVisible();
@@ -138,7 +143,7 @@ test('enroll through the dialog, agent appears live', async () => {
 
   const row = serverRow('heimserver');
   await expect(row).toBeVisible();
-  await expect(row).toContainText('Wien');
+  await expect(row).toContainText('Zuhause');
   await expect(row).toContainText('23%');
   await expect(page.getByRole('heading', { level: 1 })).not.toHaveText('Noch nichts verbunden.');
   expect(navigations).toBe(before);
@@ -177,6 +182,9 @@ test('second agent appears live, overview and list', async () => {
 });
 
 test('detail page shows values, cleanup preview and reboot confirmation', async () => {
+  // The enrollment left a step-up on this session; a new session must be asked again.
+  await pageFetch(page, 'POST', '/api/auth/logout', {});
+  await login(page, totp);
   await page.goto('/servers');
   await serverRow('heimserver').click();
   await expect(page).toHaveURL(/\/servers\/[A-Za-z0-9_-]+$/);

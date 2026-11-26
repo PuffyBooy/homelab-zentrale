@@ -42,7 +42,7 @@ const SERVERS: ServerInfo[] = [
   {
     id: 'home',
     name: 'heimserver',
-    where: 'Wien',
+    where: 'Zuhause',
     ip: '192.168.1.20',
     status: 'ok',
     cpu: 23,
@@ -63,7 +63,7 @@ const SERVERS: ServerInfo[] = [
   },
   {
     id: 'pi',
-    name: 'soundos-pi',
+    name: 'pi',
     where: 'Studio',
     ip: '192.168.1.42',
     status: 'ok',
@@ -87,13 +87,13 @@ function SurvivalServer(): ReactElement {
       name="survival"
       game="Minecraft Paper"
       version="1.21.4"
-      address="mc.hoebe.at"
+      address="mc.example.org"
       status="ok"
       players={[4, 20]}
       ram={72}
       ramDetail="5,8 / 8 GB"
       tps={19.8}
-      online={['Alex', 'Lukas', 'mia_07', 'Tobi']}
+      online={['Sam', 'Lukas', 'mia_07', 'Tobi']}
       host="oracle-a1"
     />
   );
@@ -104,7 +104,7 @@ function AlertDemo(): ReactElement {
     <>
       <Alert
         tone="crit"
-        title="sc-ball.at ist offline"
+        title="example.at ist offline"
         time="23:04"
         action={<Button size="sm">Ansehen</Button>}
       >
@@ -116,7 +116,7 @@ function AlertDemo(): ReactElement {
       <Alert tone="ok" title="Backup fertig" time="03:00">
         heimserver → oracle-a1, 12,4 GB, 6 Min.
       </Alert>
-      <Alert tone="info" title="Neuer Commit in soundos" time="21:12" floating>
+      <Alert tone="info" title="Neuer Commit in my-app" time="21:12" floating>
         „Lyrics-Sync für Bühne-Stil“ ist bereit zum Deploy.
       </Alert>
     </>
@@ -168,7 +168,7 @@ function CommitRowDemo(): ReactElement {
     >
       <CommitRow
         message="Lyrics-Sync für Bühne-Stil"
-        repo="soundos"
+        repo="my-app"
         hash="a3f9c21e"
         time="vor 2 Std"
         live
@@ -215,7 +215,7 @@ const DASHBOARD_SWITCH: ServerEntry[] = [
   { id: 'all', name: 'alle' },
   { id: 'home', name: 'heimserver' },
   { id: 'oci', name: 'oracle-a1', status: 'warn' },
-  { id: 'pi', name: 'soundos-pi' },
+  { id: 'pi', name: 'pi' },
   { id: 'vps', name: 'web-vps', status: 'crit' },
 ];
 
@@ -249,7 +249,7 @@ function DashboardDemo(): ReactElement {
         <div style={PAIR}>
           <SurvivalServer />
           <Tile title="Websites" icon="globe" count="3" flush>
-            <WebCheckRow url="sc-ball.at" status="ok" code={200} ms={312} sslDays={61} />
+            <WebCheckRow url="example.at" status="ok" code={200} ms={312} sslDays={61} />
             <WebCheckRow
               url="volontaers-alarm.app"
               status="warn"
@@ -257,16 +257,16 @@ function DashboardDemo(): ReactElement {
               ms={1240}
               sslDays={9}
             />
-            <WebCheckRow url="lernen.hoebe.at" status="crit" code={503} ms={null} sslDays={44} />
+            <WebCheckRow url="lernen.example.org" status="crit" code={503} ms={null} sslDays={44} />
           </Tile>
         </div>
         <div style={PAIR}>
           <Tile title="GitHub" icon="git" count="PuffyBooy" flush>
             <RepoRow
-              repo="soundos"
+              repo="my-app"
               commit="a3f9c21 Lyrics-Sync · vor 2 Std"
               ci="ok"
-              deployedTo="soundos-pi"
+              deployedTo="pi"
             />
             <RepoRow
               repo="novritsch-konfigurator"
@@ -410,10 +410,10 @@ function RepoRowDemo(): ReactElement {
   return (
     <div className="hz-tile hz-tile-flush" style={{ width: '100%' }}>
       <RepoRow
-        repo="PuffyBooy/soundos"
+        repo="PuffyBooy/my-app"
         commit="a3f9c21 Lyrics-Sync für Bühne-Stil · vor 2 Std"
         ci="ok"
-        deployedTo="soundos-pi"
+        deployedTo="pi"
       />
       <RepoRow
         repo="PuffyBooy/novritsch-konfigurator"
@@ -449,9 +449,9 @@ function ServerListDemo(): ReactElement {
 
 const SWITCH: ServerEntry[] = [
   { id: 'all', name: 'Alle', icon: 'cpu' },
-  { id: 'home', name: 'heimserver', where: 'Wien' },
+  { id: 'home', name: 'heimserver', where: 'Zuhause' },
   { id: 'oci', name: 'oracle-a1', icon: 'cloud', where: 'Frankfurt', status: 'warn' },
-  { id: 'pi', name: 'soundos-pi', where: 'Studio', status: 'off' },
+  { id: 'pi', name: 'pi', where: 'Studio', status: 'off' },
 ];
 
 function ServerSwitchDemo(): ReactElement {
@@ -482,7 +482,7 @@ function ServiceRowDemo(): ReactElement {
         actions={<Button size="sm" variant="ghost" icon="refresh" aria-label="Neu starten" />}
       />
       <ServiceRow
-        name="sc-ball.at"
+        name="example.at"
         icon="globe"
         host="extern · https"
         status="crit"
@@ -507,7 +507,7 @@ function ShareLinkDemo(): ReactElement {
       <ShareLink
         server="survival"
         user="Lukas"
-        url="https://zentrale.hoebe.at/g/k7Qm2xPa9"
+        url="https://zentrale.example.org/g/k7Qm2xPa9"
         expires="läuft ab in 14 Tagen"
         lastUsed="gestern 20:41"
         perms={[
@@ -559,7 +559,7 @@ function TerminalDemo(): ReactElement {
             kind: 'warn',
             text: "[WARN] Can't keep up! Is the server overloaded? Running 2140ms behind",
           },
-          { text: '[INFO] Alex joined the game' },
+          { text: '[INFO] Sam joined the game' },
           { kind: 'err', text: '[ERROR] Could not pass event PlayerMoveEvent to WorldGuard' },
         ]}
       />
@@ -635,7 +635,7 @@ function WebCheckRowDemo(): ReactElement {
   return (
     <div className="hz-tile hz-tile-flush" style={{ width: '100%' }}>
       <WebCheckRow
-        url="sc-ball.at"
+        url="example.at"
         host="WordPress · World4You"
         status="ok"
         code={200}
@@ -651,7 +651,7 @@ function WebCheckRowDemo(): ReactElement {
         sslDays={9}
       />
       <WebCheckRow
-        url="lernen.hoebe.at"
+        url="lernen.example.org"
         host="heimserver · docker"
         status="crit"
         code={503}
@@ -659,7 +659,13 @@ function WebCheckRowDemo(): ReactElement {
         sslDays={44}
         actions={<Button size="sm" variant="ghost" icon="terminal" aria-label="Logs" />}
       />
-      <WebCheckRow url="mc.hoebe.at" host="oracle-a1 · tcp 25565" status="ok" code="TCP" ms={28} />
+      <WebCheckRow
+        url="mc.example.org"
+        host="oracle-a1 · tcp 25565"
+        status="ok"
+        code="TCP"
+        ms={28}
+      />
     </div>
   );
 }

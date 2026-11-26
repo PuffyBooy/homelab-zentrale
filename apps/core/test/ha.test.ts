@@ -125,9 +125,7 @@ describe('ha connection and settings', () => {
   });
 
   it('builds the websocket URL from http/https and keeps a path prefix', () => {
-    expect(haWebSocketUrl('http://192.168.68.20:8123')).toBe(
-      'ws://192.168.68.20:8123/api/websocket',
-    );
+    expect(haWebSocketUrl('http://192.168.1.20:8123')).toBe('ws://192.168.1.20:8123/api/websocket');
     expect(haWebSocketUrl('https://ha.example.ts.net/')).toBe(
       'wss://ha.example.ts.net/api/websocket',
     );

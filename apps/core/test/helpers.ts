@@ -6,11 +6,14 @@ import type { FastifyInstance, LightMyRequestResponse } from 'fastify';
 import { buildApp, type AppDeps } from '../src/app.js';
 import { totpCode } from '../src/auth/totp.js';
 import { loadConfig } from '../src/config.js';
+import type { Modules } from '@hz/shared';
 import { openDatabase, type DbHandle } from '../src/db/index.js';
+import { writeSetting } from '../src/db/settings.js';
+import { MODULES_SETTING } from '../src/modules/service.js';
 
 export const KEY = Buffer.alloc(32, 1).toString('base64');
 export const SETUP_TOKEN = 'test-setup-token-0123456789abcdef';
-export const USERNAME = 'alex';
+export const USERNAME = 'admin';
 export const PASSWORD = 'correct horse battery staple';
 export const HOST = 'hz.test';
 /** Headers a same-origin browser request carries. */
@@ -46,6 +49,11 @@ export async function makeApp(
     githubFetch?: AppDeps['githubFetch'];
     haOptions?: AppDeps['haOptions'];
     consoleOptions?: AppDeps['consoleOptions'];
+    /**
+     * Optional modules. Tests default to all on (most suites test a module);
+     * `'fresh'` keeps the state of a fresh install (games on, github/ha off).
+     */
+    modules?: Partial<Modules> | 'fresh';
   } = {},
 ): Promise<TestApp> {
   const clock: TestClock = {
@@ -56,6 +64,10 @@ export async function makeApp(
   };
   const logs: string[] = [];
   const db = opts.db ?? openDatabase(':memory:');
+  if (opts.modules !== 'fresh') {
+    const current = { github: true, homeassistant: true, games: true, ...opts.modules };
+    writeSetting(db.db, MODULES_SETTING, current, clock.t);
+  }
   const config = loadConfig({
     HZ_SECRET_KEY: KEY,
     NODE_ENV: 'test',

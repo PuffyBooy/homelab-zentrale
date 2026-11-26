@@ -1,6 +1,7 @@
 import {
   okResponseSchema,
   wallDeviceCreateResponseSchema,
+  wallDeviceLinkResponseSchema,
   wallDeviceListResponseSchema,
   wallStateSchema,
   wallTokenSchema,
@@ -20,7 +21,10 @@ export function fetchWallState(signal?: AbortSignal): Promise<WallState> {
   return api('/api/wall/state', { schema: wallStateSchema, signal, quiet401: true, stepUp: false });
 }
 
-/** Swaps the device token from the link for the httpOnly `hz_wall` cookie. */
+/**
+ * Swaps the one-time device token from the link for the httpOnly `hz_wall` cookie.
+ * A repeated token with a valid cookie of the same device is also 200 (kiosk reload).
+ */
 export async function startWallSession(token: string): Promise<void> {
   await api('/api/wall/session', {
     method: 'POST',
@@ -54,6 +58,15 @@ export function createWallDevice(name: string): Promise<WallDeviceCreated> {
     method: 'POST',
     body: { name: name.trim() },
     schema: wallDeviceCreateResponseSchema,
+  });
+}
+
+/** Fresh one-time link (step-up via api()); the old link and the old cookie stop working. */
+export function relinkWallDevice(id: string): Promise<WallDeviceCreated> {
+  return api(`/api/settings/wall-devices/${encodeURIComponent(id)}/link`, {
+    method: 'POST',
+    body: {},
+    schema: wallDeviceLinkResponseSchema,
   });
 }
 

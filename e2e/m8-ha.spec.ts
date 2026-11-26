@@ -1,6 +1,13 @@
 import { mkdirSync } from 'node:fs';
 import { expect, test, type BrowserContext, type Locator, type Page } from '@playwright/test';
-import { answerStepUp, ORIGIN, signIn, type Totp } from './helpers/auth.js';
+import {
+  answerStepUp,
+  answerStepUpIfAsked,
+  enrollServer,
+  ORIGIN,
+  signIn,
+  type Totp,
+} from './helpers/auth.js';
 import { FAKE_HA_TOKEN, FakeHa } from './helpers/fake-ha.js';
 import { SimAgent } from './helpers/sim-agent.js';
 
@@ -9,7 +16,8 @@ import { SimAgent } from './helpers/sim-agent.js';
  * (e2e/helpers/fake-ha.ts, HA WebSocket API on 127.0.0.1): connect in the settings,
  * pick rooms and entities, switch a light in the UI (HA gets call_service and reports
  * state_changed back), a sensor changes live, the door opener asks for confirmation
- * and step-up, and an HA outage shows "Home Assistant nicht erreichbar".
+ * and step-up, and an HA outage shows "Home Assistant nicht erreichbar". A fresh install
+ * has the Home Assistant module off: it is switched on in Einstellungen → Module first.
  */
 
 const SHOTS = 'docs/screenshots/m8';
@@ -77,6 +85,8 @@ const metric = (entity: string) =>
   page.locator(`[data-testid="ha-metric"][data-entity="${entity}"]`);
 
 test.beforeAll(async ({ browser }) => {
+  // signIn and the step-up for the enrollment may each wait for a fresh TOTP window.
+  test.setTimeout(120_000);
   await ha.start();
   context = await browser.newContext({
     baseURL: ORIGIN,
@@ -87,10 +97,7 @@ test.beforeAll(async ({ browser }) => {
   page = await context.newPage();
   totp = await signIn(page);
   // The overview needs a server; the HA tile sits below the server list.
-  const enroll = await apiCall<{ token: string }>('POST', '/api/servers/enroll', {
-    name: AGENT_NAME,
-    location: 'Wien',
-  });
+  const enroll = await enrollServer(page, totp, AGENT_NAME, 'Zuhause');
   expect(enroll.status).toBe(200);
   agent = new SimAgent({ url: AGENT_URL, name: AGENT_NAME, token: enroll.data.token });
   await agent.connect();
@@ -102,11 +109,38 @@ test.afterAll(async () => {
   await ha.stop();
 });
 
+test('the Home Assistant module is switched on in the settings', async () => {
+  const nav = page.getByRole('navigation', { name: 'Hauptnavigation' });
+  const modules = await apiCall<{ homeassistant: boolean }>('GET', '/api/settings/modules');
+  test.skip(modules.data.homeassistant, 'module already on (reused core)');
+  await page.goto('/');
+  await expect(nav).toBeVisible();
+  await expect(nav.getByRole('link', { name: /Wohnung/ })).toHaveCount(0);
+  await page.goto('/home');
+  await expect(page.getByTestId('module-off')).toContainText('Modul ausgeschaltet.');
+  await page.getByRole('link', { name: 'Einstellungen → Module' }).click();
+  await expect(page).toHaveURL(`${ORIGIN}/settings#module`);
+  const sw = page.getByTestId('modules').getByRole('switch', { name: 'Home Assistant' });
+  await expect(sw).toHaveAttribute('aria-checked', 'false');
+  await sw.click();
+  // Switching HA on needs step-up (still active from the enrollment, then not asked).
+  await answerStepUpIfAsked(page, totp);
+  await expect(sw).toHaveAttribute('aria-checked', 'true');
+  // The nav follows without a reload.
+  await expect(nav.getByRole('link', { name: /Wohnung/ })).toBeVisible();
+});
+
 test('Wohnung without Home Assistant points to the settings', async () => {
   await page.goto('/');
-  await expect(page.getByRole('navigation', { name: 'Hauptnavigation' })).toBeVisible();
+  const nav = page.getByRole('navigation', { name: 'Hauptnavigation' });
+  await expect(nav).toBeVisible();
   await expect(page.locator('.app-ha-overview')).toHaveCount(0);
-  await page.keyboard.press('7');
+  // Key caps follow the visible items (GitHub may be off).
+  const key = await nav
+    .getByRole('link', { name: /Wohnung/ })
+    .locator('.hz-nav-key')
+    .textContent();
+  await page.keyboard.press(key?.trim() ?? '7');
   await expect(page).toHaveURL(`${ORIGIN}/home`);
   await expect(page.locator('.hz-page-title')).toHaveText('Home Assistant nicht verbunden.');
   await page.getByRole('link', { name: 'Home Assistant in den Einstellungen verbinden' }).click();
@@ -120,7 +154,8 @@ test('connect Home Assistant in the settings (step-up), token stays hidden', asy
   await tile.getByLabel('Token', { exact: true }).fill(FAKE_HA_TOKEN);
   await tile.getByLabel('Strompreis (€/kWh)').fill('0,25');
   await tile.getByRole('button', { name: 'Speichern' }).click();
-  await answerStepUp(page, totp);
+  // Step-up may still be active from the enrollment and the module switch.
+  await answerStepUpIfAsked(page, totp);
   await expect(tile.getByText('Token gesetzt', { exact: true })).toBeVisible();
   await expect(tile.getByLabel('Neuer Token')).toHaveValue('');
   await expect(tile.locator('.hz-tile-head .hz-status-label')).toHaveText('verbunden', {

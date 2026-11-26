@@ -1,4 +1,4 @@
-import { eq } from 'drizzle-orm';
+import { eq, inArray } from 'drizzle-orm';
 import type { FastifyBaseLogger } from 'fastify';
 import { generateRequestDetails } from 'web-push';
 import type { PushPayload, PushSubscriptionJson } from '@hz/shared';
@@ -119,6 +119,22 @@ export class PushService {
     return r.changes > 0;
   }
 
+  deviceIds(): string[] {
+    return this.deps.db
+      .select({ id: pushSubscriptions.id })
+      .from(pushSubscriptions)
+      .all()
+      .map((r) => r.id);
+  }
+
+  /** Sends to the listed devices that still exist. Never throws. */
+  sendTo(deviceIds: readonly string[], payload: PushPayload): Promise<number> {
+    const p = this.deliverAll(payload, deviceIds);
+    this.pending.add(p);
+    void p.finally(() => this.pending.delete(p));
+    return p;
+  }
+
   /** Sends to every device. Resolves with the number of accepted deliveries; never throws. */
   sendAll(payload: PushPayload): Promise<number> {
     const p = this.deliverAll(payload);
@@ -132,8 +148,17 @@ export class PushService {
     while (this.pending.size > 0) await Promise.allSettled([...this.pending]);
   }
 
-  private async deliverAll(payload: PushPayload): Promise<number> {
-    const rows = this.deps.db.select().from(pushSubscriptions).all();
+  private async deliverAll(payload: PushPayload, only?: readonly string[]): Promise<number> {
+    const rows =
+      only === undefined
+        ? this.deps.db.select().from(pushSubscriptions).all()
+        : only.length === 0
+          ? []
+          : this.deps.db
+              .select()
+              .from(pushSubscriptions)
+              .where(inArray(pushSubscriptions.id, [...only]))
+              .all();
     const results = await Promise.all(rows.map((r) => this.deliver(r, payload)));
     return results.filter(Boolean).length;
   }

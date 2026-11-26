@@ -1,13 +1,12 @@
-import { TIME_ZONE } from './format.js';
+import { zonedFormat } from './timezone.js';
 
 /**
- * Wall-clock helpers for Europe/Vienna (daily RDAP at 04:00, weekly report on
- * Sunday 19:00, quiet hours). Pure functions of a UTC timestamp, so tests can
- * use a fake clock across DST changes.
+ * Wall-clock helpers in the configured time zone (HZ_TIMEZONE, default
+ * Europe/Vienna): daily RDAP at 04:00, weekly report on Sunday 19:00, quiet hours.
+ * Pure functions of a UTC timestamp, so tests can use a fake clock across DST changes.
  */
 
-const partsFmt = new Intl.DateTimeFormat('en-US', {
-  timeZone: TIME_ZONE,
+const partsFmt = zonedFormat('en-US', {
   year: 'numeric',
   month: 'numeric',
   day: 'numeric',
@@ -28,9 +27,9 @@ export interface WallTime {
   weekday: number;
 }
 
-export function viennaTime(ms: number): WallTime {
+export function localTime(ms: number): WallTime {
   const p: Record<string, number> = {};
-  for (const part of partsFmt.formatToParts(ms)) {
+  for (const part of partsFmt().formatToParts(ms)) {
     if (part.type !== 'literal') p[part.type] = Number(part.value);
   }
   const year = p.year ?? 1970;
@@ -47,15 +46,15 @@ export function viennaTime(ms: number): WallTime {
   };
 }
 
-/** Offset of Vienna to UTC at this instant (ms, +1 h or +2 h). */
+/** Offset of the local zone to UTC at this instant (ms). */
 function offsetAt(ms: number): number {
-  const w = viennaTime(ms);
+  const w = localTime(ms);
   const asUtc = Date.UTC(w.year, w.month - 1, w.day, w.hour, w.minute, w.second);
   return asUtc - (ms - (((ms % 1000) + 1000) % 1000));
 }
 
-/** UTC timestamp of a Vienna wall time (date fields may overflow, e.g. day 32). */
-export function fromVienna(
+/** UTC timestamp of a local wall time (date fields may overflow, e.g. day 32). */
+export function fromLocal(
   year: number,
   month: number,
   day: number,
@@ -67,9 +66,9 @@ export function fromVienna(
   return guess - offsetAt(first);
 }
 
-/** Minutes since local midnight in Vienna. */
-export function viennaMinutes(ms: number): number {
-  const w = viennaTime(ms);
+/** Minutes since local midnight. */
+export function localMinutes(ms: number): number {
+  const w = localTime(ms);
   return w.hour * 60 + w.minute;
 }
 
@@ -80,13 +79,13 @@ export interface WallClockRule {
   weekday?: number;
 }
 
-/** First instant strictly after `from` that matches the rule in Vienna time. */
+/** First instant strictly after `from` that matches the rule in local time. */
 export function nextWallClock(from: number, rule: WallClockRule): number {
-  const w = viennaTime(from);
+  const w = localTime(from);
   for (let i = 0; i <= 8; i++) {
     const date = new Date(Date.UTC(w.year, w.month - 1, w.day + i));
     if (rule.weekday !== undefined && date.getUTCDay() !== rule.weekday) continue;
-    const at = fromVienna(
+    const at = fromLocal(
       date.getUTCFullYear(),
       date.getUTCMonth() + 1,
       date.getUTCDate(),
@@ -105,13 +104,13 @@ export function hhmmToMinutes(v: string): number {
 }
 
 /**
- * Whether `ms` falls in the quiet window [start, end) in Vienna time. The
+ * Whether `ms` falls in the quiet window [start, end) in local time. The
  * window may wrap midnight (23:00-07:00). start == end means no quiet hours.
  */
 export function inQuietHours(ms: number, start: string, end: string): boolean {
   const s = hhmmToMinutes(start);
   const e = hhmmToMinutes(end);
   if (s === e) return false;
-  const m = viennaMinutes(ms);
+  const m = localMinutes(ms);
   return s < e ? m >= s && m < e : m >= s || m < e;
 }

@@ -46,10 +46,10 @@ async function setup(opts: { token?: boolean } = { token: true }): Promise<Githu
 }
 
 async function blog(s: GithubSetup, opts: { private?: boolean } = {}) {
-  s.gh.addRepo('alex/blog', opts);
-  const sha = s.gh.push('alex/blog', 'Initial commit');
+  s.gh.addRepo('admin/blog', opts);
+  const sha = s.gh.push('admin/blog', 'Initial commit');
   s.gh.ci(sha, 'success');
-  const repo = await addRepo(s, 'alex/blog');
+  const repo = await addRepo(s, 'admin/blog');
   return { repo, sha };
 }
 
@@ -68,7 +68,7 @@ describe('token and settings', () => {
     });
     await setToken(s);
     const set = githubSettingsSchema.parse((await get(s, '/api/github/settings')).json());
-    expect(set).toMatchObject({ tokenSet: true, login: 'alex-hz', error: null });
+    expect(set).toMatchObject({ tokenSet: true, login: 'admin-hz', error: null });
     expect(set.rateRemaining).toBeGreaterThan(0);
     // The poll after setting the token ran.
     expect(set.lastPollAt).not.toBeNull();
@@ -130,14 +130,14 @@ describe('token and settings', () => {
 describe('repos', () => {
   it('lists available repos, tracks and untracks a repo', async () => {
     const s = await setup();
-    s.gh.addRepo('alex/blog');
-    s.gh.addRepo('alex/infra', { private: true });
+    s.gh.addRepo('admin/blog');
+    s.gh.addRepo('admin/infra', { private: true });
     const { repo, sha } = await blog(s);
     expect(repo).toMatchObject({
-      fullName: 'alex/blog',
+      fullName: 'admin/blog',
       private: false,
       defaultBranch: 'main',
-      htmlUrl: 'https://github.com/alex/blog',
+      htmlUrl: 'https://github.com/admin/blog',
       ci: 'ok',
       targets: [],
     });
@@ -147,27 +147,27 @@ describe('repos', () => {
       (await get(s, '/api/github/available')).json(),
     );
     expect(avail.repos).toEqual([
-      { fullName: 'alex/blog', private: false, tracked: true },
-      { fullName: 'alex/infra', private: true, tracked: false },
+      { fullName: 'admin/blog', private: false, tracked: true },
+      { fullName: 'admin/infra', private: true, tracked: false },
     ]);
 
     const dup = await s.t.app.inject({
       method: 'POST',
       url: '/api/github/repos',
       headers: s.headers,
-      payload: { fullName: 'Alex/Blog' },
+      payload: { fullName: 'admin/Blog' },
     });
     expect(dup.statusCode).toBe(409);
     const missing = await s.t.app.inject({
       method: 'POST',
       url: '/api/github/repos',
       headers: s.headers,
-      payload: { fullName: 'alex/nope' },
+      payload: { fullName: 'admin/nope' },
     });
     expect(missing.statusCode).toBe(404);
 
     const list = repoListResponseSchema.parse((await get(s, '/api/github/repos')).json());
-    expect(list.repos.map((r) => r.fullName)).toEqual(['alex/blog']);
+    expect(list.repos.map((r) => r.fullName)).toEqual(['admin/blog']);
 
     const del = await s.t.app.inject({
       method: 'DELETE',
@@ -193,7 +193,7 @@ describe('repos', () => {
       method: 'POST',
       url: '/api/github/repos',
       headers: s.headers,
-      payload: { fullName: 'alex/blog' },
+      payload: { fullName: 'admin/blog' },
     });
     expect(res.statusCode).toBe(409);
   });
@@ -210,7 +210,7 @@ describe('repos', () => {
   it('lists commits of other branches live and 30 at most', async () => {
     const s = await setup();
     const { repo } = await blog(s);
-    for (let i = 0; i < 35; i++) s.gh.push('alex/blog', `feature ${i}`, 'dev');
+    for (let i = 0; i < 35; i++) s.gh.push('admin/blog', `feature ${i}`, 'dev');
     const res = await get(s, `/api/github/repos/${repo.id}/commits?branch=dev`);
     expect(res.statusCode).toBe(200);
     const commits = commitListResponseSchema.parse(res.json()).commits;
@@ -266,7 +266,7 @@ describe('repos', () => {
     browser.send({ type: 'subscribe', topics: ['github'] });
     const snap = await browser.next((m) => m.type === 'snapshot');
     expect((snap.data as { id: string }[]).map((r) => r.id)).toEqual([repo.id]);
-    const sha = s.gh.push('alex/blog', 'Live update');
+    const sha = s.gh.push('admin/blog', 'Live update');
     await pollOnce(s);
     const upd = await browser.next((m) => m.type === 'update' && m.topic === 'github');
     expect((upd.upsert as { lastCommit: { sha: string } }[])[0]?.lastCommit.sha).toBe(sha);
@@ -360,7 +360,7 @@ describe('deploy targets', () => {
     await deployDone(s, tg.id);
     expect(s.rpcs.find((r) => r.action === 'deploy.run')?.params).toEqual({
       dir: '/opt/homelab/apps/blog',
-      repoUrl: 'git@github.com:alex/blog.git',
+      repoUrl: 'git@github.com:admin/blog.git',
       sha: repo.lastCommit?.sha,
       method: 'compose',
       keyName: `deploy-${tg.id}`,
@@ -440,7 +440,7 @@ describe('deploys', () => {
     await deployDone(s, tg.id);
     expect(s.t.app.hzCore.alerts.active(`deploy:${tg.id}:failed`)).toBeNull();
     const ok = s.t.app.hzCore.alerts.list({ state: 'all', limit: 1, level: 'ok' })[0];
-    expect(ok?.title).toBe(`alex/blog auf heimserver deployt (${sha.slice(0, 7)})`);
+    expect(ok?.title).toBe(`admin/blog auf heimserver deployt (${sha.slice(0, 7)})`);
     const actions = s.t.db.db
       .select()
       .from(auditLog)
@@ -467,7 +467,7 @@ describe('deploys', () => {
         {
           kind: 'refuse',
           code: 'not_allowed',
-          message: 'origin https://github.com/alex/other.git does not match',
+          message: 'origin https://github.com/admin/other.git does not match',
         },
         'Zielordner gehört zu einem anderen Repo',
       ],
@@ -571,9 +571,9 @@ describe('deploys', () => {
     const now = first.clock.t;
     first.db.sqlite.exec(`
       INSERT INTO servers (id, name, location, thresholds_json, allow_terminal, created_at)
-        VALUES ('srv00001', 'heimserver', 'Wien', '{}', 0, ${now});
+        VALUES ('srv00001', 'heimserver', 'Zuhause', '{}', 0, ${now});
       INSERT INTO github_repos (id, full_name, private, default_branch, ci_status, created_at)
-        VALUES ('repo0001', 'alex/blog', 0, 'main', 'ok', ${now});
+        VALUES ('repo0001', 'admin/blog', 0, 'main', 'ok', ${now});
       INSERT INTO deploy_targets (id, repo_id, server_id, path, branch, method, auto_deploy, created_at, updated_at)
         VALUES ('tgt00001', 'repo0001', 'srv00001', '/opt/homelab/apps/blog', 'main', 'compose', 0, ${now}, ${now});
       INSERT INTO deploys (id, target_id, sha, status, triggered_by, started_at)

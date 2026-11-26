@@ -4,6 +4,7 @@ import type { FastifyBaseLogger } from 'fastify';
 import type { z } from 'zod';
 import {
   backupDoneDataSchema,
+  gameBackupsPurgeDataSchema,
   gameStatusDataSchema,
   homelabPathSchema,
   rconDataSchema,
@@ -18,6 +19,7 @@ import {
   type gameCreateRequestSchema,
   type gameEventSchema,
   type gameUpdateRequestSchema,
+  type GamePortsUpdateResponse,
   type gameTemplateListResponseSchema,
 } from '@hz/shared';
 import {
@@ -29,12 +31,14 @@ import {
 } from '../agents/hub.js';
 import type { AlertService } from '../alerts/service.js';
 import { sanitizeReason } from '../checks/service.js';
+import { nextWallClock } from '../calendar.js';
 import type { Clock } from '../clock.js';
 import { randomToken, type SecretBox } from '../crypto.js';
 import { writeAudit } from '../db/audit.js';
 import type { Db } from '../db/index.js';
 import {
   containers,
+  deletedGameBackups,
   gameBackups,
   gameServers,
   serverState,
@@ -77,6 +81,10 @@ export type TemplateInfo = z.infer<typeof gameTemplateListResponseSchema>['templ
 export const GAMES_ROOT = '/opt/homelab/games/';
 export const BACKUPS_ROOT = '/opt/homelab/backups/';
 export const BACKUP_KEEP = 7;
+/** Backups of a deleted game server are removed this long after the deletion. */
+export const DELETED_BACKUP_DAYS = 30;
+const DAY_MS = 24 * 60 * 60_000;
+const PURGE_TIMEOUT_MS = 2 * 60_000;
 /** Setup: after compose up, the game must answer within this time (core clock). */
 export const SETUP_TIMEOUT_MS = 10 * 60_000;
 export const SETUP_POLL_MS = 5_000;
@@ -228,6 +236,17 @@ export class GameService {
     this.templates = deps.templates;
   }
 
+  /** Module switch (settings/modules): off pauses setup/status/auto-stop/purge jobs. */
+  private active = true;
+
+  setEnabled(on: boolean): void {
+    this.active = on;
+  }
+
+  get enabled(): boolean {
+    return this.active;
+  }
+
   setPublisher(p: GamePublisher): void {
     this.publisher = p;
   }
@@ -292,6 +311,11 @@ export class GameService {
     s.every('games.setup', SETUP_POLL_MS, () => this.setupTick());
     s.every('games.status', STATUS_POLL_MS, () => this.statusTick());
     s.every('games.autostop', AUTOSTOP_CHECK_MS, () => this.autoStopTick());
+    s.at(
+      'games.purgeDeletedBackups',
+      (from) => nextWallClock(from, { hour: 5, minute: 0 }),
+      () => this.purgeDeletedBackups(),
+    );
     for (const r of this.rows()) {
       const sum = this.summary(r.id);
       if (sum) this.lastSummary.set(r.id, { json: JSON.stringify(sum), serverId: sum.serverId });
@@ -886,6 +910,7 @@ export class GameService {
 
   /** Every 5 s: games that wait for their first answer after setup. */
   async setupTick(): Promise<void> {
+    if (!this.active) return;
     const now = this.deps.now();
     await Promise.all(
       [...this.waiting].map(async ([id, since]) => {
@@ -916,6 +941,7 @@ export class GameService {
 
   /** Every 30 s: players, TPS, version of running games. */
   async statusTick(): Promise<void> {
+    if (!this.active) return;
     const rows = this.rows().filter(
       (r) =>
         (r.phase === 'running' || r.phase === 'stopped') &&
@@ -951,6 +977,7 @@ export class GameService {
 
   /** Every minute: stop running games that had no players for autoStopMinutes. */
   async autoStopTick(): Promise<void> {
+    if (!this.active) return;
     const now = this.deps.now();
     const due = this.rows().filter(
       (r) =>
@@ -1317,6 +1344,109 @@ export class GameService {
     return this.summary(id) as GameSummary;
   }
 
+  // ---- ports ------------------------------------------------------------------------------
+
+  /**
+   * Changes host ports after setup (decision 2026-11-26). Same rules as on create:
+   * 1024–65535 incl. the range of `count`, no overlap between the game's own ports,
+   * no conflict with other games, containers or listening ports of the server
+   * (409 conflict). The game's own current ports and its RCON port do not count as
+   * used, so ports can be swapped; the RCON port itself never moves. Rewrites
+   * compose.yml/.env and recreates a running game (compose up).
+   */
+  async changePorts(
+    id: string,
+    requested: Record<string, number>,
+  ): Promise<Omit<GamePortsUpdateResponse, 'game'> & { game: GameSummary }> {
+    const row = this.requireRow(id);
+    const l = this.templates.get(row.templateId);
+    if (!l) throw new HttpError(409, 'conflict');
+    const t = l.template;
+    const stored = storedOf(row);
+    const names = new Set(t.ports.map((p) => p.name));
+    for (const k of Object.keys(requested)) {
+      if (!names.has(k)) throw new HttpError(400, 'invalid_input');
+    }
+    const current = new Map(stored.ports.map((p) => [p.name, p]));
+    const used = this.usedPorts(row.serverId, id);
+    // The game's own current bindings are in the agent's listening ports: free them.
+    for (const p of stored.ports) {
+      for (const proto of p.protocol === 'tcp+udp' ? (['tcp', 'udp'] as const) : [p.protocol]) {
+        for (let i = 0; i < p.count; i += 1) used[proto].delete(p.port + i);
+      }
+    }
+    const own: UsedPorts = { tcp: new Set(), udp: new Set() };
+    if (row.rconPort !== null) own.tcp.add(row.rconPort);
+    const next: HostPort[] = [];
+    const changed: GamePortsUpdateResponse['changed'] = [];
+    for (const p of t.ports) {
+      const prev = current.get(p.name);
+      const want = requested[p.name] ?? prev?.port;
+      if (want === undefined) throw new HttpError(409, 'conflict');
+      const hp = { port: want, protocol: p.protocol, count: p.count };
+      if (want < 1024 || want + p.count - 1 > 65535) throw new HttpError(400, 'invalid_input');
+      if (!isFree(own, hp)) throw new HttpError(400, 'invalid_input');
+      if (want !== prev?.port && !isFree(used, hp)) throw new HttpError(409, 'conflict');
+      markUsed(own, hp);
+      next.push({ name: p.name, port: want, protocol: p.protocol, count: p.count, local: p.local });
+      if (prev && prev.port !== want) {
+        changed.push({
+          name: p.name,
+          protocol: p.protocol,
+          count: p.count,
+          from: prev.port,
+          to: want,
+          local: p.local,
+        });
+      }
+    }
+    const result = (game: GameSummary) => ({
+      game,
+      ports: next.map((p) => ({
+        name: p.name,
+        port: p.port,
+        protocol: p.protocol,
+        count: p.count,
+        local: p.local ?? false,
+      })),
+      changed,
+      forwardingHint: forwardingHint(changed),
+    });
+    if (changed.length === 0) return result(this.summary(id) as GameSummary);
+
+    const values = { values: stored.values, secrets: this.secretValues(row) };
+    const files = this.render(l, {
+      name: row.name,
+      ports: next,
+      rconPort: row.rconPort,
+      values,
+      rconPassword: this.rconPassword(row),
+    });
+    this.lock(row, 'Ports werden geändert');
+    const dir = gameDirOf(row.name);
+    try {
+      await this.deps.hub.call(
+        row.serverId,
+        'compose.write',
+        { dir, files: { 'compose.yml': files.compose, '.env': files.env } },
+        { timeoutMs: WRITE_TIMEOUT_MS },
+      );
+      this.deps.db
+        .update(gameServers)
+        .set({ portsJson: JSON.stringify(next), updatedAt: this.deps.now() })
+        .where(eq(gameServers.id, id))
+        .run();
+      if (row.phase === 'running') {
+        for (const c of this.containerIds(row)) this.deps.setIntent(c, 'restart', INTENT_TTL_MS);
+        await this.deps.hub.call(row.serverId, 'compose.up', { dir }, { timeoutMs: UP_TIMEOUT_MS });
+        this.setRunState(id, 'running');
+      }
+    } finally {
+      this.unlock(id);
+    }
+    return result(this.summary(id) as GameSummary);
+  }
+
   // ---- delete ---------------------------------------------------------------------------
 
   /** Backup first (a missing world folder is fine), then game.remove, then the row. */
@@ -1346,10 +1476,95 @@ export class GameService {
       throw err;
     }
     this.deps.db.delete(gameServers).where(eq(gameServers.id, id)).run();
+    // The backups stay on the server; they are purged 30 days later (purgeDeletedBackups).
+    this.deps.db
+      .insert(deletedGameBackups)
+      .values({
+        id: randomToken(12),
+        serverId: row.serverId,
+        gameId: row.id,
+        gameName: row.name,
+        deletedAt: this.deps.now(),
+        lastAttemptAt: null,
+        lastError: null,
+      })
+      .run();
     this.cleanup(id);
     this.deps.alerts.resolveAllWithPrefix(`game:${id}:`);
     this.emit(id, true);
     return row;
+  }
+
+  // ---- backups of deleted games (decision 2026-11-26) -------------------------------------
+
+  /** Pending purges, oldest first (tests, diagnostics). */
+  deletedBackups() {
+    return this.deps.db
+      .select()
+      .from(deletedGameBackups)
+      .orderBy(asc(deletedGameBackups.deletedAt))
+      .all();
+  }
+
+  /**
+   * Daily: asks the agent of every server with deleted games to remove their
+   * backups older than 30 days (game.backups.purge). The record is dropped once
+   * the agent reported success and the deletion is 30 days old (then every backup
+   * of that game is older than 30 days and gone). Offline agent or an error: the
+   * next day tries again. If a new game with the same folder name exists on the
+   * server, the backup folder belongs to it now: the record is dropped unpurged.
+   */
+  async purgeDeletedBackups(): Promise<void> {
+    if (!this.active) return;
+    const now = this.deps.now();
+    for (const r of this.deletedBackups()) {
+      const reused = this.deps.db
+        .select({ id: gameServers.id })
+        .from(gameServers)
+        .where(and(eq(gameServers.serverId, r.serverId), eq(gameServers.name, r.gameName)))
+        .get();
+      if (reused || !NAME_RE.test(r.gameName)) {
+        this.deps.db.delete(deletedGameBackups).where(eq(deletedGameBackups.id, r.id)).run();
+        continue;
+      }
+      if (!this.deps.hub.isConnected(r.serverId)) continue;
+      let removed: number;
+      try {
+        const data = await this.deps.hub.call(
+          r.serverId,
+          'game.backups.purge',
+          { gameId: r.gameName, olderThanDays: DELETED_BACKUP_DAYS },
+          { timeoutMs: PURGE_TIMEOUT_MS },
+        );
+        const parsed = gameBackupsPurgeDataSchema.safeParse(data);
+        if (!parsed.success) throw new RpcError('failed', 'invalid purge result');
+        removed = parsed.data.removed;
+      } catch (err) {
+        this.deps.db
+          .update(deletedGameBackups)
+          .set({ lastAttemptAt: now, lastError: err instanceof RpcError ? err.code : 'failed' })
+          .where(eq(deletedGameBackups.id, r.id))
+          .run();
+        continue;
+      }
+      if (removed > 0) {
+        writeAudit(this.deps.db, now, {
+          actor: 'system',
+          action: 'game.backups_purged',
+          target: r.gameId,
+          details: { name: r.gameName, serverId: r.serverId, removed },
+        });
+      }
+      if (now - r.deletedAt >= DELETED_BACKUP_DAYS * DAY_MS) {
+        this.deps.db.delete(deletedGameBackups).where(eq(deletedGameBackups.id, r.id)).run();
+      } else {
+        this.deps.db
+          .update(deletedGameBackups)
+          .set({ lastAttemptAt: now, lastError: null })
+          .where(eq(deletedGameBackups.id, r.id))
+          .run();
+      }
+    }
   }
 
   /** Oldest first, for tests. */
@@ -1361,6 +1576,22 @@ export class GameService {
       .orderBy(asc(gameBackups.createdAt))
       .all();
   }
+}
+
+const PROTO_LABEL = { tcp: 'TCP', udp: 'UDP', 'tcp+udp': 'TCP+UDP' } as const;
+
+const portRange = (port: number, count: number): string =>
+  count > 1 ? `${port}–${port + count - 1}` : String(port);
+
+/** "Portweiterleitung anpassen: game 25565 → 25570 (TCP)"; null if no public port changed. */
+export function forwardingHint(changed: GamePortsUpdateResponse['changed']): string | null {
+  const pub = changed.filter((c) => !c.local);
+  if (pub.length === 0) return null;
+  const parts = pub.map(
+    (c) =>
+      `${c.name} ${portRange(c.from, c.count)} → ${portRange(c.to, c.count)} (${PROTO_LABEL[c.protocol]})`,
+  );
+  return `Portweiterleitung anpassen: ${parts.join(', ')}`;
 }
 
 function mergeUsed(a: UsedPorts, b: UsedPorts): UsedPorts {

@@ -39,7 +39,7 @@ export const pushTestResponseSchema = z.strictObject({
   sent: z.number().int(),
 });
 
-/** Notification settings (SPEC 9). Times in Europe/Vienna, "HH:MM". */
+/** Notification settings (SPEC 9). Times in the core time zone (HZ_TIMEZONE, default Europe/Vienna), "HH:MM". */
 const hhmm = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/);
 export const notifySettingsSchema = z.strictObject({
   quietStart: hhmm.default('23:00'),

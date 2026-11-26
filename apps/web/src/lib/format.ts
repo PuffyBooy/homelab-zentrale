@@ -1,11 +1,62 @@
 /** Austrian formats from the brand book: 23:04, 25.11.2026, "vor 4 Min". */
 
-const timeFmt = new Intl.DateTimeFormat('de-AT', { hour: '2-digit', minute: '2-digit' });
-const dateFmt = new Intl.DateTimeFormat('de-AT', {
-  day: '2-digit',
-  month: '2-digit',
-  year: 'numeric',
-});
+let zone: string | undefined;
+let timeFmt = makeTimeFmt(undefined);
+let dateFmt = makeDateFmt(undefined);
+let dayFmt = makeDayFmt(undefined);
+
+function makeTimeFmt(timeZone: string | undefined): Intl.DateTimeFormat {
+  return new Intl.DateTimeFormat('de-AT', {
+    hour: '2-digit',
+    minute: '2-digit',
+    ...(timeZone ? { timeZone } : {}),
+  });
+}
+
+function makeDateFmt(timeZone: string | undefined): Intl.DateTimeFormat {
+  return new Intl.DateTimeFormat('de-AT', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    ...(timeZone ? { timeZone } : {}),
+  });
+}
+
+/** Day and month as numbers, for "today?" and "24.11.". */
+function makeDayFmt(timeZone: string | undefined): Intl.DateTimeFormat {
+  return new Intl.DateTimeFormat('en-US', {
+    day: 'numeric',
+    month: 'numeric',
+    year: 'numeric',
+    ...(timeZone ? { timeZone } : {}),
+  });
+}
+
+function validZone(timeZone: string): boolean {
+  try {
+    new Intl.DateTimeFormat('de-AT', { timeZone });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Zone for all times shown (HZ_TIMEZONE of the core, from GET /api/auth/state).
+ * Undefined or unknown: the zone of the device.
+ */
+export function setDisplayTimeZone(timeZone: string | undefined): void {
+  const next = timeZone && validZone(timeZone) ? timeZone : undefined;
+  if (next === zone) return;
+  zone = next;
+  timeFmt = makeTimeFmt(zone);
+  dateFmt = makeDateFmt(zone);
+  dayFmt = makeDayFmt(zone);
+}
+
+export function displayTimeZone(): string | undefined {
+  return zone;
+}
 
 export function formatTime(d: Date): string {
   return timeFmt.format(d);
@@ -13,6 +64,16 @@ export function formatTime(d: Date): string {
 
 export function formatDateTime(d: Date): string {
   return `${dateFmt.format(d)} ${timeFmt.format(d)}`;
+}
+
+function dayParts(d: Date): { day: number; month: number; year: number } {
+  const out = { day: 0, month: 0, year: 0 };
+  for (const p of dayFmt.formatToParts(d)) {
+    if (p.type === 'day') out.day = Number(p.value);
+    else if (p.type === 'month') out.month = Number(p.value);
+    else if (p.type === 'year') out.year = Number(p.value);
+  }
+  return out;
 }
 
 export function formatAgo(d: Date, now: Date = new Date()): string {
@@ -151,13 +212,11 @@ export function formatUptimeShort(seconds: number | null | undefined): string {
 
 /** "23:04" for today, "24.11. 23:04" for other days. */
 export function formatWhen(d: Date, now: Date = new Date()): string {
-  const sameDay =
-    d.getFullYear() === now.getFullYear() &&
-    d.getMonth() === now.getMonth() &&
-    d.getDate() === now.getDate();
-  if (sameDay) return formatTime(d);
-  const day = String(d.getDate()).padStart(2, '0');
-  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const a = dayParts(d);
+  const b = dayParts(now);
+  if (a.day === b.day && a.month === b.month && a.year === b.year) return formatTime(d);
+  const day = String(a.day).padStart(2, '0');
+  const month = String(a.month).padStart(2, '0');
   return `${day}.${month}. ${formatTime(d)}`;
 }
 

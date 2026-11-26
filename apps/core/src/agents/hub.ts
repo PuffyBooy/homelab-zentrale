@@ -337,7 +337,8 @@ export class AgentHub {
           },
           'agent connected',
         );
-        this.deps.sink.onConnected(auth.server, msg, auth.kind === 'enrolled');
+        // A takeover of a revoked server is audited as server.reenrolled (tokens.ts).
+        this.deps.sink.onConnected(auth.server, msg, auth.kind === 'enrolled' && !auth.reenrolled);
         return;
       }
 

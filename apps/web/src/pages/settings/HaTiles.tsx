@@ -130,12 +130,12 @@ export function HaSettingsTile(): ReactElement {
     const patch: HaSettingsPatch = {};
     const u = url.trim();
     if (u !== (s.url ?? '')) {
-      if (!u) next.url = 'Adresse fehlt, z. B. http://192.168.68.20:8123.';
+      if (!u) next.url = 'Adresse fehlt, z. B. http://192.168.1.20:8123.';
       else if (!haUrlSchema.safeParse(u).success)
         next.url = 'Adresse mit http:// oder https://, ohne Benutzer, Query oder Anker.';
       else patch.url = u;
     } else if (!u && !s.url && token.trim()) {
-      next.url = 'Adresse fehlt, z. B. http://192.168.68.20:8123.';
+      next.url = 'Adresse fehlt, z. B. http://192.168.1.20:8123.';
     }
     const t = token.trim();
     if (t) {
@@ -212,7 +212,7 @@ export function HaSettingsTile(): ReactElement {
                 autoComplete="off"
                 spellCheck={false}
                 maxLength={200}
-                placeholder="http://192.168.68.20:8123"
+                placeholder="http://192.168.1.20:8123"
                 onChange={(e) => setUrl(e.target.value)}
                 hint="Im LAN oder im Tailnet. http reicht dort."
                 error={errors.url}

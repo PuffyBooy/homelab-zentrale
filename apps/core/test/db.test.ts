@@ -43,6 +43,8 @@ const tables = [
   schema.haEnergyMonths,
   schema.consoleSessions,
   schema.wallDevices,
+  schema.pushDigestItems,
+  schema.deletedGameBackups,
 ];
 
 describe('database', () => {
@@ -124,9 +126,48 @@ describe('database', () => {
     }
   });
 
+  it('migration 10: keeps configured modules on, existing wall devices keep their cookie', () => {
+    const file = join(emptyDir(), 'm10.sqlite');
+    const v9 = openDatabase(
+      file,
+      migrations.filter((m) => m.version <= 9),
+    );
+    v9.sqlite.exec(`
+      INSERT INTO settings VALUES ('github.token', '"enc"', 0);
+      INSERT INTO settings VALUES ('ha.settings', '{"url":"http://192.0.2.20:8123"}', 0);
+      INSERT INTO wall_devices VALUES ('d1', 'Tablet', 'hash-paired', 0, 5);
+      INSERT INTO wall_devices VALUES ('d2', 'Neu', 'hash-new', 0, NULL);`);
+    v9.close();
+    h = openDatabase(file);
+    const modules = h.sqlite
+      .prepare("SELECT value_json v FROM settings WHERE key = 'modules'")
+      .get() as {
+      v: string;
+    };
+    expect(JSON.parse(modules.v)).toEqual({ github: true, homeassistant: true, games: true });
+    expect(
+      h.sqlite
+        .prepare('SELECT id, token_hash, session_hash, paired_at FROM wall_devices ORDER BY id')
+        .all(),
+    ).toEqual([
+      { id: 'd1', token_hash: 'hash-paired', session_hash: 'hash-paired', paired_at: 5 },
+      { id: 'd2', token_hash: 'hash-new', session_hash: null, paired_at: null },
+    ]);
+  });
+
+  it('migration 10 on a fresh install: games on, github and homeassistant off', () => {
+    h = openDatabase(':memory:');
+    const modules = h.sqlite
+      .prepare("SELECT value_json v FROM settings WHERE key = 'modules'")
+      .get() as {
+      v: string;
+    };
+    expect(JSON.parse(modules.v)).toEqual({ github: false, homeassistant: false, games: true });
+  });
+
   it('cascades user deletion to sessions and recovery codes', () => {
     h = openDatabase(':memory:');
-    h.sqlite.exec(`INSERT INTO users VALUES (1,'alex','h','e',NULL,0,0);
+    h.sqlite.exec(`INSERT INTO users VALUES (1,'admin','h','e',NULL,0,0);
       INSERT INTO sessions VALUES ('s','th',1,0,0,1,'',NULL);
       INSERT INTO recovery_codes VALUES (1,1,'c',0,NULL);
       DELETE FROM users;`);

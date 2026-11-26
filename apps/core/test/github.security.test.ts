@@ -49,17 +49,17 @@ const MUTATING = new Set(['POST', 'PUT', 'DELETE', 'PATCH']);
 async function ready(opts: { captureLogs?: boolean; private?: boolean } = {}) {
   const s = await withGithub(clients, { token: true, ...opts });
   t = s.t;
-  s.gh.addRepo('alex/blog', { private: opts.private ?? false });
-  const sha = s.gh.push('alex/blog', 'Initial commit');
+  s.gh.addRepo('admin/blog', { private: opts.private ?? false });
+  const sha = s.gh.push('admin/blog', 'Initial commit');
   s.gh.ci(sha, 'success');
-  const repo = await addRepo(s, 'alex/blog');
+  const repo = await addRepo(s, 'admin/blog');
   const tg = await addTarget(s, repo.id);
   return { s, repo, tg, sha };
 }
 
 function payloadFor(url: string, s: GithubSetup): Record<string, unknown> {
   if (url.endsWith('/token')) return { token: OTHER_TOKEN };
-  if (url === '/api/github/repos') return { fullName: 'alex/other' };
+  if (url === '/api/github/repos') return { fullName: 'admin/other' };
   if (url.includes('/targets') && !url.includes('/deploy'))
     return { serverId: s.serverId, path: '/opt/homelab/apps/x', branch: 'main' };
   return {};
@@ -198,7 +198,7 @@ describe('github token never leaks', () => {
     await pollOnce(s);
     await call('GET', '/api/github/available');
     await call('GET', '/api/github/settings');
-    await call('POST', '/api/github/repos', { fullName: 'alex/blog2' });
+    await call('POST', '/api/github/repos', { fullName: 'admin/blog2' });
     await stepUp(s.t, s.secret, s.cookie);
     await call('PUT', '/api/github/token', { token: TOKEN });
 
@@ -235,18 +235,18 @@ describe('github input validation', () => {
     const ghBefore = s.gh.requests.length;
     for (const fullName of [
       '../etc',
-      'alex/../passwd',
-      'alex/..',
+      'admin/../passwd',
+      'admin/..',
       '-rf/blog',
-      'alex/blog.git',
-      'alex/.git',
-      'alex',
-      'alex/blog/extra',
-      'alex/bl og',
-      'alex/blog?x=1',
-      'alex/blog%2F..',
-      'alex/.hidden',
-      'alex/-rf',
+      'admin/blog.git',
+      'admin/.git',
+      'admin',
+      'admin/blog/extra',
+      'admin/bl og',
+      'admin/blog?x=1',
+      'admin/blog%2F..',
+      'admin/.hidden',
+      'admin/-rf',
       'a'.repeat(40) + '/x',
       '',
     ]) {
@@ -320,7 +320,7 @@ describe('github input validation', () => {
 
   it('refuses to deploy a sha that is not on the target branch', async () => {
     const { s, tg } = await ready();
-    const foreign = s.gh.push('alex/blog', 'On another branch', 'evil');
+    const foreign = s.gh.push('admin/blog', 'On another branch', 'evil');
     s.gh.ci(foreign, 'success', { branch: 'evil' });
     const res = await deployRequest(s, tg.id, { sha: foreign });
     expect(res.statusCode).toBe(409);

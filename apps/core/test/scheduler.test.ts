@@ -99,8 +99,8 @@ describe('HZ_DEMO', () => {
     const list = t.app.hzCore.servers.list();
     expect(list.map((s) => [s.name, s.location, s.status, s.connected])).toEqual([
       ['oracle-a1', 'Frankfurt', 'warn', true],
-      ['heimserver', 'Wien', 'ok', true],
-      ['soundos-pi', 'Studio', 'ok', true],
+      ['heimserver', 'Zuhause', 'ok', true],
+      ['raspi', 'Studio', 'ok', true],
     ]);
     const id = list[1]?.id ?? '';
     const hist = await t.app.inject({

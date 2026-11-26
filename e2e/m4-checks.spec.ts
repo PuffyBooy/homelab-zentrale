@@ -52,9 +52,14 @@ test.afterAll(async () => {
 
 test('create a TCP check and see it in the list', async () => {
   await page.goto('/');
-  await expect(page.getByRole('navigation', { name: 'Hauptnavigation' })).toBeVisible();
-  // Shortcut 6 opens the websites page.
-  await page.keyboard.press('6');
+  const nav = page.getByRole('navigation', { name: 'Hauptnavigation' });
+  await expect(nav).toBeVisible();
+  // The shortcut on the key cap opens the websites page (6, or 5 while GitHub is off).
+  const key = await nav
+    .getByRole('link', { name: /Websites/ })
+    .locator('.hz-nav-key')
+    .textContent();
+  await page.keyboard.press(key?.trim() ?? '6');
   await expect(page).toHaveURL(`${ORIGIN}/websites`);
 
   await page.getByRole('button', { name: 'Check anlegen' }).click();

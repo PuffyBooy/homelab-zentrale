@@ -63,7 +63,7 @@ jobs:
       - name: Build and start core
         run: |
           printf 'HZ_SECRET_KEY=%s\n' "$(openssl rand -base64 32)" > .env
-          docker compose -f deploy/docker-compose.core.yml up -d --build --wait
+          docker compose -f deploy/docker-compose.core.yml -f deploy/docker-compose.core.build.yml up -d --build --wait
       - name: Check /api/health
         run: |
           body="$(curl -fsS http://127.0.0.1:8080/api/health)"
@@ -71,10 +71,10 @@ jobs:
           echo "$body" | jq -e '.ok == true'
       - name: Logs on failure
         if: failure()
-        run: docker compose -f deploy/docker-compose.core.yml logs
+        run: docker compose -f deploy/docker-compose.core.yml -f deploy/docker-compose.core.build.yml logs
       - name: Stop
         if: always()
-        run: docker compose -f deploy/docker-compose.core.yml down -v
+        run: docker compose -f deploy/docker-compose.core.yml -f deploy/docker-compose.core.build.yml down -v
 
   ha-smoke:
     name: home assistant smoke (core + HA demo)

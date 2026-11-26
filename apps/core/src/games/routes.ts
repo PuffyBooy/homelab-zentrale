@@ -4,6 +4,8 @@ import {
   gameBackupListResponseSchema,
   gameCreateRequestSchema,
   gameDeleteRequestSchema,
+  gamePortsUpdateRequestSchema,
+  gamePortsUpdateResponseSchema,
   gameIdParamsSchema,
   gameListResponseSchema,
   gameRconRequestSchema,
@@ -34,8 +36,8 @@ function asHttp(err: unknown): HttpError {
 }
 
 /**
- * /api/games/* (SPEC 6.2/6.3). Admin session everywhere; deleting a game and
- * RCON (the console) need step-up. Responses never contain the RCON password or secret field values.
+ * /api/games/* (SPEC 6.2/6.3). Admin session everywhere; deleting a game,
+ * changing its ports and RCON (the console) need step-up. Responses never contain the RCON password or secret field values.
  */
 export const gameRoutes: FastifyPluginAsync<GameRoutesOptions> = async (app, o) => {
   const stepUp = requireStepUp(o.now);
@@ -94,6 +96,28 @@ export const gameRoutes: FastifyPluginAsync<GameRoutesOptions> = async (app, o) 
       const e = asHttp(err);
       if (e.status >= 500 || e.code === 'agent_offline') {
         audit('game.update_failed', row.id, { name: row.name, error: e.code });
+      }
+      throw e;
+    }
+  });
+
+  // Changing ports breaks the friends' port forwarding until it is adjusted: step-up.
+  app.patch('/games/:id/ports', { preHandler: stepUp }, async (request) => {
+    const row = rowOf(request.params);
+    const body = gamePortsUpdateRequestSchema.parse(request.body);
+    try {
+      const res = await g.changePorts(row.id, body.ports);
+      if (res.changed.length > 0) {
+        audit('game.ports_changed', row.id, {
+          name: row.name,
+          changed: res.changed.map((c) => ({ name: c.name, from: c.from, to: c.to })),
+        });
+      }
+      return gamePortsUpdateResponseSchema.parse(res);
+    } catch (err) {
+      const e = asHttp(err);
+      if (e.status >= 500 || e.code === 'agent_offline') {
+        audit('game.ports_change_failed', row.id, { name: row.name, error: e.code });
       }
       throw e;
     }

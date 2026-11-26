@@ -4,6 +4,7 @@ import {
   okResponseSchema,
   wallDeviceCreateRequestSchema,
   wallDeviceCreateResponseSchema,
+  wallDeviceLinkResponseSchema,
   wallDeviceListResponseSchema,
   wallDeviceParamsSchema,
   wallSessionRequestSchema,
@@ -39,8 +40,9 @@ function wallCookieOptions(maxAgeMs: number) {
   } as const;
 }
 
-function setWallCookie(reply: FastifyReply, token: string): void {
-  void reply.setCookie(WALL_COOKIE, token, wallCookieOptions(WALL_COOKIE_MAX_AGE_MS));
+/** The cookie carries the device session secret (never the link token). */
+function setWallCookie(reply: FastifyReply, secret: string): void {
+  void reply.setCookie(WALL_COOKIE, secret, wallCookieOptions(WALL_COOKIE_MAX_AGE_MS));
 }
 
 /** Base of the wall link: HZ_BASE_URL, else the Host of this (tailnet) request. */
@@ -52,9 +54,10 @@ function wallBase(request: FastifyRequest, o: WallRoutesOptions): string {
 
 /**
  * Wall mode (SPEC 12). Device management needs the admin session (global guard);
- * creating a device needs step-up (SECURITY.md: tokens). `/api/wall/session` is
- * public (rate limited) and `/api/wall/state` is the only route that accepts the
- * device cookie (DEVICE_API_ROUTES in the guard), besides the admin session.
+ * creating a device and issuing a new link need step-up (SECURITY.md: tokens).
+ * `/api/wall/session` is public (rate limited) and swaps the one-time link token
+ * for a device session cookie; `/api/wall/state` is the only route that accepts
+ * the device cookie (DEVICE_API_ROUTES in the guard), besides the admin session.
  */
 export const wallRoutes: FastifyPluginAsync<WallRoutesOptions> = async (app, o) => {
   const stepUp = requireStepUp(o.now);
@@ -79,6 +82,17 @@ export const wallRoutes: FastifyPluginAsync<WallRoutesOptions> = async (app, o) 
     });
   });
 
+  app.post('/settings/wall-devices/:id/link', { preHandler: stepUp }, async (request) => {
+    const { id } = wallDeviceParamsSchema.parse(request.params);
+    const linked = o.wall.relink(id);
+    if (!linked) throw new HttpError(404, 'not_found');
+    audit('wall.device_relinked', id, { name: linked.device.name });
+    return wallDeviceLinkResponseSchema.parse({
+      device: linked.device,
+      url: `${wallBase(request, o)}/wall?t=${linked.token}`,
+    });
+  });
+
   app.delete('/settings/wall-devices/:id', async (request) => {
     const { id } = wallDeviceParamsSchema.parse(request.params);
     const device = o.wall.get(id);
@@ -93,8 +107,10 @@ export const wallRoutes: FastifyPluginAsync<WallRoutesOptions> = async (app, o) 
     const wait = limiter.hit(request.ip);
     if (wait !== null) throw new HttpError(429, 'rate_limited', wait);
     const parsed = wallSessionRequestSchema.safeParse(request.body);
-    const device = parsed.success ? o.wall.resolve(parsed.data.token) : null;
-    if (!parsed.success || !device) {
+    const result = parsed.success
+      ? o.wall.exchange(parsed.data.token, request.cookies[WALL_COOKIE])
+      : null;
+    if (!parsed.success || !result) {
       writeAudit(o.db, o.now(), {
         actor: 'anonymous',
         action: 'wall.session_failed',
@@ -103,14 +119,16 @@ export const wallRoutes: FastifyPluginAsync<WallRoutesOptions> = async (app, o) 
       if (!parsed.success) throw new HttpError(400, 'invalid_input');
       throw new HttpError(401, 'unauthorized');
     }
-    o.wall.touch({ id: device.id, lastSeenAt: null });
-    setWallCookie(reply, parsed.data.token);
-    writeAudit(o.db, o.now(), {
-      actor: `wall:${device.id}`,
-      action: 'wall.session',
-      target: device.id,
-      details: { ip: request.ip },
-    });
+    if (result.kind === 'paired') {
+      setWallCookie(reply, result.secret);
+      writeAudit(o.db, o.now(), {
+        actor: `wall:${result.id}`,
+        action: 'wall.session',
+        target: result.id,
+        details: { ip: request.ip },
+      });
+    }
+    // `repeat`: a kiosk reload of the used link with a valid cookie; nothing changes.
     return okResponseSchema.parse({ ok: true });
   });
 

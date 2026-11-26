@@ -3,7 +3,7 @@ import { decideGuard, safeReturnPath } from './guard.js';
 
 const setup = { setupRequired: true, authenticated: false };
 const out = { setupRequired: false, authenticated: false };
-const inn = { setupRequired: false, authenticated: true, username: 'alex' };
+const inn = { setupRequired: false, authenticated: true, username: 'admin' };
 
 describe('decideGuard', () => {
   it('waits until the state is known', () => {

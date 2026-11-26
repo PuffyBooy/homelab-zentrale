@@ -412,8 +412,8 @@ describe('checks from an agent', () => {
       headers,
       payload: {
         kind: 'http',
-        name: 'sc-ball.at',
-        url: 'https://sc-ball.at/',
+        name: 'beispiel.at',
+        url: 'https://beispiel.at/',
         runFrom: s.serverId,
       },
     });
@@ -422,7 +422,7 @@ describe('checks from an agent', () => {
     await step(s.t);
     const rpc = s.rpcs.find((r) => r.action === 'check.http');
     expect(rpc?.params).toEqual({
-      url: 'https://sc-ball.at/',
+      url: 'https://beispiel.at/',
       method: 'GET',
       expectStatusMin: 200,
       expectStatusMax: 399,
@@ -434,7 +434,7 @@ describe('checks from an agent', () => {
     const ssl = s.t.app.hzCore.alerts.active(`check:${id}:ssl`);
     expect(ssl).toMatchObject({
       level: 'crit',
-      title: 'SSL-Zertifikat von sc-ball.at läuft ab',
+      title: 'SSL-Zertifikat von beispiel.at läuft ab',
       serverId: s.serverId,
     });
     expect(s.t.app.hzCore.alerts.active(`check:${id}:slow`)).toBeNull();
@@ -443,7 +443,7 @@ describe('checks from an agent', () => {
     await step(s.t);
     expect(s.t.app.hzCore.alerts.active(`check:${id}:slow`)).toMatchObject({
       level: 'warn',
-      title: 'sc-ball.at antwortet langsam',
+      title: 'beispiel.at antwortet langsam',
     });
 
     // Certificate renewed and fast again: both resolve with OK entries.
@@ -464,8 +464,8 @@ describe('checks from an agent', () => {
       .map((a) => a.title)
       .sort();
     expect(titles).toEqual([
-      'SSL-Zertifikat von sc-ball.at erneuert',
-      'sc-ball.at antwortet wieder schnell',
+      'SSL-Zertifikat von beispiel.at erneuert',
+      'beispiel.at antwortet wieder schnell',
     ]);
   });
 
@@ -561,11 +561,11 @@ describe('RDAP domain expiry', () => {
       });
       return checkResponseSchema.parse(r.json()).check.id;
     };
-    const id = await mk('shop', 'https://shop.sc-ball.at/');
+    const id = await mk('shop', 'https://shop.beispiel.at/');
     await mk('ip', 'https://100.64.0.5/');
     await mk('tailnet', 'https://heimserver.tail1234.ts.net/');
     await core.checks.idle();
-    expect(calls).toEqual(['https://rdap.org/domain/sc-ball.at']);
+    expect(calls).toEqual(['https://rdap.org/domain/beispiel.at']);
     expect(core.checks.summary(id)?.domainExpiresAt).toBe(new Date(expiry).toISOString());
     expect(core.alerts.active(`check:${id}:domain`)).toMatchObject({
       level: 'warn',

@@ -2,7 +2,13 @@
 # Installs or updates the Homelab-Zentrale agent on this server.
 #
 #   sudo HZ_AGENT_TOKEN=<token> ./deploy/install-agent.sh \
-#     --url wss://heimserver.<tailnet>.ts.net/agent --name oracle-a1 [--image <image>] [--allow-terminal]
+#     --url wss://heimserver.<tailnet>.ts.net/agent --name oracle-a1 \
+#     [--image <image> | --build-local] [--allow-terminal]
+#
+# Image: by default the multi-arch image ghcr.io/puffybooy/homelab-agent:latest
+# (amd64 + arm64) is pulled. Pin a build with --image ghcr.io/puffybooy/homelab-agent:sha-<short>
+# or :v<version>. --build-local (or HZ_BUILD_LOCAL=1) builds the image from this checkout
+# instead, as homelab-zentrale/agent:local.
 #
 # The token is the one-time enrollment token from the core ("Server hinzufügen").
 # Pass it via HZ_AGENT_TOKEN, via --token-stdin, or type it when asked. It is never
@@ -12,7 +18,7 @@
 #   1. checks Docker and Docker Compose v2,
 #   2. creates /opt/homelab (the only directory agent actions may write to),
 #   3. writes /etc/homelab-agent/agent.env (mode 0600) and the compose file,
-#   4. builds the image from this checkout (or uses --image) and starts the agent.
+#   4. pulls the image (or builds it with --build-local) and starts the agent.
 # The agent opens no port; it connects out to the core over Tailscale.
 set -euo pipefail
 
@@ -21,11 +27,14 @@ HOMELAB_DIR=/opt/homelab
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 LOCAL_IMAGE=homelab-zentrale/agent:local
+DEFAULT_IMAGE=ghcr.io/puffybooy/homelab-agent:latest
 
 url=""
 name=""
 image=""
 allow_terminal=0
+build_local=0
+if [[ "${HZ_BUILD_LOCAL:-0}" == 1 ]]; then build_local=1; fi
 token_stdin=0
 
 die() {
@@ -34,7 +43,7 @@ die() {
 }
 
 usage() {
-  sed -n '2,16p' "$0" | sed 's/^# \{0,1\}//'
+  sed -n '2,22p' "$0" | sed 's/^# \{0,1\}//'
   exit "${1:-0}"
 }
 
@@ -43,6 +52,7 @@ while [[ $# -gt 0 ]]; do
     --url) url="${2:-}"; shift 2 ;;
     --name) name="${2:-}"; shift 2 ;;
     --image) image="${2:-}"; shift 2 ;;
+    --build-local) build_local=1; shift ;;
     --allow-terminal) allow_terminal=1; shift ;;
     --token-stdin) token_stdin=1; shift ;;
     --token|--token=*) die "das Token nie als Argument übergeben, sondern über HZ_AGENT_TOKEN oder --token-stdin" ;;
@@ -62,6 +72,9 @@ url_re='^wss?://[][A-Za-z0-9.:-]+(/[A-Za-z0-9._~-]+)*/agent$'
 [[ -n "$name" ]] || name="$(hostname | tr '[:upper:]' '[:lower:]')"
 [[ "$name" =~ ^[a-z0-9][a-z0-9-]{0,62}$ ]] || die "--name: nur a-z, 0-9 und -, höchstens 63 Zeichen"
 
+if [[ -n "$image" && $build_local -eq 1 ]]; then
+  die "--image und --build-local (HZ_BUILD_LOCAL=1) schließen sich aus"
+fi
 if [[ -n "$image" ]]; then
   [[ "$image" =~ ^[A-Za-z0-9][A-Za-z0-9._/:@-]{0,255}$ ]] || die "--image ist kein gültiger Image-Name"
 fi
@@ -110,11 +123,13 @@ unset token HZ_AGENT_TOKEN
 [[ -f "$SCRIPT_DIR/docker-compose.agent.yml" ]] || die "deploy/docker-compose.agent.yml nicht gefunden"
 install -m 0644 "$SCRIPT_DIR/docker-compose.agent.yml" "$CONF_DIR/docker-compose.yml"
 
-if [[ -z "$image" ]]; then
-  [[ -f "$REPO_DIR/apps/agent/Dockerfile" ]] || die "ohne --image muss das Skript aus einem Checkout des Repos laufen"
+if [[ $build_local -eq 1 ]]; then
+  [[ -f "$REPO_DIR/apps/agent/Dockerfile" ]] || die "--build-local muss aus einem Checkout des Repos laufen"
   echo "Baue das Agent-Image aus $REPO_DIR ..."
   docker build -f "$REPO_DIR/apps/agent/Dockerfile" -t "$LOCAL_IMAGE" "$REPO_DIR"
   image="$LOCAL_IMAGE"
+elif [[ -z "$image" ]]; then
+  image="$DEFAULT_IMAGE"
 fi
 
 # Interpolation variables for compose (no secrets here).
@@ -122,7 +137,8 @@ printf 'HZ_AGENT_IMAGE=%s\nHZ_AGENT_ENV_FILE=%s\n' "$image" "$CONF_DIR/agent.env
 chmod 0644 "$CONF_DIR/.env"
 
 cd "$CONF_DIR"
-if [[ "$image" != "$LOCAL_IMAGE" ]]; then
+if [[ $build_local -eq 0 ]]; then
+  echo "Lade $image ..."
   docker compose pull agent
 fi
 docker compose up -d --no-build --force-recreate agent

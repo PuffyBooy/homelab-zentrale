@@ -551,7 +551,7 @@ export type ShareAuditRow = typeof shareAudit.$inferSelect;
 // ---- M8: Home Assistant ----------------------------------------------------------
 
 export const haEnergyMonths = sqliteTable('ha_energy_months', {
-  /** YYYY-MM in Europe/Vienna. */
+  /** YYYY-MM in the configured time zone (HZ_TIMEZONE). */
   month: text('month').primaryKey(),
   /** Energy sensor the values belong to. */
   entityId: text('entity_id').notNull(),
@@ -593,11 +593,50 @@ export const consoleSessions = sqliteTable(
 export const wallDevices = sqliteTable('wall_devices', {
   id: text('id').primaryKey(),
   name: text('name').notNull(),
-  /** SHA-256 of `wall:<token>`. The token itself is never stored. */
-  tokenHash: text('token_hash').notNull().unique(),
+  /**
+   * SHA-256 of `wall:<token>` of the one-time link; null once it was exchanged.
+   * The token itself is never stored.
+   */
+  tokenHash: text('token_hash').unique(),
+  /** SHA-256 of `wall:<secret>` of the device cookie; null until paired (or after relink). */
+  sessionHash: text('session_hash').unique(),
+  /** Hash of the link that paired the current cookie (a kiosk reload repeats it). */
+  usedTokenHash: text('used_token_hash'),
   createdAt: integer('created_at').notNull(),
   lastSeenAt: integer('last_seen_at'),
+  pairedAt: integer('paired_at'),
 });
+
+/** Warn/info pushes held back during quiet hours (migration 10). */
+export const pushDigestItems = sqliteTable('push_digest_items', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  ts: integer('ts').notNull(),
+  level: text('level').notNull(),
+  title: text('title').notNull(),
+  /** JSON array of push_subscriptions ids that would have received the push. */
+  deviceIdsJson: text('device_ids_json').notNull(),
+});
+
+/** Backups of deleted game servers, purged 30 days after deletion (migration 10). */
+export const deletedGameBackups = sqliteTable(
+  'deleted_game_backups',
+  {
+    id: text('id').primaryKey(),
+    serverId: text('server_id')
+      .notNull()
+      .references(() => servers.id, { onDelete: 'cascade' }),
+    /** Core id of the deleted game (no foreign key: the row is gone). */
+    gameId: text('game_id').notNull(),
+    /** Folder name: /opt/homelab/backups/<gameName>/. */
+    gameName: text('game_name').notNull(),
+    deletedAt: integer('deleted_at').notNull(),
+    lastAttemptAt: integer('last_attempt_at'),
+    lastError: text('last_error'),
+  },
+  (t) => [index('deleted_game_backups_server').on(t.serverId)],
+);
 
 export type ConsoleSessionRow = typeof consoleSessions.$inferSelect;
 export type WallDeviceRow = typeof wallDevices.$inferSelect;
+export type PushDigestItemRow = typeof pushDigestItems.$inferSelect;
+export type DeletedGameBackupRow = typeof deletedGameBackups.$inferSelect;

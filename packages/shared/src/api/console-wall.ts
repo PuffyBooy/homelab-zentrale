@@ -106,10 +106,17 @@ export const consoleSessionListResponseSchema = z.strictObject({
 
 // ---- wall mode (SPEC 12) ------------------------------------------------------------
 //
-// The tablet opens /wall?t=<token> once; the core swaps the token for an httpOnly
-// cookie `hz_wall` (SameSite=Strict, Secure, path /api/wall) and redirects to
-// /wall without the token in the URL. The device token is read-only: it can only
-// read GET /api/wall/state. Stored as SHA-256 hash; revocable.
+// The tablet opens /wall?t=<token>. The token is ONE-TIME (decision 2026-11-26):
+// POST /api/wall/session swaps it once for an httpOnly cookie `hz_wall`
+// (SameSite=Strict, Secure, path /api/wall). The token hash is then invalidated and
+// the cookie carries a new random device session secret (only its SHA-256 hash is
+// stored). A second exchange of the same token is 401 (rate limited), except when
+// the request already carries a valid wall cookie of that device: then the repeated
+// token is ignored and the answer is 200 (kiosk browsers reload the start URL).
+// After cookie loss the device must be relinked:
+// POST /api/settings/wall-devices/:id/link (step-up) issues a fresh one-time link
+// and invalidates the old cookie. The device cookie is read-only: it can only read
+// GET /api/wall/state. Deleting the device revokes everything at once.
 
 export const wallTokenSchema = z.string().regex(/^[A-Za-z0-9_-]{43}$/);
 /** Name of the device cookie (path /api/wall, only GET /api/wall/state accepts it). */
@@ -120,6 +127,8 @@ export const wallDeviceSchema = z.strictObject({
   name: z.string(),
   createdAt: z.iso.datetime(),
   lastSeenAt: z.iso.datetime().nullable(),
+  /** true once the one-time link was exchanged for a cookie (and not relinked since). */
+  paired: z.boolean(),
 });
 // GET /api/settings/wall-devices
 export const wallDeviceListResponseSchema = z.strictObject({
@@ -138,6 +147,9 @@ export const wallDeviceCreateResponseSchema = z.strictObject({
   device: wallDeviceSchema,
   url: z.string(),
 });
+// POST /api/settings/wall-devices/:id/link (step-up) -> { device, url } (fresh one-time
+// link, shown once; the old link and the old cookie stop working)
+export const wallDeviceLinkResponseSchema = wallDeviceCreateResponseSchema;
 // DELETE /api/settings/wall-devices/:id -> { ok }
 export const wallDeviceParamsSchema = z.strictObject({ id: idSchema });
 
@@ -164,7 +176,7 @@ export const wallStateSchema = z.strictObject({
   alerts: z.array(alertSchema.pick({ level: true, title: true, openedAt: true })).max(5),
   /** "Alles läuft." or "2 Probleme · 3 von 4 Servern laufen". */
   sentence: z.string(),
-  /** 22–7 Uhr Europe/Vienna: dim to 40 %, crit stays bright. */
+  /** 22–7 Uhr local time (HZ_TIMEZONE): dim to 40 %, crit stays bright. */
   night: z.boolean(),
   updatedAt: z.iso.datetime(),
 });
