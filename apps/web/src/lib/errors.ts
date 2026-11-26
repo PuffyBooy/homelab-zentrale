@@ -49,6 +49,12 @@ export function errorText(err: unknown): string {
       return 'Home Assistant nicht erreichbar oder hat abgelehnt. Details unter Einstellungen → Home Assistant.';
     case 'module_disabled':
       return 'Modul ausgeschaltet. Einschalten unter Einstellungen → Module.';
+    case 'price_changed':
+      return 'Preis hat sich geändert. Neuen Preis prüfen und erneut bestätigen.';
+    case 'over_budget':
+      return 'Cloud-Budget aufgebraucht. Nur mit ausdrücklicher Bestätigung.';
+    case 'cloud_error':
+      return 'Azure nicht erreichbar oder hat abgelehnt. Details auf der Seite Cloud.';
     case 'bad_response':
       return 'Antwort der Zentrale unerwartet. Versionen von Core und Web prüfen.';
     default:
