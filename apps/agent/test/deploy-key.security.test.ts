@@ -3,6 +3,7 @@ import { createHash, createPrivateKey, createPublicKey, sign, verify } from 'nod
 import {
   chmod,
   link,
+  unlink,
   lstat,
   mkdir,
   mkdtemp,
@@ -144,6 +145,16 @@ describe('deploy.key files', () => {
     const lines = await Promise.all([1, 2, 3, 4].map(() => ensureDeployKey(dataDir, 'race')));
     expect(new Set(lines).size).toBe(1);
     expect(await readdir(path.join(dataDir, 'deploy-keys'))).toEqual(['race']);
+  });
+
+  it('waits for a parallel call that still holds its temp link', async () => {
+    const dataDir = await freshDataDir();
+    const line = await ensureDeployKey(dataDir, 'linked');
+    const keyFile = path.join(dataDir, 'deploy-keys', 'linked');
+    const tmp = path.join(dataDir, 'deploy-keys', '.tmp-0123456789abcdef');
+    await link(keyFile, tmp);
+    setTimeout(() => void unlink(tmp), 60);
+    expect(await ensureDeployKey(dataDir, 'linked')).toBe(line);
   });
 
   it('tightens a too wide mode back to 0600', async () => {
