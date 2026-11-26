@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray, ne, sql, type SQL } from 'drizzle-orm';
+import { and, desc, eq, inArray, lt, ne, sql, type SQL } from 'drizzle-orm';
 import type { z } from 'zod';
 import type { Alert, AlertLevel, AlertSource, AlertState, alertListQuerySchema } from '@hz/shared';
 import type { Clock } from '../clock.js';
@@ -58,6 +58,9 @@ export interface RaiseResult {
  * acked -> resolved. Push, quiet hours and bundling sit on top of `onEvent`
  * (push/notifier.ts).
  */
+/** Resolved alerts are kept this long (open and acknowledged ones forever). */
+export const ALERT_RETENTION_MS = 90 * 24 * 60 * 60_000;
+
 export class AlertService {
   private readonly listeners = new Set<AlertListener>();
   private readonly eventListeners = new Set<AlertEventListener>();
@@ -84,6 +87,15 @@ export class AlertService {
   }
 
   /** Open or acked alert with this key. */
+  /** Removes resolved alerts older than `maxAgeMs` (default 90 days). Returns the count. */
+  prune(maxAgeMs = ALERT_RETENTION_MS): number {
+    const cutoff = this.now() - maxAgeMs;
+    return this.db
+      .delete(alerts)
+      .where(and(eq(alerts.state, 'resolved'), lt(alerts.resolvedAt, cutoff)))
+      .run().changes;
+  }
+
   active(key: string): Alert | null {
     const row = this.db
       .select()

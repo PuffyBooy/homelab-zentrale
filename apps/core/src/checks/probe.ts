@@ -72,6 +72,36 @@ export function reasonForError(err: unknown, timeoutMs: number): string {
   }
 }
 
+/**
+ * German text for an error reported by the agent (Node codes or the agent's fixed
+ * English texts). Unknown texts never reach alerts verbatim.
+ */
+export function reasonForAgentError(error: string, timeoutMs: number): string {
+  switch (error) {
+    case 'timeout':
+      return `Timeout nach ${Math.round(timeoutMs / 1000)} s`;
+    case 'text not found':
+      return 'Text nicht gefunden';
+    case 'no reply':
+      return 'Keine Antwort auf Ping';
+    case 'dns failed':
+      return 'Name nicht auflösbar';
+    case 'ping not permitted':
+      return 'Ping auf dem Server nicht erlaubt';
+    case 'ping failed':
+      return 'Ping fehlgeschlagen';
+    case 'too many redirects':
+      return 'Zu viele Weiterleitungen';
+    case 'invalid redirect':
+    case 'redirect to unsupported scheme':
+      return 'Weiterleitung auf ein nicht unterstütztes Ziel';
+    default:
+      return /^[A-Z0-9_]+$/.test(error)
+        ? reasonForError({ code: error }, timeoutMs)
+        : 'Verbindung fehlgeschlagen';
+  }
+}
+
 function timeoutError(): Error & { code: string } {
   return Object.assign(new Error('timeout'), { code: 'HZ_TIMEOUT' });
 }

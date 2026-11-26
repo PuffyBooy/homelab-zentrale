@@ -470,7 +470,7 @@ describe('checks from an agent', () => {
   });
 
   it('ping and tcp go to the agent; failures count; invalid data and offline agent are off, not crit', async () => {
-    let result: unknown = { ok: false, ms: null, error: 'host unreachable' };
+    let result: unknown = { ok: false, ms: null, error: 'no reply' };
     const s = await withAgent(clients, {
       reply: (rpc) =>
         typeof rpc.action === 'string' && rpc.action.startsWith('check.')
@@ -496,7 +496,7 @@ describe('checks from an agent', () => {
     });
     expect(s.t.app.hzCore.checks.summary(id)).toMatchObject({
       status: 'crit',
-      reason: 'host unreachable',
+      reason: 'Keine Antwort auf Ping',
     });
     const down = s.t.app.hzCore.alerts.active(`check:${id}:down`);
     expect(down?.title).toBe('router ist nicht erreichbar');

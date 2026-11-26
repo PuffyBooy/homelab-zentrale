@@ -79,7 +79,7 @@ test('two failed runs turn the check DOWN and raise an alert', async () => {
   await run.click();
   await expect(run).toBeEnabled();
   await expect(row().locator('.hz-status-label')).toHaveText('DOWN', { timeout: 30_000 });
-  await expect(page.locator('.hz-page-title')).toContainText(`${TARGET} ist offline`);
+  await expect(page.locator('.hz-page-title')).toContainText(`${TARGET} ist nicht erreichbar`);
   await themes('websites-down');
 
   await page.goto('/alerts?source=check');

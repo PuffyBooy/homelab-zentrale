@@ -5,11 +5,28 @@ export type CheckKind = z.infer<typeof checkKindSchema>;
 export const checkIdSchema = z.string().regex(/^[A-Za-z0-9_-]{8,64}$/);
 export const checkIdParamsSchema = z.strictObject({ id: checkIdSchema });
 
-const hostSchema = z
-  .string()
-  .trim()
-  .max(253)
-  .regex(/^[A-Za-z0-9.:[\]-]+$/);
+const DNS_LABEL = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$/;
+const IPV4 = /^(?:(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)\.){3}(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)$/;
+const ipv6 = z.ipv6();
+
+/**
+ * Host of a TCP/ping check: IPv4, IPv6 (optionally in brackets) or a DNS name.
+ * Same rules as the agent's normalizeHost: no leading dash, valid labels, and no
+ * numeric last label (would be read as an IP in another notation).
+ */
+export function isValidCheckHost(host: string): boolean {
+  if (host.length === 0 || host.length > 253) return false;
+  const inner = /^\[(.+)\]$/.exec(host)?.[1];
+  if (inner !== undefined) return ipv6.safeParse(inner).success;
+  if (IPV4.test(host)) return true;
+  if (host.includes(':')) return ipv6.safeParse(host).success;
+  const name = host.endsWith('.') ? host.slice(0, -1) : host;
+  const labels = name.split('.');
+  if (!labels.every((l) => DNS_LABEL.test(l))) return false;
+  return !/^(?:\d+|0x[0-9a-f]+)$/i.test(labels.at(-1) ?? '');
+}
+
+const hostSchema = z.string().trim().max(253).refine(isValidCheckHost, { message: 'invalid host' });
 
 /** Where a check runs: the core itself or one agent (e.g. oracle-a1 for "from outside"). */
 export const checkRunFromSchema = z.union([

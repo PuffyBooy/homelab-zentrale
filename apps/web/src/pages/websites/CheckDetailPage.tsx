@@ -94,7 +94,7 @@ function Detail({ check: c }: { check: CheckSummary }): ReactElement {
         <div className="hz-span-4">
           <Alert
             tone="crit"
-            title={`${checkTarget(c.def)} ist offline`}
+            title={`${checkTarget(c.def)} ist nicht erreichbar`}
             time={c.lastCheckedAt ? formatWhen(new Date(c.lastCheckedAt), now) : undefined}
           >
             {c.reason} · {plural2(c.consecutiveFailures)} hintereinander fehlgeschlagen.

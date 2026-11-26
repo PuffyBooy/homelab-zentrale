@@ -208,7 +208,7 @@ describe('check results: no bodies or secrets in alerts, logs or audit', () => {
       s.t.clock.advance(60_000);
     }
     const alert = s.t.app.hzCore.alerts.active(`check:${id}:down`);
-    expect(alert?.body).toContain('fetch https://10.0.0.1/ failed');
+    expect(alert?.body).toContain('Verbindung fehlgeschlagen');
     const dump = JSON.stringify([
       s.t.app.hzCore.alerts.list({ state: 'all', limit: 100 }),
       s.t.app.hzCore.checks.list(),

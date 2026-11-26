@@ -36,7 +36,13 @@ import {
   type Evaluation,
   type Streak,
 } from './evaluate.js';
-import { httpProbe, PROBE_TIMEOUT_MS, tcpProbe, type ProbeResult } from './probe.js';
+import {
+  httpProbe,
+  PROBE_TIMEOUT_MS,
+  reasonForAgentError,
+  tcpProbe,
+  type ProbeResult,
+} from './probe.js';
 import { lookupDomainExpiry, registrableDomain, type FetchLike } from './rdap.js';
 
 const HOUR = 60 * 60 * 1000;
@@ -371,7 +377,13 @@ export class CheckService {
         ms: r.ms,
         ...(r.code !== undefined ? { code: r.code } : {}),
         ...(!r.ok
-          ? { error: r.error ? sanitizeReason(r.error) : r.code ? `HTTP ${r.code}` : 'Fehlschlag' }
+          ? {
+              error: r.error
+                ? reasonForAgentError(r.error, PROBE_TIMEOUT_MS)
+                : r.code
+                  ? `HTTP ${r.code}`
+                  : 'Fehlschlag',
+            }
           : {}),
         ...(Number.isFinite(tls) ? { tlsExpiresAt: tls } : {}),
       },

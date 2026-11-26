@@ -37,7 +37,7 @@ describe('check presentation', () => {
   it('shows the target per kind', () => {
     expect(checkTarget(check({ def: { url: 'https://sc-ball.at/' } }).def)).toBe('sc-ball.at');
     expect(checkTarget(check({ def: { url: 'https://hoebe.at/api?x=1' } }).def)).toBe(
-      'hoebe.at/api?x=1',
+      'hoebe.at/api',
     );
     const tcp = check({ def: { kind: 'tcp', host: 'mc.hoebe.at', port: 25565 } as never });
     expect(checkTarget(tcp.def)).toBe('mc.hoebe.at:25565');
@@ -94,7 +94,7 @@ describe('Statussatz', () => {
       check(),
     ];
     expect(sentenceText(checksSentence(list))).toBe(
-      'lernen.hoebe.at ist offline · 2 von 3 Checks erreichbar',
+      'lernen.hoebe.at ist nicht erreichbar · 2 von 3 Checks erreichbar',
     );
   });
 

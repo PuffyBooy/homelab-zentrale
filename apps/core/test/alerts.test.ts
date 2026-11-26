@@ -26,6 +26,19 @@ function service() {
 }
 
 describe('AlertService', () => {
+  it('prunes resolved alerts after 90 days, never open ones', () => {
+    const { svc, clock } = service();
+    svc.raise('check:1:down', 'crit', 'alt', 'x', null, 'check');
+    svc.resolve('check:1:down');
+    svc.raise('check:2:down', 'crit', 'offen', 'x', null, 'check');
+    clock.t += 89 * 86_400_000;
+    expect(svc.prune()).toBe(0);
+    clock.t += 2 * 86_400_000;
+    expect(svc.prune()).toBeGreaterThan(0);
+    const left = svc.list({ state: 'all', limit: 100 });
+    expect(left.map((a) => a.title)).toEqual(['offen']);
+  });
+
   it('dedupes by key while open or acked', () => {
     const { svc } = service();
     const a = svc.raise(

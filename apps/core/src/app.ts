@@ -313,6 +313,7 @@ export async function buildApp(config: Config, deps: AppDeps = {}): Promise<Fast
   scheduler.every('metrics.rollup5m', 5 * 60_000, () => void metrics.rollup5m(), { align: true });
   scheduler.every('metrics.rollup1h', HOUR, () => void metrics.rollup1h(), { align: true });
   scheduler.every('metrics.prune', HOUR, () => void metrics.prune());
+  scheduler.every('alerts.prune', HOUR, () => void alerts.prune());
   checks.start();
   scheduler.every('push.warnBundle', 60_000, () => notifier.flush());
   scheduler.at('report.weekly', nextWeeklyReport, () => {

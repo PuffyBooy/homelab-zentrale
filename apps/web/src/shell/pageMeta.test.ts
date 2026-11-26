@@ -51,7 +51,7 @@ describe('pageMeta for websites and alerts', () => {
     expect(pageMeta('/websites', { servers: [home] }).sub).toBe('lädt …');
     const meta = pageMeta('/websites', { servers: [home], checks: [down, check()], live: 'open' });
     expect(meta.title).toEqual({
-      em: 'lernen.hoebe.at ist offline',
+      em: 'lernen.hoebe.at ist nicht erreichbar',
       rest: ' · 1 von 2 Checks erreichbar',
     });
     expect(meta.sub).toBe('Websites · 2 Checks · live');
@@ -61,7 +61,7 @@ describe('pageMeta for websites and alerts', () => {
       checks: [down, check()],
       filter: home.id,
     });
-    expect(one.title.em).toBe('lernen.hoebe.at ist offline');
+    expect(one.title.em).toBe('lernen.hoebe.at ist nicht erreichbar');
     expect(one.title.rest).toBe(' · 0 von 1 Check erreichbar');
   });
 
@@ -70,7 +70,7 @@ describe('pageMeta for websites and alerts', () => {
     expect(checkDetailId(path)).toBe(down.id);
     expect(needsChecks(path)).toBe(true);
     const meta = pageMeta(path, { servers: [home], checks: [down] });
-    expect(meta.title).toEqual({ em: 'lernen.hoebe.at ist offline', rest: ' · HTTP 503' });
+    expect(meta.title).toEqual({ em: 'lernen.hoebe.at ist nicht erreichbar', rest: ' · HTTP 503' });
     expect(meta.sub).toBe('Website · HTTP(S) · von der Zentrale');
   });
 

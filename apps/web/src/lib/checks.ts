@@ -103,7 +103,8 @@ export function checkTarget(def: CheckDef): string {
   try {
     const u = new URL(def.url);
     const path = u.pathname === '/' ? '' : u.pathname;
-    return `${u.host}${path}${u.search}`;
+    // Never the query: it may carry a token (shown on the wall display too).
+    return `${u.host}${path}`;
   } catch {
     return def.url;
   }
@@ -191,7 +192,7 @@ export function checksSentence(list: readonly CheckSummary[]): StatusSentence {
   const okCount = active.filter((c) => c.status !== 'crit').length;
   const rest = `${okCount} von ${plural(active.length, 'Check', 'Checks')} erreichbar`;
   const only = crit.length === 1 && warn.length === 0 ? crit[0] : undefined;
-  if (only) return { em: `${checkTarget(only.def)} ist offline`, rest: ` · ${rest}` };
+  if (only) return { em: `${checkTarget(only.def)} ist nicht erreichbar`, rest: ` · ${rest}` };
   const problems = crit.length + warn.length;
   if (problems === 0) {
     return active.length ? { em: null, rest: 'Alles erreichbar.' } : { em: null, rest };
@@ -204,7 +205,7 @@ export function checkSentence(c: CheckSummary): StatusSentence {
   const t = checkTarget(c.def);
   if (!c.def.enabled || c.status === 'off') return { em: null, rest: `${t} ist pausiert.` };
   if (c.status === 'crit')
-    return { em: `${t} ist offline`, rest: c.reason ? ` · ${c.reason}` : '' };
+    return { em: `${t} ist nicht erreichbar`, rest: c.reason ? ` · ${c.reason}` : '' };
   if (c.status === 'warn') return { em: `${t}: ${c.reason ?? 'Warnung'}`, rest: '' };
   if (c.status === 'busy' || !c.lastCheckedAt) return { em: null, rest: `${t} wird geprüft.` };
   return { em: null, rest: `${t} ist erreichbar.` };
