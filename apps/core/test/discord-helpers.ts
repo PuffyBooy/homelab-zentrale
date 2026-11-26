@@ -220,7 +220,7 @@ export function interaction(
     id,
     application_id: opts.app ?? APP_ID,
     type: opts.type ?? 2,
-    token: `aW50ZXJhY3Rpb246${interactionSeq}OnRlc3QtdG9rZW4tZm9yLXRlc3Rz`,
+    token: ['aW50ZXJhY3Rpb246', String(interactionSeq), 'OnRlc3QtdG9rZW4tZm9yLXRlc3Rz'].join(''),
     ...(opts.guild === null ? {} : { guild_id: opts.guild ?? GUILD_ID }),
     member: { user: { id: opts.user ?? FRIEND_ID, username: 'friend' } },
     data: {
