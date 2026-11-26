@@ -1164,11 +1164,12 @@ body,
   padding: var(--space-2) 0;
 }
 .app-ha-press-off .hz-toggle-text {
-  opacity: 0.45;
+  color: var(--ink-muted);
 }
-/* HA unreachable: values stay visible as the last known state, but muted. */
+/* HA unreachable: values stay visible as the last known state, but muted
+   (muted ink, not transparency, so the contrast stays readable). */
 .app-ha-stale {
-  opacity: 0.45;
+  color: var(--ink-muted);
 }
 /* Stale numbers stay readable (WCAG contrast): muted ink instead of transparency. */
 .hz-metric.app-ha-stale {
