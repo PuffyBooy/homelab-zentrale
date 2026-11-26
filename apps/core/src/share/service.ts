@@ -1,4 +1,5 @@
-import { desc, eq, lt, sql } from 'drizzle-orm';
+import { createHmac, randomBytes } from 'node:crypto';
+import { and, desc, eq, lt, sql } from 'drizzle-orm';
 import type { FastifyBaseLogger } from 'fastify';
 import { z } from 'zod';
 import type { shareConsoleLineSchema, shareExpirySchema } from '@hz/shared';
@@ -45,6 +46,10 @@ export const PIN_LOCK_MS = 15 * MIN;
 /** `view` and `console_read` are audited at most once per 10 minutes per link. */
 export const READ_AUDIT_MS = 10 * MIN;
 export const SHARE_AUDIT_RETENTION_MS = 90 * DAY;
+/** After a verified PIN, the same token+PIN skips argon2 this long (in memory). */
+export const PIN_GRANT_MS = 10 * MIN;
+/** Hard cap of remembered PIN grants (oldest are dropped first). */
+export const PIN_GRANT_MAX = 2000;
 /** The container log stream stays open this long after the last console poll. */
 export const LOG_LEASE_MS = 2 * MIN;
 /** lastSeenAt of the gateway and last_used_at of a link are written at most this often. */
@@ -133,6 +138,51 @@ export function maskTailnet(text: string): string {
     .replace(TS_IPV6, '[intern]')
     .replace(TS_NAME, '[intern]');
 }
+/**
+ * Fixed texts a friend may see as status (never free agent/phase text, which
+ * can contain container ids, paths or LAN addresses).
+ */
+export const FRIEND_STATUS_TEXTS = [
+  'Läuft',
+  'Läuft, aber langsam',
+  'Antwortet nicht',
+  'Gestört',
+  'Gestoppt',
+  'Nicht erreichbar',
+  'Startet',
+  'Startet neu',
+  'Wird gestoppt',
+  'Backup läuft',
+  'Wird eingerichtet',
+  'Beschäftigt',
+] as const;
+export type FriendStatusText = (typeof FRIEND_STATUS_TEXTS)[number];
+
+/** Maps the internal status (games/status.ts) to a fixed friend text. */
+export function friendStatusText(
+  status: ShareStatus['game']['status'],
+  statusText: string,
+  phase: string,
+): FriendStatusText {
+  switch (status) {
+    case 'ok':
+      return 'Läuft';
+    case 'warn':
+      return statusText.startsWith('TPS niedrig') ? 'Läuft, aber langsam' : 'Antwortet nicht';
+    case 'crit':
+      return 'Gestört';
+    case 'off':
+      return statusText === 'Server offline' ? 'Nicht erreichbar' : 'Gestoppt';
+    case 'busy':
+      if (phase === 'setup') return 'Wird eingerichtet';
+      if (statusText === 'Startet') return 'Startet';
+      if (statusText === 'Neustart') return 'Startet neu';
+      if (statusText === 'Wird gestoppt') return 'Wird gestoppt';
+      if (statusText.startsWith('Backup läuft')) return 'Backup läuft';
+      return 'Beschäftigt';
+  }
+}
+
 const PERM_ORDER = sharePermSchema.options;
 const CURSOR_RE = /^(\d{1,15})\.(\d{1,15})(?:\.\d{1,6})?$/;
 
@@ -165,6 +215,14 @@ export interface ShareServiceDeps {
 export class ShareService {
   /** Last `view` / `console_read` audit per link (in memory). */
   private readonly readAudits = new Map<string, number>();
+  /**
+   * Verified PINs (S4): HMAC(processKey, tokenHash|pinHash|pin) → expiry, in LRU
+   * order. The key never leaves memory, so the map holds no usable PIN material.
+   */
+  private readonly pinGrants = new Map<string, number>();
+  private readonly grantKey = randomBytes(32);
+  /** PIN verifies in flight per link (a saturated counter without one is stale). */
+  private readonly pinInFlight = new Map<string, number>();
 
   constructor(private readonly deps: ShareServiceDeps) {}
 
@@ -292,6 +350,7 @@ export class ShareService {
   prune(maxAgeMs = SHARE_AUDIT_RETENTION_MS): number {
     const now = this.deps.now();
     for (const [k, ts] of this.readAudits) if (now - ts >= READ_AUDIT_MS) this.readAudits.delete(k);
+    for (const [k, until] of this.pinGrants) if (until <= now) this.pinGrants.delete(k);
     return this.db
       .delete(shareAudit)
       .where(lt(shareAudit.ts, now - maxAgeMs))
@@ -407,6 +466,10 @@ export class ShareService {
   /**
    * Token → link, then state (revoked/expired 410), lock (423) and PIN (401).
    * Unknown and malformed tokens give the same 404.
+   *
+   * PIN tries are reserved atomically before the (async) argon2 verify, so
+   * parallel requests can never run more than 5 verifies per lock period. While
+   * locked (or while all 5 tries are in flight) every PIN, right or wrong, gets 423.
    */
   async authenticate(
     token: string | undefined,
@@ -421,32 +484,30 @@ export class ShareService {
     const link = this.db.select().from(shareLinks).where(eq(shareLinks.tokenHash, hash)).get();
     if (!link) throw new ShareError(404, 'not_found');
     this.checkState(link);
-    const now = this.deps.now();
-    if (link.lockedUntil !== null && link.lockedUntil > now) {
-      throw new ShareError(423, 'locked', {
-        retryAfter: Math.max(1, Math.ceil((link.lockedUntil - now) / 1000)),
-      });
-    }
+    this.checkLock(link);
+    let verified = false;
     if (link.pinHash !== null) {
       if (pin === undefined || pin === '') {
+        const lockOver = link.lockedUntil !== null && link.lockedUntil <= this.deps.now();
         throw new ShareError(401, 'pin_required', {
-          triesLeft: Math.max(0, PIN_MAX_FAILURES - link.pinFailures),
+          triesLeft: lockOver ? PIN_MAX_FAILURES : Math.max(0, PIN_MAX_FAILURES - link.pinFailures),
         });
       }
-      const ok = sharePinSchema.safeParse(pin).success && (await verifyPassword(link.pinHash, pin));
-      if (!ok) this.pinFailed(link, ip, via);
+      const grant = this.grantId(link, pin);
+      if (!this.hasGrant(grant)) {
+        await this.verifyPin(link, pin, ip, via);
+        verified = true;
+        this.addGrant(grant);
+      }
     }
     // Re-read: the link may have been revoked or locked while the PIN was checked.
     const fresh = this.row(link.id);
     if (!fresh) throw new ShareError(404, 'not_found');
     this.checkState(fresh);
-    if (fresh.lockedUntil !== null && fresh.lockedUntil > this.deps.now()) {
-      throw new ShareError(423, 'locked', {
-        retryAfter: Math.max(1, Math.ceil((fresh.lockedUntil - this.deps.now()) / 1000)),
-      });
-    }
+    this.checkLock(fresh);
     const set: Partial<ShareLinkRow> = {};
-    if (fresh.pinFailures !== 0) set.pinFailures = 0;
+    if (verified && fresh.pinFailures !== 0) set.pinFailures = 0;
+    if (verified && fresh.lockedUntil !== null) set.lockedUntil = null;
     if (fresh.lastUsedAt === null || this.deps.now() - fresh.lastUsedAt >= TOUCH_MS) {
       set.lastUsedAt = this.deps.now();
     }
@@ -463,25 +524,109 @@ export class ShareService {
     }
   }
 
-  private pinFailed(link: ShareLinkRow, ip: string | null, via: ShareVia): never {
-    this.db
-      .update(shareLinks)
-      .set({ pinFailures: sql`${shareLinks.pinFailures} + 1` })
-      .where(eq(shareLinks.id, link.id))
-      .run();
-    const fresh = this.row(link.id) ?? link;
-    const ctx = { link: fresh, ip, via };
-    if (fresh.pinFailures >= PIN_MAX_FAILURES) {
-      this.db
-        .update(shareLinks)
-        .set({ pinFailures: 0, lockedUntil: this.deps.now() + PIN_LOCK_MS })
-        .where(eq(shareLinks.id, link.id))
-        .run();
-      this.record(ctx, 'pin_locked', null, { action: 'share.pin_locked' });
+  private checkLock(link: ShareLinkRow): void {
+    const now = this.deps.now();
+    if (link.lockedUntil !== null && link.lockedUntil > now) {
+      throw new ShareError(423, 'locked', {
+        retryAfter: Math.max(1, Math.ceil((link.lockedUntil - now) / 1000)),
+      });
+    }
+  }
+
+  private grantId(link: ShareLinkRow, pin: string): string {
+    return createHmac('sha256', this.grantKey)
+      .update(`${link.tokenHash}|${link.pinHash ?? ''}|${pin}`, 'utf8')
+      .digest('hex');
+  }
+
+  private hasGrant(id: string): boolean {
+    const until = this.pinGrants.get(id);
+    if (until === undefined) return false;
+    if (until <= this.deps.now()) {
+      this.pinGrants.delete(id);
+      return false;
+    }
+    return true;
+  }
+
+  private addGrant(id: string): void {
+    this.pinGrants.delete(id);
+    while (this.pinGrants.size >= PIN_GRANT_MAX) {
+      const oldest = this.pinGrants.keys().next();
+      if (oldest.done) break;
+      this.pinGrants.delete(oldest.value);
+    }
+    this.pinGrants.set(id, this.deps.now() + PIN_GRANT_MS);
+  }
+
+  /**
+   * Reserves one try (atomic UPDATE … RETURNING), then verifies. Throws 423 when no
+   * try is left, 401 pin_wrong for a wrong PIN, 423 for the 5th wrong PIN.
+   */
+  private async verifyPin(
+    link: ShareLinkRow,
+    pin: string,
+    ip: string | null,
+    via: ShareVia,
+  ): Promise<void> {
+    const now = this.deps.now();
+    const c = shareLinks;
+    const lockOver = sql`(${c.lockedUntil} IS NOT NULL AND ${c.lockedUntil} <= ${now})`;
+    const reserved = this.db
+      .update(c)
+      .set({
+        pinFailures: sql`CASE WHEN ${lockOver} THEN 1 ELSE ${c.pinFailures} + 1 END`,
+        lockedUntil: sql`CASE WHEN ${lockOver} THEN NULL ELSE ${c.lockedUntil} END`,
+      })
+      .where(
+        and(
+          eq(c.id, link.id),
+          sql`((${c.lockedUntil} IS NULL AND ${c.pinFailures} < ${PIN_MAX_FAILURES}) OR ${lockOver})`,
+        ),
+      )
+      .returning({ pinFailures: c.pinFailures })
+      .get();
+    if (!reserved) {
+      const cur = this.row(link.id);
+      if (cur) this.checkLock(cur);
+      // All tries are taken. Without a verify in flight the counter is stale
+      // (e.g. a crash mid-verify): lock, on the safe side.
+      if (cur && (this.pinInFlight.get(link.id) ?? 0) === 0) {
+        this.lock(cur, ip, via);
+      }
       throw new ShareError(423, 'locked', { retryAfter: PIN_LOCK_MS / 1000 });
     }
-    this.record(ctx, 'pin_failed', null, { action: 'share.pin_failed' });
-    throw new ShareError(401, 'pin_wrong', { triesLeft: PIN_MAX_FAILURES - fresh.pinFailures });
+    const attempt = reserved.pinFailures;
+    this.pinInFlight.set(link.id, (this.pinInFlight.get(link.id) ?? 0) + 1);
+    let ok: boolean;
+    try {
+      ok = sharePinSchema.safeParse(pin).success && (await verifyPassword(link.pinHash ?? '', pin));
+    } catch {
+      ok = false;
+    } finally {
+      const n = (this.pinInFlight.get(link.id) ?? 1) - 1;
+      if (n <= 0) this.pinInFlight.delete(link.id);
+      else this.pinInFlight.set(link.id, n);
+    }
+    if (ok) return;
+    const fresh = this.row(link.id) ?? link;
+    if (attempt >= PIN_MAX_FAILURES) {
+      this.lock(fresh, ip, via);
+      throw new ShareError(423, 'locked', { retryAfter: PIN_LOCK_MS / 1000 });
+    }
+    this.record({ link: fresh, ip, via }, 'pin_failed', null, { action: 'share.pin_failed' });
+    // Locked meanwhile by a parallel try: same 423 as everyone else.
+    this.checkLock(fresh);
+    throw new ShareError(401, 'pin_wrong', { triesLeft: PIN_MAX_FAILURES - attempt });
+  }
+
+  private lock(link: ShareLinkRow, ip: string | null, via: ShareVia): void {
+    this.db
+      .update(shareLinks)
+      .set({ pinFailures: PIN_MAX_FAILURES, lockedUntil: this.deps.now() + PIN_LOCK_MS })
+      .where(eq(shareLinks.id, link.id))
+      .run();
+    this.record({ link, ip, via }, 'pin_locked', null, { action: 'share.pin_locked' });
   }
 
   /** 403 and an audit entry unless the link has one of `perms`. Nothing else happens. */
@@ -514,7 +659,8 @@ export class ShareService {
         game: s.game,
         version: s.version,
         status: s.status,
-        statusText: maskTailnet(s.statusText),
+        // Fixed texts only: agent errors and phase texts never reach the friend.
+        statusText: friendStatusText(s.status, s.statusText, row.phase),
         // Only what Alex entered for friends; never the Tailscale IP or server name.
         // An external address that is itself a tailnet address is not shown either.
         address:

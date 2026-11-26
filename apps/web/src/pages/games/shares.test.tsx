@@ -12,6 +12,7 @@ import {
   type ShareGatewaySettings,
 } from '../../lib/shares.js';
 import { game } from '../../test-fixtures.js';
+import { ShareCreateDialog } from './ShareCreateDialog.js';
 import { ShareAuditTile, ShareLinksTile } from './ShareLinksTile.js';
 
 const now = new Date(2026, 10, 26, 23, 4);
@@ -117,5 +118,16 @@ describe('ShareAuditTile', () => {
     expect(out).toContain('23:02 · im Tailnet');
     expect(out).toContain('>ABGEWIESEN<');
     expect(out).toContain('hz-status hz-status-warn');
+  });
+});
+
+describe('ShareCreateDialog', () => {
+  it('starts with Starten/Stoppen only and no console warning', () => {
+    const out = html(
+      <ShareCreateDialog game={game({ id: 'game-0001' })} onClose={() => {}} />,
+      () => {},
+    );
+    expect(out).toContain('Konsole schreiben');
+    expect(out).not.toContain('erlaubt jeden RCON-Befehl');
   });
 });

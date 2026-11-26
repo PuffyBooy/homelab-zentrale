@@ -12,7 +12,8 @@ import { SimAgent } from './helpers/sim-agent.js';
 
 const SHOTS = 'docs/screenshots/m7';
 const AGENT_URL = `${ORIGIN.replace(/^http/, 'ws')}/agent`;
-const AGENT_NAME = 'oracle-m7';
+// Unique per run: a retried beforeAll must not hit the name of the first try (409).
+const AGENT_NAME = `oracle-m7-${Date.now().toString(36)}`;
 const GAME = 'survival';
 
 test.describe.configure({ mode: 'serial', timeout: 180_000 });
@@ -45,29 +46,36 @@ async function apiCall<T>(
   );
 }
 
-async function shot(p: Page, name: string): Promise<void> {
+/** fullPage: false for app pages, the sticky NavRail lands mid-page in full-page shots. */
+async function shot(p: Page, name: string, fullPage = true): Promise<void> {
   mkdirSync(SHOTS, { recursive: true });
   await p.evaluate('document.fonts.ready');
   await p.waitForTimeout(300);
-  await p.screenshot({ path: `${SHOTS}/${name}.png`, fullPage: true });
+  await p.screenshot({ path: `${SHOTS}/${name}.png`, fullPage });
 }
 
 /** dark, light (system preference) and wall (data-theme) like the other milestones. */
-async function themes(p: Page, name: string): Promise<void> {
+async function themes(p: Page, name: string, fullPage = true): Promise<void> {
   for (const scheme of ['dark', 'light'] as const) {
     await p.emulateMedia({ colorScheme: scheme });
     await expect(p.locator('html')).toHaveAttribute('data-theme', scheme);
-    await shot(p, `e2e-${name}-${scheme}`);
+    await shot(p, `e2e-${name}-${scheme}`, fullPage);
   }
   await p.evaluate("document.documentElement.dataset.theme = 'wall'");
-  await shot(p, `e2e-${name}-wall`);
+  await shot(p, `e2e-${name}-wall`, fullPage);
   await p.emulateMedia({ colorScheme: 'dark' });
   await expect(p.locator('html')).toHaveAttribute('data-theme', 'dark');
 }
 
 async function gameStatus(): Promise<string> {
-  const res = await apiCall<{ games: { id: string; status: string }[] }>('GET', '/api/games');
-  return res.data.games.find((g) => g.id === gameId)?.status ?? 'missing';
+  const res = await apiCall<{ games: { id: string; status: string; statusText: string }[] }>(
+    'GET',
+    '/api/games',
+  );
+  const g = res.data.games.find((x) => x.id === gameId);
+  if (g && g.status !== 'ok' && g.status !== 'off')
+    console.warn(`game ${g.status}: ${g.statusText}`);
+  return g?.status ?? 'missing';
 }
 
 async function newFriend(browser: Browser): Promise<void> {
@@ -107,7 +115,7 @@ test.beforeAll(async ({ browser }) => {
   expect(created.status).toBe(202);
   gameId = created.data.game.id;
   // Setup: write, pull, up, then game.status every 5 s until online.
-  await expect.poll(gameStatus, { timeout: 30_000, intervals: [1000] }).toBe('ok');
+  await expect.poll(gameStatus, { timeout: 90_000, intervals: [1000] }).toBe('ok');
   const stop = await apiCall('POST', `/api/games/${gameId}/stop`);
   expect(stop.status).toBe(200);
   await expect.poll(gameStatus, { timeout: 15_000 }).toBe('off');
@@ -143,7 +151,7 @@ test('Teilen on the tile creates a link with only Starten/Stoppen, shown once', 
   await expect(dialog.getByText('Name der Person eingeben.')).toBeVisible();
   await dialog.getByLabel('Person').fill('Lena');
   await dialog.getByLabel('Läuft ab nach').selectOption('7d');
-  await shot(page, 'e2e-share-create-dark');
+  await shot(page, 'e2e-share-create-dark', false);
   await dialog.getByRole('button', { name: 'Link erstellen' }).click();
 
   const done = page.getByRole('dialog', { name: 'Link für Lena' });
@@ -153,7 +161,7 @@ test('Teilen on the tile creates a link with only Starten/Stoppen, shown once', 
   expect(m, `share url: ${url}`).not.toBeNull();
   token = m?.[1] ?? '';
   await expect(done.getByText('Starten/Stoppen', { exact: true })).toBeVisible();
-  await shot(page, 'e2e-share-created-dark');
+  await shot(page, 'e2e-share-created-dark', false);
   await done.getByRole('button', { name: 'Fertig' }).click();
 
   const row = tile.getByTestId('share-row');
@@ -224,7 +232,7 @@ test('admin sees the audit and the link in all themes', async () => {
   await expect(audit).toContainText('im Tailnet');
   await expect(audit.getByText('Lena wurde abgewiesen (kein Recht)').first()).toBeVisible();
   await page.locator('.hz-tile').filter({ hasText: 'Benutzerlinks' }).scrollIntoViewIfNeeded();
-  await themes(page, 'share-admin');
+  await themes(page, 'share-admin', false);
 });
 
 test('a revoked link shows "Link widerrufen" with the next poll', async () => {

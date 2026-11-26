@@ -178,3 +178,8 @@ Freund ── HTTPS ──▶ Caddy (oracle-a1, :443) ──▶ Gateway 127.0.0.
 | Logs | JSON-Zeilen auf stderr, nur Methode, Routenname (`/s/:token`), Status, Dauer, IP. Nie Tokens, PINs, Header oder die rohe URL. |
 
 Der Container läuft als `node`, mit schreibgeschütztem Dateisystem, `cap_drop: ALL`, `no-new-privileges`, im Host-Netz nur auf `127.0.0.1:8090`. Das Image (`deploy/Dockerfile.share`) gibt es für `linux/amd64` und `linux/arm64` (Oracle A1 ist ARM).
+
+### Grenzen
+
+- Das Gateway lässt insgesamt höchstens 600 API-Anfragen pro Minute durch (über alle IPs). Wer viele IPv6-Netze hat, kann diese Grenze ausschöpfen; dann sind die Links für alle Freunde kurz gesperrt (nur Ausfall, kein Zugriff). Abhilfe bei Bedarf: Gateway ausschalten oder in Caddy zusätzliche Limits setzen.
+- Im Tailnet zählt der Core das IP-Limit nach der Adresse, die `tailscale serve` meldet. Zusätzlich gilt immer das Limit pro Link (20 Anfragen pro Minute, Konsole 60).

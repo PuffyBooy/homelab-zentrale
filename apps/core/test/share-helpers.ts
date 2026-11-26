@@ -16,12 +16,13 @@ export async function createShare(
   gameId: string,
   body: Record<string, unknown> = {},
 ): Promise<CreatedShare> {
-  const res = await gameRequest(s, 'POST', `/api/games/${gameId}/shares`, {
-    person: 'Max',
-    perms: ['power'],
-    expires: '7d',
-    ...body,
-  });
+  const payload = { person: 'Max', perms: ['power'], expires: '7d', ...body };
+  let res = await gameRequest(s, 'POST', `/api/games/${gameId}/shares`, payload);
+  // A link with console_write needs step-up; do it only when asked (it moves the clock).
+  if (res.statusCode === 403 && res.json<{ error?: string }>().error === 'step_up_required') {
+    await stepUp(s.t, s.secret, s.cookie);
+    res = await gameRequest(s, 'POST', `/api/games/${gameId}/shares`, payload);
+  }
   if (res.statusCode !== 201) throw new Error(`create share ${res.statusCode} ${res.body}`);
   const parsed = shareCreateResponseSchema.parse(res.json());
   const token = parsed.urls.tailnet.split('/s/')[1] ?? '';

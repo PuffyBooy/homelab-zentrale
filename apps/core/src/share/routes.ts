@@ -38,7 +38,8 @@ function tailnetBase(request: FastifyRequest, baseUrl: string | undefined): stri
 
 /**
  * Admin side of share links (session + Origin from the global guard). Changing
- * the gateway settings and its token needs step-up (SECURITY.md: tokens).
+ * the gateway settings and its token needs step-up (SECURITY.md: tokens), and so
+ * does a link with `console_write` (full RCON for the friend).
  */
 export const shareRoutes: FastifyPluginAsync<ShareRoutesOptions> = async (app, o) => {
   const stepUp = requireStepUp(o.now);
@@ -66,6 +67,12 @@ export const shareRoutes: FastifyPluginAsync<ShareRoutesOptions> = async (app, o
   app.post('/games/:id/shares', async (request, reply) => {
     const game = gameOf(request.params);
     const body = shareCreateRequestSchema.parse(request.body);
+    // console_write gives the friend full RCON (SPEC 6.4), so it needs step-up like the console.
+    if (body.perms.includes('console_write')) {
+      // The reply is thenable, so `await` does not give it back; check `sent` instead.
+      await stepUp(request, reply);
+      if (reply.sent) return reply;
+    }
     const { share, token } = await s.create(game.id, body);
     audit('share.created', share.id, {
       gameId: game.id,

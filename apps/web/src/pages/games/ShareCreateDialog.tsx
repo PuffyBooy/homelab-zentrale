@@ -7,6 +7,7 @@ import { Dialog } from '../../components/Dialog.js';
 import { Field } from '../../components/Field.js';
 import { FormError } from '../../components/FormError.js';
 import { SelectField } from '../../components/SelectField.js';
+import { isApiError } from '../../lib/api.js';
 import { errorText } from '../../lib/errors.js';
 import {
   createShare,
@@ -125,6 +126,9 @@ function CreateForm({
           </span>
         ) : null}
       </fieldset>
+      {draft.perms.includes('console_write') ? (
+        <Alert tone="warn" title="Konsole schreiben erlaubt jeden RCON-Befehl, auch stop und op." />
+      ) : null}
       <div className="app-form-row">
         <SelectField
           label="Läuft ab nach"
@@ -145,7 +149,10 @@ function CreateForm({
           error={errors.pin}
         />
       </div>
-      {create.error ? <FormError title={errorText(create.error)} /> : null}
+      {/* A cancelled step-up is not an error the form has to repeat. */}
+      {create.error && !isApiError(create.error, 'step_up_required') ? (
+        <FormError title={errorText(create.error)} />
+      ) : null}
       <div className="hz-dialog-foot">
         <Button onClick={onClose}>Abbrechen</Button>
         <Button variant="primary" type="submit" icon="link" disabled={create.isPending}>

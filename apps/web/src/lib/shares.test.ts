@@ -1,9 +1,11 @@
 import type { ShareLink } from '@hz/shared';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { configureApi, isApiError } from './api.js';
 import {
   auditIsWarning,
   auditSub,
   AUDIT_TEXT,
+  createShare,
   emptyDraft,
   permsFor,
   permsText,
@@ -178,5 +180,58 @@ describe('share gateway URL', () => {
     expect(publicUrlError('https://spiel.example.org/x', true)).toMatch(/ohne Pfad/);
     expect(publicUrlError('spiel.example.org', true)).toBe('Ganze Adresse mit https:// eintragen.');
     expect(publicUrlError('https://spiel.example.duckdns.org', true)).toBeNull();
+  });
+});
+
+describe('create with step-up', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  const reply = (status: number, body: unknown): Response =>
+    new Response(JSON.stringify(body), {
+      status,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  const body = { person: 'Lena', perms: ['console_read', 'console_write'], expires: '7d' } as const;
+
+  it('goes through api(): console_write asks for the code and the create repeats', async () => {
+    const onStepUp = vi.fn(() => Promise.resolve(true));
+    const reset = configureApi({ onStepUp });
+    const created = {
+      share: link({ person: 'Lena', perms: ['console_read', 'console_write'] }),
+      urls: { tailnet: 'https://zentrale.example.ts.net/s/abc', public: null },
+    };
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(reply(403, { ok: false, error: 'step_up_required' }))
+      .mockResolvedValueOnce(reply(200, created));
+    vi.stubGlobal('fetch', fetchMock);
+    try {
+      await expect(createShare('game-0001', { ...body, perms: [...body.perms] })).resolves.toEqual(
+        created,
+      );
+    } finally {
+      reset();
+    }
+    expect(onStepUp).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls[1]?.[0]).toBe('/api/games/game-0001/shares');
+  });
+
+  it('a cancelled step-up rejects with step_up_required and sends nothing again', async () => {
+    const reset = configureApi({ onStepUp: () => Promise.resolve(false) });
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(reply(403, { ok: false, error: 'step_up_required' }));
+    vi.stubGlobal('fetch', fetchMock);
+    let err: unknown;
+    try {
+      await createShare('game-0001', { ...body, perms: [...body.perms] });
+    } catch (e) {
+      err = e;
+    } finally {
+      reset();
+    }
+    expect(isApiError(err, 'step_up_required')).toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });

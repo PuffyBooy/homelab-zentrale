@@ -951,7 +951,8 @@ body,
     grid-template-columns: minmax(0, 1fr);
   }
 }
-.app-kv a {
+.app-kv a,
+.app-foot-text a {
   color: var(--ink);
 }
 /* Phones: WebCheckRow keeps the name on the first line, the numbers move below it. */
