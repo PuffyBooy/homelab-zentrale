@@ -1,5 +1,5 @@
 import { createReadStream } from 'node:fs';
-import { mkdir, readdir, stat, unlink } from 'node:fs/promises';
+import { mkdir, readdir, stat, unlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type Database from 'better-sqlite3';
 import type { FastifyBaseLogger, FastifyPluginAsync } from 'fastify';
@@ -68,6 +68,9 @@ export const exportRoutes: FastifyPluginAsync<ExportRoutesOptions> = async (app,
     let size: number;
     try {
       await mkdir(o.dataDir, { recursive: true });
+      // Empty 0600 file first (VACUUM INTO accepts an empty target), so the copy
+      // is never readable by other users, whatever the umask.
+      await writeFile(path, '', { mode: 0o600, flag: 'wx' });
       o.sqlite.prepare('VACUUM INTO ?').run(path);
       size = (await stat(path)).size;
     } catch (err) {

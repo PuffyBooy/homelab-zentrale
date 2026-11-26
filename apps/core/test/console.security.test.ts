@@ -420,7 +420,8 @@ describe('console: limits', () => {
     for (let i = 0; i < CONSOLE_MAX_MINUTES / 10; i++) {
       e.t.clock.advance(10 * MIN);
       b.send({ type: 'input', data: 'l' });
-      await e.agent.next((m) => m.type === 'rpc' && m.action === 'pty.input');
+      const input = await e.agent.next((m) => m.type === 'rpc' && m.action === 'pty.input');
+      e.agent.send({ type: 'rpc.result', id: input.id, ok: true, data: null });
       e.t.app.hzCore.consoles.check();
     }
     expect(await closedOf(b)).toMatchObject({ reason: 'max_duration' });
@@ -443,6 +444,76 @@ describe('console: limits', () => {
     }
     await until(() => b.received.filter((m) => m.type === 'output').length === 700, 5000);
     expect(e.t.app.hzCore.hub.isConnected(e.serverId)).toBe(true);
+  });
+
+  it('results of 700 inputs count against the terminal budget, not the general one', async () => {
+    const e = await setup();
+    const b = await openBrowser(e);
+    await openConsole(e, b);
+    for (let i = 0; i < 700; i++) {
+      b.send({ type: 'input', data: 'j' });
+      const input = await e.agent.next((m) => m.type === 'rpc' && m.action === 'pty.input');
+      e.agent.send({ type: 'rpc.result', id: input.id, ok: true, data: null });
+      // Stay below the per-console input limit of the core.
+      if (i % 300 === 299) e.t.clock.advance(11_000);
+    }
+    b.send({ type: 'ping' });
+    await b.nextOfType('pong');
+    expect(e.t.app.hzCore.hub.isConnected(e.serverId)).toBe(true);
+    expect(b.received.some((m) => m.type === 'closed')).toBe(false);
+  });
+
+  it('keys typed while an input call runs are joined in order; resize is coalesced', async () => {
+    const e = await setup();
+    const b = await openBrowser(e);
+    await openConsole(e, b);
+    b.send({ type: 'input', data: 'a' });
+    const first = await e.agent.next((m) => m.type === 'rpc' && m.action === 'pty.input');
+    b.send({ type: 'input', data: 'b' });
+    b.send({ type: 'input', data: 'c' });
+    b.send({ type: 'resize', cols: 90, rows: 20 });
+    b.send({ type: 'resize', cols: 120, rows: 40 });
+    b.send({ type: 'ping' });
+    await b.nextOfType('pong');
+    e.agent.send({ type: 'rpc.result', id: first.id, ok: true, data: null });
+    const second = await e.agent.next((m) => m.type === 'rpc' && m.action === 'pty.input');
+    expect(second.params).toMatchObject({ data: 'bc' });
+    e.agent.send({ type: 'rpc.result', id: second.id, ok: true, data: null });
+    const resize = await e.agent.next((m) => m.type === 'rpc' && m.action === 'pty.resize');
+    expect(resize.params).toMatchObject({ cols: 120, rows: 40 });
+  });
+
+  it('input the agent refuses with busy is retried, never dropped', async () => {
+    const e = await setup();
+    const b = await openBrowser(e);
+    await openConsole(e, b);
+    b.send({ type: 'input', data: 'ls\r' });
+    const first = await e.agent.next((m) => m.type === 'rpc' && m.action === 'pty.input');
+    e.agent.send({
+      type: 'rpc.result',
+      id: first.id,
+      ok: false,
+      error: { code: 'busy', message: 'busy' },
+    });
+    const again = await e.agent.next(
+      (m) => m.type === 'rpc' && m.action === 'pty.input' && m.id !== first.id,
+    );
+    expect(again.params).toMatchObject({ data: 'ls\r' });
+  });
+
+  it('input that fails otherwise ends the console with error', async () => {
+    const e = await setup();
+    const b = await openBrowser(e);
+    await openConsole(e, b);
+    b.send({ type: 'input', data: 'x' });
+    const input = await e.agent.next((m) => m.type === 'rpc' && m.action === 'pty.input');
+    e.agent.send({
+      type: 'rpc.result',
+      id: input.id,
+      ok: false,
+      error: { code: 'not_found', message: 'gone' },
+    });
+    expect(await closedOf(b)).toMatchObject({ reason: 'error' });
   });
 
   it('sessions left open by a crash are closed on start', async () => {

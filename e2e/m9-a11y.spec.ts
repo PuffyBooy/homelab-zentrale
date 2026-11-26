@@ -82,14 +82,13 @@ function containers(): SimContainer[] {
 }
 
 async function setTheme(p: Page, theme: Theme): Promise<void> {
-  if (theme === 'wall') {
-    await p.emulateMedia({ colorScheme: 'dark' });
-    await p.evaluate("document.documentElement.dataset.theme = 'wall'");
-  } else {
-    await p.emulateMedia({ colorScheme: theme });
-    // Leaving the manual 'wall' theme: no media change event when the scheme is the same.
-    await p.evaluate(`document.documentElement.dataset.theme = '${theme}'`);
-  }
+  await p.emulateMedia({ colorScheme: theme === 'wall' ? 'dark' : theme });
+  // Let the matchMedia change event run first: the app re-applies its theme on it
+  // and would otherwise overwrite the manual 'wall' (the wall shots were dark copies).
+  await p.evaluate('new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)))');
+  await p.evaluate(`document.documentElement.dataset.theme = '${theme}'`);
+  await p.waitForTimeout(100);
+  await expect(p.locator('html')).toHaveAttribute('data-theme', theme);
 }
 
 /** axe over the page; collects serious/critical violations (checked at the end). */
@@ -119,6 +118,8 @@ async function shotAndAudit(
     await p.evaluate('document.fonts.ready');
     await p.waitForTimeout(250);
     await p.screenshot({ path: `${SHOTS}/${name}-${theme}.png` });
+    // The shot only counts if the theme was still applied when it was taken.
+    await expect(p.locator('html')).toHaveAttribute('data-theme', theme);
     await audit(p, `${name} [${theme}]`, into);
   }
   await p.emulateMedia({ colorScheme: 'dark' });
@@ -244,6 +245,7 @@ const pages = (): [string, string][] => [
   ['containers', '/containers'],
   ['logs', `/containers/${containerId}/logs`],
   ['games', '/games'],
+  ['game-new', '/games/new'],
   ['game-detail', `/games/${gameId}`],
   ['github', '/github'],
   ['websites', '/websites'],

@@ -199,11 +199,6 @@ body {
 .hz-term-host {
   color: var(--terminal-ink);
 }
-/* The terminal is always dark: in the light theme the light-theme ink and crit
-   colours would drop below 4.5:1 on --terminal-bg. */
-[data-theme='light'] .hz-term {
-  --crit: #ff6b6b;
-}
 .hz-term-body {
   margin: 0;
   padding: var(--space-3);

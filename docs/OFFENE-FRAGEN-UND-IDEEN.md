@@ -51,6 +51,8 @@ Alles hier braucht deine Zugänge oder ist nicht rückgängig zu machen. Bis dah
 - **Eigene Container geschützt:** Agent und Core tragen das Label `hz.role` (in den Compose-Dateien unter `deploy/`). Der Agent lehnt Stoppen, Neustart und Update dafür ab (auch für den eigenen Container über die Container-ID). Wer den Agent schon vor M3 ohne Label installiert hat, startet ihn einmal neu mit der neuen Compose-Datei (`deploy/install-agent.sh` erneut ausführen). Die Knöpfe sind in der Oberfläche noch sichtbar und liefern dann „nicht erlaubt“; ausblenden kommt später.
 - **Kleinigkeiten aus dem M3-Review, später:** Ein neuer Container, der beim Update sofort mit Exit 0 endet, gilt als Erfolg (kein Rollback). Fehler in Docker-Event-Handlern werden still verworfen. Der Log-Demuxer hat keine Obergrenze für die Frame-Größe (Docker ist vertrauenswürdig).
 
+- **Kleinigkeiten aus dem M9-Review, später:** Eine offene Konsole läuft über die 15 Min Step-up hinaus weiter (bis 15 Min ohne Eingabe bzw. 60 Min gesamt). TOTP neu einrichten beendet die anderen Sessions, erzeugt aber keine neuen Wiederherstellungscodes. Der Wandmodus nutzt eigene Schriftgrößen statt der `wall-*`-Klassen und ein flexibles Raster statt fix 2×2. Die Bundle-Grenze (400 kB gzip, derzeit etwa 160 kB beim Start) wird nicht automatisch im CI geprüft. Für die Repo-Detailseite gibt es keinen Screenshot, weil die Tests keinen GitHub-Token haben.
+
 ## Zukunftsideen
 
 Sortiert nach Bereich. Nichts davon ist in den Meilensteinen, alles wäre ein eigener kleiner Ausbau.

@@ -409,7 +409,8 @@ class ConsolePart {
   constructor(canWrite: boolean) {
     const term = h(
       'div',
-      { class: 'hz-term' },
+      // The terminal is always dark; its own subtree keeps status colours readable.
+      { class: 'hz-term', 'data-theme': 'dark' },
       h(
         'div',
         { class: 'hz-term-head' },

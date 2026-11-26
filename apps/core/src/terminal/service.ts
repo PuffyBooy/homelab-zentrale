@@ -36,6 +36,11 @@ export type ConsoleSession = z.infer<typeof consoleSessionSchema>;
  */
 export const CONSOLE_MAX_CLIENT_BYTES = 6 * 16 * 1024 + 1024;
 const MAX_INVALID = 20;
+/** Largest `pty.input` the agent protocol accepts (agent-protocol.ts). */
+const PTY_INPUT_MAX_CHARS = 16 * 1024;
+/** The agent answers `busy` while 8 RPCs run; input is retried, not dropped. */
+const PTY_BUSY_RETRIES = 50;
+const PTY_BUSY_RETRY_MS = 100;
 /** Output kept while the agent has not confirmed pty.open yet. */
 const MAX_PENDING_OUT_CHARS = 256 * 1024;
 /** A browser that does not read its output is cut off beyond this. */
@@ -70,6 +75,13 @@ interface Client {
   bytesOut: number;
   invalid: number;
   inputs: { t: number; bytes: number }[];
+  /** Input not yet sent to the agent; sent in order, one call at a time. */
+  inBuf: string;
+  /** Latest size not yet sent (older sizes are dropped). */
+  resizeTo: { cols: number; rows: number } | null;
+  inFlight: boolean;
+  busyRetries: number;
+  retryTimer: NodeJS.Timeout | null;
 }
 
 const MIN = 60_000;
@@ -172,6 +184,11 @@ export class ConsoleService {
       bytesOut: 0,
       invalid: 0,
       inputs: [],
+      inBuf: '',
+      resizeTo: null,
+      inFlight: false,
+      busyRetries: 0,
+      retryTimer: null,
     };
     this.clients.add(c);
     ws.on('message', (data, isBinary) => this.onMessage(c, data, isBinary));
@@ -213,13 +230,9 @@ export class ConsoleService {
         return;
       case 'resize':
         if (c.state !== 'open' || !c.stream) return this.invalid(c);
-        this.agentCall(
-          this.deps.hub.call(c.serverId, 'pty.resize', {
-            streamId: c.stream.id,
-            cols: msg.cols,
-            rows: msg.rows,
-          }),
-        );
+        // Coalesced: only the latest size is sent once the previous call is done.
+        c.resizeTo = { cols: msg.cols, rows: msg.rows };
+        this.pump(c);
         return;
       case 'close':
         this.finish(c, 'closed', null);
@@ -326,11 +339,63 @@ export class ConsoleService {
     c.bytesIn += bytes;
     c.lastInput = now;
     if (c.stream) {
-      this.agentCall(this.deps.hub.call(c.serverId, 'pty.input', { streamId: c.stream.id, data }));
+      c.inBuf += data;
+      this.pump(c);
     }
   }
 
-  /** Fire and forget: a lost input or resize surfaces as the stream ending. */
+  /**
+   * Sends buffered input (and the latest resize) to the agent, one call at a
+   * time and in order. Keystrokes typed while a call runs are joined into the
+   * next one, so key repeat in vim does not become one RPC per key. Input is
+   * never dropped silently: the agent's parallel limit (`busy`) is retried,
+   * any other failure ends the console with `error`.
+   */
+  private pump(c: Client): void {
+    if (c.inFlight || c.retryTimer || c.state !== 'open' || !c.stream) return;
+    const streamId = c.stream.id;
+    let call: Promise<unknown>;
+    let sent = '';
+    if (c.inBuf !== '') {
+      let n = Math.min(c.inBuf.length, PTY_INPUT_MAX_CHARS);
+      // Never split a surrogate pair between two calls.
+      const last = c.inBuf.charCodeAt(n - 1);
+      if (n < c.inBuf.length && last >= 0xd800 && last <= 0xdbff) n -= 1;
+      sent = c.inBuf.slice(0, n);
+      c.inBuf = c.inBuf.slice(n);
+      call = this.deps.hub.call(c.serverId, 'pty.input', { streamId, data: sent });
+    } else if (c.resizeTo) {
+      const size = c.resizeTo;
+      c.resizeTo = null;
+      call = this.deps.hub.call(c.serverId, 'pty.resize', { streamId, ...size });
+    } else {
+      return;
+    }
+    c.inFlight = true;
+    call.then(
+      () => {
+        c.inFlight = false;
+        c.busyRetries = 0;
+        this.pump(c);
+      },
+      (err: unknown) => {
+        c.inFlight = false;
+        if (c.state !== 'open') return;
+        if (err instanceof RpcError && err.code === 'busy' && c.busyRetries < PTY_BUSY_RETRIES) {
+          c.busyRetries += 1;
+          c.inBuf = sent + c.inBuf;
+          c.retryTimer = setTimeout(() => {
+            c.retryTimer = null;
+            this.pump(c);
+          }, PTY_BUSY_RETRY_MS);
+          return;
+        }
+        this.finish(c, 'error', null);
+      },
+    );
+  }
+
+  /** Fire and forget (pty.close while ending). */
   private agentCall(p: Promise<unknown>): void {
     p.catch(() => undefined);
   }
@@ -351,6 +416,9 @@ export class ConsoleService {
     this.clients.delete(c);
     if (c.openTimer) clearTimeout(c.openTimer);
     c.openTimer = null;
+    if (c.retryTimer) clearTimeout(c.retryTimer);
+    c.retryTimer = null;
+    c.inBuf = '';
     const stream = c.stream;
     if (stream && hangUp && !stream.isEnded) {
       this.agentCall(this.deps.hub.call(c.serverId, 'pty.close', { streamId: stream.id }));

@@ -184,6 +184,8 @@ interface Pending {
   resolve(v: unknown): void;
   reject(e: RpcError): void;
   timer: NodeJS.Timeout;
+  /** pty.input/resize/close: its result counts against the terminal budget. */
+  pty: boolean;
 }
 
 interface Conn {
@@ -276,11 +278,13 @@ export class AgentHub {
       const now = this.deps.now();
       const raw = isBinary ? null : rawText(data);
       const msg = raw === null ? null : parseAgentMessage(raw);
-      // Output of an open terminal counts against its own (higher) budget.
+      // Output of an open terminal and the results of its input/resize calls
+      // count against their own (higher) budget, so typing in vim cannot trip
+      // the general limit and drop the agent.
       const ptyData =
         conn !== null &&
-        msg?.type === 'stream.data' &&
-        conn.streams.get(msg.streamId)?.pty === true;
+        ((msg?.type === 'stream.data' && conn.streams.get(msg.streamId)?.pty === true) ||
+          (msg?.type === 'rpc.result' && conn.pending.get(msg.id)?.pty === true));
       const over = ptyData
         ? bump(ptyRate, now, this.opts.rateWindowMs) > this.opts.maxPtyMessages
         : bump(rate, now, this.opts.rateWindowMs) > this.opts.maxMessages;
@@ -529,7 +533,7 @@ export class AgentHub {
         conn.pending.delete(id);
         reject(new RpcError('timeout'));
       }, opts.timeoutMs ?? this.opts.defaultRpcTimeoutMs);
-      conn.pending.set(id, { resolve, reject, timer });
+      conn.pending.set(id, { resolve, reject, timer, pty: action.startsWith('pty.') });
       this.send(conn.ws, { type: 'rpc', id, action, params: prepared.params });
     });
   }
