@@ -94,12 +94,15 @@ export async function withGames(
     templatesDir?: string;
     ramPct?: number;
     gameFetch?: FetchLike;
+    /** M15: fake DNS provider. */
+    dnsFetch?: FetchLike;
   } = {},
 ): Promise<GameSetup> {
   const t = await makeApp({
     env: { HZ_GAME_TEMPLATES_DIR: opts.templatesDir ?? FIXTURE_TEMPLATES },
     liveOptions: { throttleMs: 10, appendThrottleMs: 5 },
     ...(opts.gameFetch ? { gameFetch: opts.gameFetch } : {}),
+    ...(opts.dnsFetch ? { dnsFetch: opts.dnsFetch } : {}),
     ...(opts.captureLogs ? { captureLogs: true } : {}),
   });
   const admin = await completeSetup(t);

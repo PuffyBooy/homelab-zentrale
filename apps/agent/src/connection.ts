@@ -26,6 +26,8 @@ export interface ConnectionOptions {
   /** HZ_AGENT_TOKEN (enrollment or agent token). */
   envToken: string | undefined;
   allowTerminal: boolean;
+  /** HZ_AGENT_ALLOW_RELAY=1 (capability relay in hello). */
+  allowRelay?: boolean;
   docker: boolean;
   version: string;
   arch: string;
@@ -181,7 +183,11 @@ export class AgentConnection {
       arch: this.o.arch.slice(0, 20),
       os: osName,
       token,
-      capabilities: { terminal: this.o.allowTerminal, docker: this.o.docker },
+      capabilities: {
+        terminal: this.o.allowTerminal,
+        docker: this.o.docker,
+        relay: this.o.allowRelay === true,
+      },
     });
     const handshakeTimeout = this.o.handshakeTimeoutMs ?? 15_000;
     this.timers.push(

@@ -165,6 +165,9 @@ Freunde bekommen pro Gameserver einen Link, mit dem sie **nur diesen Server** st
 - **Benutzerlinks:** zusätzliche Rechte „Welt herunterladen“ und „Whitelist-Anfrage“ (Admin bestätigt per Push-Hinweis und Knopf im Detail).
 - **Netz am Server:** zuhause / Cloud / VPS / anderes. Danach richtet sich der Hinweis zur Portweiterleitung (Router bzw. Firewall des Anbieters).
 
+### 6.6 Game-Relay und feste Adressen (M15)
+Jeder Server mit öffentlicher IPv4 kann **Eingang** sein. Ein Gameserver kann über einen Eingang laufen: Der Agent am Eingang nimmt die Spielports an und leitet sie über Tailscale zu dem Server, auf dem das Spiel gerade läuft. Zu Hause muss dann nichts im Router freigegeben werden. Zieht der Gameserver um, ändert sich nur das Ziel; Adresse und Port für Freunde bleiben gleich. Optional bekommt jeder Gameserver einen festen DNS-Namen, den die Zentrale bei Cloudflare oder DuckDNS auf den Eingang zeigen lässt. Hinweis: Das Spiel sieht als Absender die Tailscale-Adresse des Eingangs, IP-Sperren im Spiel wirken deshalb nicht pro Spieler.
+
 ## 6a. Prioritäten und automatisches Drosseln
 
 Jeder Container und jeder Gameserver hat eine **Priorität**:

@@ -277,6 +277,9 @@ describe('top consumers', () => {
     const fn = mockFetch(reply(200, res));
     await expect(fetchTopConsumers()).resolves.toEqual(res);
     expect(sent(fn).url).toBe('/api/overview/top-consumers');
+    const fn2 = mockFetch(reply(200, res));
+    await fetchTopConsumers('srv-2');
+    expect(sent(fn2).url).toBe('/api/overview/top-consumers?serverId=srv-2');
   });
 });
 
