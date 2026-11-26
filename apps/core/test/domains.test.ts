@@ -495,6 +495,58 @@ describe('domains: relay interface (DomainService)', () => {
     expect(renamed.owner).toBe('relay');
     sim.agent.close();
   });
+
+  it('providerForName, relayNameConflict, relayRecord and relayOwners (no provider request)', async () => {
+    const { t, h } = await setup();
+    const svc = service(t);
+    expect(svc.providerForName('mc.example.com')).toBeNull();
+    const cf = await addCloudflare(t, h);
+    const duck = await addDuck(t, h);
+    const before = t.world.calls.length;
+    expect(svc.providerForName('mc.example.com')).toBe(cf.id);
+    expect(svc.providerForName('example.com')).toBe(cf.id);
+    expect(svc.providerForName('a.b.other.org')).toBe(cf.id);
+    expect(svc.providerForName('meinheim.duckdns.org')).toBe(duck.id);
+    // Look-alikes and names under a DuckDNS subdomain belong to no provider.
+    for (const name of ['mc.example.com.evil.org', 'notexample.com', 'x.meinheim.duckdns.org'])
+      expect(svc.providerForName(name), name).toBeNull();
+    expect(svc.relayRecord('game1')).toBeNull();
+    expect(svc.relayOwners()).toEqual([]);
+    expect(svc.relayNameConflict('game1', cf.id, 'mc.example.com', 'A')).toBeNull();
+    expect(t.world.calls.length).toBe(before);
+
+    await svc.ensureRecord({
+      ownerRef: 'game1',
+      providerId: cf.id,
+      name: 'mc.example.com',
+      type: 'A',
+      target: { kind: 'static', value: '203.0.113.20' },
+    });
+    expect(svc.relayRecord('game1')).toEqual({
+      providerId: cf.id,
+      name: 'mc.example.com',
+      target: '203.0.113.20',
+      value: '203.0.113.20',
+      status: 'ok',
+      lastError: null,
+    });
+    expect(svc.relayRecord('game1', 'AAAA')).toBeNull();
+    expect(svc.relayOwners()).toEqual(['game1']);
+    // Its own record is no clash; another game's or an admin record is.
+    expect(svc.relayNameConflict('game1', cf.id, 'mc.example.com', 'A')).toBeNull();
+    expect(svc.relayNameConflict('game2', cf.id, 'mc.example.com', 'A')).toContain(
+      'schon einen DNS-Eintrag',
+    );
+    const admin = await req(t, h, 'POST', '/api/domains/records', {
+      providerId: cf.id,
+      name: 'www.example.com',
+      type: 'CNAME',
+      target: { kind: 'static', value: 'example.com' },
+    });
+    expect(admin.statusCode, admin.body).toBe(201);
+    expect(svc.relayNameConflict('game1', cf.id, 'www.example.com', 'A')).not.toBeNull();
+    expect(svc.relayOwners()).toEqual(['game1']);
+  });
 });
 
 describe('domains: certificates', () => {

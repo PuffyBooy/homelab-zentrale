@@ -1,6 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import {
-  dnsSettingsSchema,
   gameRelayResponseSchema,
   gameResponseSchema,
   ingressListResponseSchema,
@@ -10,9 +9,10 @@ import {
   TRANSFER_CHUNK_BYTES,
 } from '@hz/shared';
 import { eq } from 'drizzle-orm';
-import type { FetchLike } from '../src/checks/rdap.js';
-import { auditLog, gameRelays, gameServers, servers } from '../src/db/schema.js';
+import { auditLog, dnsRecords, gameRelays, gameServers, servers } from '../src/db/schema.js';
+import { DNS_TEXT } from '../src/relay/service.js';
 import { stepUp, type WsClient } from './agent-helpers.js';
+import { CF_TOKEN, DUCK_TOKEN, World } from './domains-helpers.js';
 import { gameRequest, type GameSetup } from './games-helpers.js';
 import { makeApp, authHeaders, completeSetup, type TestApp } from './helpers.js';
 import {
@@ -25,7 +25,6 @@ import {
 } from './migrate-helpers.js';
 import {
   addIngress,
-  fakeDns,
   INGRESS_PUBLIC_IP,
   putIngress,
   putRelay,
@@ -54,7 +53,13 @@ interface RelaySetup {
 }
 
 async function setup(
-  opts: { dnsFetch?: FetchLike; captureLogs?: boolean; targetListening?: number[] } = {},
+  opts: {
+    /** Fake Cloudflare / DuckDNS for the domains module (on unless domainsOn false). */
+    world?: World;
+    domainsOn?: boolean;
+    captureLogs?: boolean;
+    targetListening?: number[];
+  } = {},
 ): Promise<RelaySetup> {
   const m = await withTwoServers(
     clients,
@@ -62,7 +67,8 @@ async function setup(
     {
       targetListening: opts.targetListening ?? [],
       targetTailscaleIp: TARGET_TS,
-      ...(opts.dnsFetch ? { dnsFetch: opts.dnsFetch } : {}),
+      modules: { domains: opts.domainsOn ?? opts.world !== undefined },
+      ...(opts.world ? { features: { domains: opts.world.deps() } } : {}),
       ...(opts.captureLogs ? { captureLogs: true } : {}),
     },
   );
@@ -437,38 +443,53 @@ describe('game relay (M15)', () => {
   });
 });
 
-describe('DNS (M15)', () => {
-  it('Cloudflare: A record is created, then moved with the ingress; the token never shows', async () => {
-    const dns = fakeDns();
-    const r = await setup({ dnsFetch: dns.fetch, captureLogs: true });
-    const token = 'cf_' + 'x'.repeat(10) + Math.random().toString(36).slice(2, 12);
-    const zoneId = 'a'.repeat(32);
-    const put = await gameRequest(r.s, 'PUT', '/api/settings/dns', {
-      provider: 'cloudflare',
-      token,
-      zoneId,
-    });
-    expect(put.statusCode, put.body).toBe(200);
-    expect(dnsSettingsSchema.parse(put.json())).toMatchObject({
-      provider: 'cloudflare',
-      tokenSet: true,
-      zoneId,
-    });
-    const relay = await enableAndAssign(r, 'MC.Example.org');
-    expect(relay).toMatchObject({ dnsName: 'mc.example.org', dnsOk: true });
-    expect(relay?.address).toBe('mc.example.org:25566');
-    expect(dns.records.get('mc.example.org')?.content).toBe(INGRESS_PUBLIC_IP);
-    const create = dns.calls.find((c) => c.method === 'POST');
-    expect(create?.url).toBe(`https://api.cloudflare.com/client/v4/zones/${zoneId}/dns_records`);
-    expect(JSON.parse(create?.body ?? '{}')).toEqual({
+/** Adds a DNS provider in the domains module (session has step-up from setup). */
+async function addProvider(r: RelaySetup, kind: 'cloudflare' | 'duckdns'): Promise<string> {
+  const res = await gameRequest(
+    r.s,
+    'POST',
+    '/api/domains/providers',
+    kind === 'cloudflare'
+      ? { kind, label: 'Cloudflare', token: CF_TOKEN }
+      : { kind, label: 'DuckDNS', token: DUCK_TOKEN, subdomains: ['meinheim'] },
+  );
+  expect(res.statusCode, res.body).toBe(201);
+  return res.json<{ id: string }>().id;
+}
+
+const cfByName = (w: World, name: string) =>
+  [...w.cf.records.values()].find((x) => x.name === name);
+const relayRecords = (r: RelaySetup) =>
+  r.s.t.db.db
+    .select()
+    .from(dnsRecords)
+    .all()
+    .filter((x) => x.owner === 'relay');
+
+async function minuteTick(r: RelaySetup): Promise<void> {
+  r.s.t.clock.advance(60_000);
+  await r.s.t.app.hzCore.scheduler.tick();
+  await relayIdle(r.s);
+  await r.s.t.app.hzCore.features.domains.idle();
+}
+
+describe('DNS through the domains module (M15/M20)', () => {
+  it('Cloudflare: a relay record points to the ingress and follows it; the token never shows', async () => {
+    const world = new World(() => Date.now());
+    const r = await setup({ world, captureLogs: true });
+    const providerId = await addProvider(r, 'cloudflare');
+    const relay = await enableAndAssign(r, 'MC.Example.com');
+    expect(relay).toMatchObject({ dnsName: 'mc.example.com', dnsOk: true, dnsError: null });
+    expect(relay?.address).toBe('mc.example.com:25566');
+    expect(cfByName(world, 'mc.example.com')).toMatchObject({
       type: 'A',
-      name: 'mc.example.org',
       content: INGRESS_PUBLIC_IP,
       ttl: 60,
       proxied: false,
     });
-    expect(create?.headers.authorization).toBe(`Bearer ${token}`);
-    expect(dns.calls.every((c) => c.redirect === 'error')).toBe(true);
+    expect(relayRecords(r)).toMatchObject([
+      { providerId, name: 'mc.example.com', ownerRef: r.gameId, status: 'ok' },
+    ]);
 
     // A second ingress: the record follows.
     const ing2 = await addIngress(r.s, clients, { name: 'edge2', publicIp: '203.0.113.55' });
@@ -477,85 +498,73 @@ describe('DNS (M15)', () => {
     const moved = await putRelay(r.s, r.gameId, { ingressServerId: ing2.serverId });
     expect(moved.statusCode, moved.body).toBe(200);
     await relayIdle(r.s);
-    expect(dns.records.get('mc.example.org')?.content).toBe('203.0.113.55');
-    expect(dns.calls.some((c) => c.method === 'PUT')).toBe(true);
+    expect(cfByName(world, 'mc.example.com')?.content).toBe('203.0.113.55');
     expect(gameRelayResponseSchema.parse(moved.json()).relay).toMatchObject({
       ingressName: 'edge2',
-      dnsName: 'mc.example.org',
+      dnsName: 'mc.example.com',
       dnsOk: true,
+      dnsError: null,
     });
-    // The old ingress drops the route, the new one takes it.
+    // An explicit IP on the ingress moves the record too.
+    expect((await putIngress(r.s, ing2.serverId, { publicIp: '203.0.113.66' })).statusCode).toBe(
+      200,
+    );
+    expect(cfByName(world, 'mc.example.com')?.content).toBe('203.0.113.66');
     expect(r.ing.sets.at(-1)).toEqual([]);
     expect(ing2.sets.at(-1)?.[0]?.target.host).toBe(SOURCE_TS);
 
-    // Only the fixed provider host was contacted.
-    expect(dns.calls.every((c) => new URL(c.url).host === 'api.cloudflare.com')).toBe(true);
-    // The token is in no answer, no log line, no audit entry and not in the settings row clear.
-    const get = await gameRequest(r.s, 'GET', '/api/settings/dns');
-    expect(get.body).not.toContain(token);
-    expect(put.body).not.toContain(token);
-    expect(r.s.t.logs.join('\n')).not.toContain(token);
-    const auditText = JSON.stringify(r.s.t.db.db.select().from(auditLog).all());
-    expect(auditText).not.toContain(token);
-    const settingsRow = r.s.t.db.sqlite
-      .prepare("SELECT value_json v FROM settings WHERE key = 'relay.dns'")
-      .get() as { v: string };
-    expect(settingsRow.v).not.toContain(token);
-    expect(audits(r.s.t, 'relay.dns_updated').length).toBeGreaterThanOrEqual(2);
-  });
-
-  it('DuckDNS: only <sub>.duckdns.org names; a refusal is reported without the token', async () => {
-    const dns = fakeDns({ duck: 'KO' });
-    const r = await setup({ dnsFetch: dns.fetch, captureLogs: true });
-    const token = 'duck' + Math.random().toString(36).slice(2, 12) + 'abcdefghij';
-    expect(
-      (await gameRequest(r.s, 'PUT', '/api/settings/dns', { provider: 'duckdns', token }))
-        .statusCode,
-    ).toBe(200);
-    expect((await putIngress(r.s, r.ing.serverId)).statusCode).toBe(200);
-    const bad = await putRelay(r.s, r.gameId, {
-      ingressServerId: r.ing.serverId,
-      dnsName: 'mc.example.org',
-    });
-    expect(bad.statusCode).toBe(400);
-    const ok = await putRelay(r.s, r.gameId, {
-      ingressServerId: r.ing.serverId,
-      dnsName: 'meinspiel.duckdns.org',
-    });
-    expect(ok.statusCode, ok.body).toBe(200);
-    expect(gameRelayResponseSchema.parse(ok.json()).relay?.dnsOk).toBe(false);
-    const call = dns.calls.at(-1);
-    const u = new URL(call?.url ?? '');
-    expect(u.origin + u.pathname).toBe('https://www.duckdns.org/update');
-    expect(u.searchParams.get('domains')).toBe('meinspiel');
-    expect(u.searchParams.get('ip')).toBe(INGRESS_PUBLIC_IP);
-    const settings = dnsSettingsSchema.parse(
-      (await gameRequest(r.s, 'GET', '/api/settings/dns')).json(),
-    );
-    expect(settings.lastError).toBe('DuckDNS hat die Änderung abgelehnt');
+    // Only the fixed provider host; redirects are never followed (domains/http.ts).
+    expect(world.calls.every((c) => new URL(c.url).host === 'api.cloudflare.com')).toBe(true);
+    expect(world.calls.every((c) => c.redirect === 'manual')).toBe(true);
+    // The token is in no relay answer, no log line and no audit entry.
+    const get = await gameRequest(r.s, 'GET', `/api/games/${r.gameId}/relay`);
+    const game = await gameRequest(r.s, 'GET', `/api/games/${r.gameId}`);
+    const ingresses = await gameRequest(r.s, 'GET', '/api/relay/ingresses');
     for (const text of [
-      JSON.stringify(settings),
+      get.body,
+      game.body,
+      ingresses.body,
+      moved.body,
       r.s.t.logs.join('\n'),
       JSON.stringify(r.s.t.db.db.select().from(auditLog).all()),
     ]) {
-      expect(text).not.toContain(token);
+      expect(text).not.toContain(CF_TOKEN);
     }
+    expect(audits(r.s.t, 'relay.dns_updated').length).toBeGreaterThanOrEqual(3);
+  });
+
+  it('DuckDNS: the provider whose subdomain matches; a refusal shows the record error', async () => {
+    const world = new World(() => Date.now());
+    const r = await setup({ world, captureLogs: true });
+    await addProvider(r, 'duckdns');
+    const relay = await enableAndAssign(r, 'meinheim.duckdns.org');
+    expect(relay).toMatchObject({ dnsOk: true, dnsError: null });
+    expect(world.duck.subs.get('meinheim')?.ip).toBe(INGRESS_PUBLIC_IP);
+    // DuckDNS refuses the next change (token revoked there).
+    world.duck.token = 'revoked';
+    expect((await putIngress(r.s, r.ing.serverId, { publicIp: '203.0.113.77' })).statusCode).toBe(
+      200,
+    );
+    const after = gameRelayResponseSchema.parse(
+      (await gameRequest(r.s, 'GET', `/api/games/${r.gameId}/relay`)).json(),
+    ).relay;
+    expect(after?.dnsOk).toBe(false);
+    expect(after?.dnsError).toBeTruthy();
+    expect(after?.dnsError).not.toContain(DUCK_TOKEN);
+    expect(r.s.t.logs.join('\n')).not.toContain(DUCK_TOKEN);
+    expect(world.calls.every((c) => new URL(c.url).host === 'www.duckdns.org')).toBe(true);
   });
 
   it('one DNS name per game (409); a changed or removed name deletes the old record', async () => {
-    const dns = fakeDns();
-    const r = await setup({ dnsFetch: dns.fetch });
-    await gameRequest(r.s, 'PUT', '/api/settings/dns', {
-      provider: 'cloudflare',
-      token: 'a'.repeat(26),
-      zoneId: 'c'.repeat(32),
-    });
-    await enableAndAssign(r, 'mc.example.org');
-    expect(dns.records.get('mc.example.org')?.content).toBe(INGRESS_PUBLIC_IP);
+    const world = new World(() => Date.now());
+    const r = await setup({ world });
+    await addProvider(r, 'cloudflare');
+    await enableAndAssign(r, 'mc.example.com');
+    expect(cfByName(world, 'mc.example.com')?.content).toBe(INGRESS_PUBLIC_IP);
     const other = copyGame(r, r.s.serverId, 'creative', 25580);
     const dup = await putRelay(r.s, other, {
       ingressServerId: r.ing.serverId,
-      dnsName: 'mc.example.org',
+      dnsName: 'mc.example.com',
     });
     expect(dup.statusCode).toBe(409);
     expect(dup.json<{ message?: string }>().message).toBe(
@@ -564,77 +573,139 @@ describe('DNS (M15)', () => {
     // Rename: the old record goes, the new one points to the ingress.
     const renamed = await putRelay(r.s, r.gameId, {
       ingressServerId: r.ing.serverId,
-      dnsName: 'play.example.org',
+      dnsName: 'play.example.com',
     });
     expect(renamed.statusCode, renamed.body).toBe(200);
-    expect(dns.records.has('mc.example.org')).toBe(false);
-    expect(dns.records.get('play.example.org')?.content).toBe(INGRESS_PUBLIC_IP);
-    expect(dns.calls.filter((c) => c.method === 'DELETE')).toHaveLength(1);
-    expect(audits(r.s.t, 'relay.dns_deleted')).toHaveLength(1);
+    expect(cfByName(world, 'mc.example.com')).toBeUndefined();
+    expect(cfByName(world, 'play.example.com')?.content).toBe(INGRESS_PUBLIC_IP);
     // The freed name can be used by another game now.
-    expect(
-      (await putRelay(r.s, other, { ingressServerId: r.ing.serverId, dnsName: 'mc.example.org' }))
-        .statusCode,
-    ).toBe(200);
+    const reuse = await putRelay(r.s, other, {
+      ingressServerId: r.ing.serverId,
+      dnsName: 'mc.example.com',
+    });
+    expect(reuse.statusCode, reuse.body).toBe(200);
+    expect(gameRelayResponseSchema.parse(reuse.json()).relay?.dnsOk).toBe(true);
+    // Dropping the name deletes the record, the relay stays.
+    const unnamed = await putRelay(r.s, other, {
+      ingressServerId: r.ing.serverId,
+      dnsName: null,
+    });
+    expect(gameRelayResponseSchema.parse(unnamed.json()).relay).toMatchObject({
+      dnsName: null,
+      dnsOk: null,
+      dnsError: null,
+    });
+    expect(cfByName(world, 'mc.example.com')).toBeUndefined();
     // Removing the relay deletes its record too.
     await putRelay(r.s, r.gameId, { ingressServerId: null });
-    expect(dns.records.has('play.example.org')).toBe(false);
-    expect(dns.records.get('mc.example.org')?.content).toBe(INGRESS_PUBLIC_IP);
+    expect(cfByName(world, 'play.example.com')).toBeUndefined();
+    expect(relayRecords(r)).toEqual([]);
+    expect(audits(r.s.t, 'relay.dns_deleted')).toHaveLength(2);
   });
 
-  it('switching the provider needs a new token (a token never goes to another provider)', async () => {
-    const dns = fakeDns();
-    const r = await setup({ dnsFetch: dns.fetch });
-    const cfToken = 'cloudflare' + 'Z'.repeat(20);
-    await gameRequest(r.s, 'PUT', '/api/settings/dns', {
-      provider: 'cloudflare',
-      token: cfToken,
-      zoneId: 'd'.repeat(32),
+  it('a name that exists: at the provider -> stored with dnsError; as an admin record -> 409', async () => {
+    const world = new World(() => Date.now());
+    const r = await setup({ world });
+    const providerId = await addProvider(r, 'cloudflare');
+    world.cf.addForeign('taken.example.com', 'A', '198.51.100.9');
+    const relay = await enableAndAssign(r, 'taken.example.com');
+    expect(relay).toMatchObject({
+      dnsName: 'taken.example.com',
+      dnsOk: false,
+      dnsError: 'Diesen Eintrag gibt es beim Anbieter schon (nicht von der Zentrale).',
     });
-    await enableAndAssign(r, 'spiel.duckdns.org');
-    const sw = await gameRequest(r.s, 'PUT', '/api/settings/dns', { provider: 'duckdns' });
-    expect(sw.statusCode).toBe(400);
+    // The foreign record is untouched.
+    expect(cfByName(world, 'taken.example.com')?.content).toBe('198.51.100.9');
+    expect(audits(r.s.t, 'relay.dns_failed')).toHaveLength(1);
+    // Retries (minute job) report the same reason once.
+    await minuteTick(r);
+    expect(audits(r.s.t, 'relay.dns_failed')).toHaveLength(1);
+
+    const admin = await gameRequest(r.s, 'POST', '/api/domains/records', {
+      providerId,
+      name: 'admin.example.com',
+      type: 'A',
+      target: { kind: 'static', value: '198.51.100.10' },
+    });
+    expect(admin.statusCode, admin.body).toBe(201);
+    const clash = await putRelay(r.s, r.gameId, {
+      ingressServerId: r.ing.serverId,
+      dnsName: 'admin.example.com',
+    });
+    expect(clash.statusCode).toBe(409);
+    expect(clash.json<{ message?: string }>().message).toBe(
+      'Für diesen Namen gibt es schon einen DNS-Eintrag (Internet → Domains).',
+    );
+    expect(r.s.t.db.db.select().from(gameRelays).get()?.dnsName).toBe('taken.example.com');
+    // The foreign record goes away at the provider: the next minute sets the name.
+    for (const [id, rec] of world.cf.records)
+      if (rec.name === 'taken.example.com') world.cf.records.delete(id);
+    await minuteTick(r);
+    const ok = gameRelayResponseSchema.parse(
+      (await gameRequest(r.s, 'GET', `/api/games/${r.gameId}/relay`)).json(),
+    ).relay;
+    expect(ok).toMatchObject({ dnsOk: true, dnsError: null });
+    expect(cfByName(world, 'taken.example.com')?.content).toBe(INGRESS_PUBLIC_IP);
+  });
+
+  it('no provider for the name: dnsOk false; a provider added later is used within a minute', async () => {
+    const world = new World(() => Date.now());
+    const r = await setup({ world });
+    const relay = await enableAndAssign(r, 'mc.example.com');
+    expect(relay).toMatchObject({ dnsOk: false, dnsError: DNS_TEXT.noProvider });
+    expect(world.calls).toEqual([]);
+    await addProvider(r, 'cloudflare');
+    await minuteTick(r);
+    const after = gameRelayResponseSchema.parse(
+      (await gameRequest(r.s, 'GET', `/api/games/${r.gameId}/relay`)).json(),
+    ).relay;
+    expect(after).toMatchObject({ dnsOk: true, dnsError: null });
+    expect(cfByName(world, 'mc.example.com')?.content).toBe(INGRESS_PUBLIC_IP);
+  });
+
+  it('domains module off: dnsOk false; switching it on applies names and removes leftovers', async () => {
+    const world = new World(() => Date.now());
+    const r = await setup({ world });
+    await addProvider(r, 'cloudflare');
+    const modules = r.s.t.app.hzCore.modules;
+    modules.set({ domains: false });
+    const relay = await enableAndAssign(r, 'mc.example.com');
+    expect(relay).toMatchObject({ dnsOk: false, dnsError: DNS_TEXT.moduleOff });
+    const callsOff = world.calls.length;
+    await minuteTick(r);
+    expect(world.calls.length).toBe(callsOff);
+    expect(relayRecords(r)).toEqual([]);
+
+    modules.set({ domains: true });
+    await relayIdle(r.s);
+    expect(cfByName(world, 'mc.example.com')?.content).toBe(INGRESS_PUBLIC_IP);
     expect(
-      dnsSettingsSchema.parse((await gameRequest(r.s, 'GET', '/api/settings/dns')).json()).provider,
-    ).toBe('cloudflare');
-    const ok = await gameRequest(r.s, 'PUT', '/api/settings/dns', {
-      provider: 'duckdns',
-      token: 'duck' + 'Y'.repeat(20),
-    });
-    expect(ok.statusCode).toBe(200);
-    for (const c of dns.calls.filter((x) => new URL(x.url).host === 'www.duckdns.org')) {
-      expect(c.url).not.toContain(cfToken);
-      expect(JSON.stringify(c.headers)).not.toContain(cfToken);
-    }
-    // Same provider without a token keeps it (zone change only).
-    const keep = await gameRequest(r.s, 'PUT', '/api/settings/dns', { provider: 'duckdns' });
-    expect(keep.statusCode).toBe(200);
-    expect(dnsSettingsSchema.parse(keep.json()).tokenSet).toBe(true);
+      gameRelayResponseSchema.parse(
+        (await gameRequest(r.s, 'GET', `/api/games/${r.gameId}/relay`)).json(),
+      ).relay,
+    ).toMatchObject({ dnsOk: true, dnsError: null });
+
+    // Unassigned while the module is off: the record stays until it is on again.
+    modules.set({ domains: false });
+    expect((await putRelay(r.s, r.gameId, { ingressServerId: null })).statusCode).toBe(200);
+    expect(relayRecords(r)).toHaveLength(1);
+    modules.set({ domains: true });
+    await relayIdle(r.s);
+    expect(relayRecords(r)).toEqual([]);
+    expect(cfByName(world, 'mc.example.com')).toBeUndefined();
   });
 
-  it('provider none deletes the token; cloudflare without zone is refused', async () => {
-    const r = await setup();
-    const noZone = await gameRequest(r.s, 'PUT', '/api/settings/dns', {
-      provider: 'cloudflare',
-      token: 'a'.repeat(26),
-    });
-    expect(noZone.statusCode).toBe(400);
-    const badZone = await gameRequest(r.s, 'PUT', '/api/settings/dns', {
-      provider: 'cloudflare',
-      token: 'a'.repeat(26),
-      zoneId: '../../evil',
-    });
-    expect(badZone.statusCode).toBe(400);
-    await gameRequest(r.s, 'PUT', '/api/settings/dns', {
-      provider: 'duckdns',
-      token: 'a'.repeat(26),
-    });
-    const none = await gameRequest(r.s, 'PUT', '/api/settings/dns', { provider: 'none' });
-    expect(dnsSettingsSchema.parse(none.json())).toMatchObject({
-      provider: 'none',
-      tokenSet: false,
-    });
-    expect(audits(r.s.t, 'settings.dns_updated')).toHaveLength(2);
+  it('a deleted game leaves no relay record behind (minute job)', async () => {
+    const world = new World(() => Date.now());
+    const r = await setup({ world });
+    await addProvider(r, 'cloudflare');
+    await enableAndAssign(r, 'mc.example.com');
+    expect(relayRecords(r)).toHaveLength(1);
+    // The relay row goes with the game (ON DELETE CASCADE).
+    r.s.t.db.db.delete(gameRelays).where(eq(gameRelays.gameId, r.gameId)).run();
+    await minuteTick(r);
+    expect(relayRecords(r)).toEqual([]);
+    expect(cfByName(world, 'mc.example.com')).toBeUndefined();
   });
 });
 

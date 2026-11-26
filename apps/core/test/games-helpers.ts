@@ -1,6 +1,6 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
-import { gameResponseSchema, type ContainerInfo, type GameSummary } from '@hz/shared';
+import { gameResponseSchema, type ContainerInfo, type GameSummary, type Modules } from '@hz/shared';
 import {
   enrollAgent,
   inventoryMsg,
@@ -10,6 +10,7 @@ import {
   type Received,
   type WsClient,
 } from './agent-helpers.js';
+import type { AppDeps } from '../src/app.js';
 import type { FetchLike } from '../src/checks/rdap.js';
 import { authHeaders, completeSetup, makeApp, type TestApp } from './helpers.js';
 
@@ -94,15 +95,17 @@ export async function withGames(
     templatesDir?: string;
     ramPct?: number;
     gameFetch?: FetchLike;
-    /** M15: fake DNS provider. */
-    dnsFetch?: FetchLike;
+    /** M15 relay DNS: domains module state and its fake providers (domains-helpers.ts). */
+    modules?: Partial<Modules>;
+    features?: AppDeps['features'];
   } = {},
 ): Promise<GameSetup> {
   const t = await makeApp({
     env: { HZ_GAME_TEMPLATES_DIR: opts.templatesDir ?? FIXTURE_TEMPLATES },
     liveOptions: { throttleMs: 10, appendThrottleMs: 5 },
     ...(opts.gameFetch ? { gameFetch: opts.gameFetch } : {}),
-    ...(opts.dnsFetch ? { dnsFetch: opts.dnsFetch } : {}),
+    ...(opts.modules ? { modules: opts.modules } : {}),
+    ...(opts.features ? { features: opts.features } : {}),
     ...(opts.captureLogs ? { captureLogs: true } : {}),
   });
   const admin = await completeSetup(t);

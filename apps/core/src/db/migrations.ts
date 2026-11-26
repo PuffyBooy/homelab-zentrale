@@ -810,7 +810,8 @@ CREATE INDEX whitelist_requests_share ON whitelist_requests(share_id, created_at
     // A record value set last), listen_ports_json (the public ports on the ingress per port
     // name, fixed at assignment: friends keep address and port when the game moves or its
     // host ports change) and the relay state per game (ok | pending | error). The DNS
-    // provider lives in settings key relay.dns (token via crypto.ts, AAD settings.relay.dns.token).
+    // provider lived in settings key relay.dns until migration 17 moved relay DNS to the
+    // domains module (dns_ip is no longer written).
     sql: `
 CREATE TABLE server_ingress (
   server_id TEXT PRIMARY KEY REFERENCES servers(id) ON DELETE CASCADE,
@@ -985,6 +986,9 @@ CREATE TABLE apps (
   UNIQUE (server_id, app_id)
 );
 CREATE INDEX apps_template ON apps(template_id);
+
+-- M15 relay DNS now goes through the domains module (dns_records owner 'relay').
+DELETE FROM settings WHERE key = 'relay.dns';
 `,
   },
 ];

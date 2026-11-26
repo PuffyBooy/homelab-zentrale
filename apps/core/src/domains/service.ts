@@ -28,6 +28,7 @@ import {
   dnsProviderSchema,
   dnsRecordCreateSchema,
   dnsRecordSchema,
+  dnsRecordStatusSchema,
   dnsRecordTypeSchema,
   dnsTargetSchema,
   domainSettingsSchema,
@@ -891,6 +892,88 @@ export class DomainService {
   }
 
   // ---- interface for the game relay (M15) --------------------------------------------
+
+  /**
+   * Id of the first provider (oldest first) whose zones contain `name` (DuckDNS:
+   * exactly one of its `<sub>.duckdns.org` names), null if none. DB only, no request.
+   */
+  providerForName(name: string): string | null {
+    const rows = this.ctx.db
+      .select()
+      .from(dnsProviders)
+      .all()
+      .sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id));
+    return rows.find((r) => nameAllowed(r.kind, zonesOf(r), name))?.id ?? null;
+  }
+
+  /**
+   * German reason why `ownerRef` cannot get a relay record of `type` for `name` at
+   * `providerId` because the hub already manages a clashing record there (an admin
+   * record or another owner's relay record), else null. DB only, no request; a name
+   * that exists only at the provider surfaces later through ensureRecord.
+   */
+  relayNameConflict(
+    ownerRef: string,
+    providerId: string,
+    name: string,
+    type: DnsRecordType,
+  ): string | null {
+    const clash = this.ctx.db
+      .select()
+      .from(dnsRecords)
+      .where(and(eq(dnsRecords.providerId, providerId), eq(dnsRecords.name, name)))
+      .all()
+      .filter((r) => r.type === type || r.type === 'CNAME' || type === 'CNAME')
+      .some((r) => !(r.owner === 'relay' && r.ownerRef === ownerRef));
+    return clash ? 'Für diesen Namen gibt es schon einen DNS-Eintrag (Internet → Domains).' : null;
+  }
+
+  /** The relay record of `ownerRef` with this type (null without), for the relay view. */
+  relayRecord(
+    ownerRef: string,
+    type: DnsRecordType = 'A',
+  ): {
+    providerId: string;
+    name: string;
+    /** Static target value (what the record should point to). */
+    target: string | null;
+    /** Value the provider has (last sync). */
+    value: string | null;
+    status: DnsRecord['status'];
+    lastError: string | null;
+  } | null {
+    const row = this.ctx.db
+      .select()
+      .from(dnsRecords)
+      .where(
+        and(
+          eq(dnsRecords.owner, 'relay'),
+          eq(dnsRecords.ownerRef, ownerRef),
+          eq(dnsRecords.type, type),
+        ),
+      )
+      .get();
+    if (!row) return null;
+    const target = targetOf(row);
+    return {
+      providerId: row.providerId,
+      name: row.name,
+      target: target?.kind === 'static' ? target.value : null,
+      value: row.value,
+      status: dnsRecordStatusSchema.catch('error').parse(row.status),
+      lastError: clip(row.lastError),
+    };
+  }
+
+  /** ownerRefs of all relay records (orphan cleanup of the relay). */
+  relayOwners(): string[] {
+    const rows = this.ctx.db
+      .select({ ownerRef: dnsRecords.ownerRef })
+      .from(dnsRecords)
+      .where(eq(dnsRecords.owner, 'relay'))
+      .all();
+    return [...new Set(rows.map((r) => r.ownerRef).filter((r): r is string => r !== null))];
+  }
 
   /**
    * Creates or updates the relay record of `ownerRef` with this type. A relay

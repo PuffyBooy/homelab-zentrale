@@ -1,7 +1,5 @@
 import type { FastifyPluginAsync } from 'fastify';
 import {
-  dnsSettingsRequestSchema,
-  dnsSettingsSchema,
   gameIdParamsSchema,
   gameRelayRequestSchema,
   gameRelayResponseSchema,
@@ -27,10 +25,10 @@ export interface RelayRoutesOptions {
 
 /**
  * M15 game relay (packages/shared/src/api/relay.ts). Admin session everywhere
- * (global guard), module games (module gate: /api/relay, /api/settings/dns and
+ * (global guard), module games (module gate: /api/relay and
  * /api/servers/:id/ingress). Every change needs step-up. Answers are read back
- * from the database, never echoed from the request; the DNS token never leaves
- * the service.
+ * from the database, never echoed from the request. DNS providers and their
+ * tokens live in the domains module (/api/domains), never here.
  */
 export const relayRoutes: FastifyPluginAsync<RelayRoutesOptions> = async (app, o) => {
   const stepUp = requireStepUp(o.now);
@@ -76,18 +74,6 @@ export const relayRoutes: FastifyPluginAsync<RelayRoutesOptions> = async (app, o
       return gameRelayResponseSchema.parse({ relay });
     } catch (err) {
       refused('game.relay_refused', id, err);
-      throw err;
-    }
-  });
-
-  app.get('/settings/dns', async () => dnsSettingsSchema.parse(o.relay.dnsSettings()));
-
-  app.put('/settings/dns', { preHandler: stepUp }, async (request) => {
-    const body = dnsSettingsRequestSchema.parse(request.body);
-    try {
-      return dnsSettingsSchema.parse(await o.relay.updateDns(body));
-    } catch (err) {
-      refused('settings.dns_refused', null, err);
       throw err;
     }
   });

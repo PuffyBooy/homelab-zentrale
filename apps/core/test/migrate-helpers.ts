@@ -5,6 +5,7 @@ import {
   TRANSFER_WINDOW,
   type ContainerInfo,
   type Migration,
+  type Modules,
 } from '@hz/shared';
 import {
   connectAgent,
@@ -15,7 +16,7 @@ import {
   type Received,
   type WsClient,
 } from './agent-helpers.js';
-import type { FetchLike } from '../src/checks/rdap.js';
+import type { AppDeps } from '../src/app.js';
 import { ONLINE, readyGame, withGames, type GameSetup } from './games-helpers.js';
 
 /** How the fake source agent answers game.export. */
@@ -310,12 +311,14 @@ export async function withTwoServers(
     targetRamPct?: number;
     targetListening?: number[];
     targetTailscaleIp?: string;
-    dnsFetch?: FetchLike;
+    modules?: Partial<Modules>;
+    features?: AppDeps['features'];
     captureLogs?: boolean;
   } = {},
 ): Promise<MigrateSetup> {
   const s = await withGames(clients, {
-    ...(opts.dnsFetch ? { dnsFetch: opts.dnsFetch } : {}),
+    ...(opts.modules ? { modules: opts.modules } : {}),
+    ...(opts.features ? { features: opts.features } : {}),
     ...(opts.captureLogs ? { captureLogs: true } : {}),
   });
   const game = await readyGame(s);

@@ -11,7 +11,8 @@ import { z } from 'zod';
  * same port numbers on the ingress as on its host.
  *
  * Optional DNS: per game a name (e.g. "mc.example.org") that the core points to
- * the ingress's public IPv4 (Cloudflare or DuckDNS, token stored encrypted).
+ * the ingress's public IPv4 through the domains module (M20, api/domains.ts):
+ * a relay-owned A record at the provider whose zones contain the name.
  * All routes need an admin session; changes marked step-up need a fresh TOTP.
  */
 
@@ -111,8 +112,11 @@ export const gameRelaySchema = z.strictObject({
   address: z.string().nullable(),
   state: gameRelayStateSchema,
   error: z.string().nullable(),
-  /** DNS record points to the ingress (null: no DNS name or no provider). */
+  /** DNS record points to the ingress (null: no DNS name). false also while the domains
+   *  module is off or no provider's zones contain the name (see dnsError). */
   dnsOk: z.boolean().nullable(),
+  /** Why the DNS record is not ok (German, no secret), null when ok or no DNS name. */
+  dnsError: z.string().max(200).nullable(),
 });
 export type GameRelay = z.infer<typeof gameRelaySchema>;
 
@@ -125,34 +129,4 @@ export const gameRelayResponseSchema = z.strictObject({ relay: gameRelaySchema.n
 export const gameRelayRequestSchema = z.strictObject({
   ingressServerId: idSchema.nullable(),
   dnsName: dnsNameSchema.nullable().optional(),
-});
-
-// ---- DNS provider (settings) -------------------------------------------------------------
-
-export const relayDnsProviderSchema = z.enum(['none', 'cloudflare', 'duckdns']);
-
-// GET /api/settings/dns -> never the token
-export const dnsSettingsSchema = z.strictObject({
-  provider: relayDnsProviderSchema,
-  tokenSet: z.boolean(),
-  /** Cloudflare zone id (32 hex), null otherwise. */
-  zoneId: z.string().nullable(),
-  lastError: z.string().nullable(),
-  lastUpdateAt: z.iso.datetime().nullable(),
-});
-// PUT /api/settings/dns (step-up). token undefined keeps it; provider none deletes it.
-// Cloudflare: API token with Zone.DNS edit, A records only, proxied false, TTL 60.
-// DuckDNS: names must be <sub>.duckdns.org; only https://www.duckdns.org/update.
-export const dnsSettingsRequestSchema = z.strictObject({
-  provider: relayDnsProviderSchema,
-  token: z
-    .string()
-    .trim()
-    .regex(/^[A-Za-z0-9_-]{20,100}$/)
-    .optional(),
-  zoneId: z
-    .string()
-    .regex(/^[0-9a-f]{32}$/)
-    .nullable()
-    .optional(),
 });

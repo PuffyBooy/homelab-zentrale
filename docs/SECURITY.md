@@ -37,7 +37,7 @@ Die Zentrale hat Root-ähnliche Macht über alle Server. Diese Regeln sind **nic
 - Backup wiederherstellen nur mit Step-up und Namensbestätigung; jeder Archiv-Eintrag wird geprüft.
 
 ## Game-Relay (M15)
-- Relay nur mit `HZ_AGENT_ALLOW_RELAY=1` am Eingang und Step-up für Eingänge, Relays und DNS-Einstellungen.
+- Relay nur mit `HZ_AGENT_ALLOW_RELAY=1` am Eingang und Step-up für Eingänge und Relays. DNS-Namen setzt das Relay seit M20 über das Domains-Modul (Anbieter und Token dort, Step-up beim Einschalten); Relay-Einträge kann man in den Domains nicht bearbeiten oder löschen.
 - Ziele nur Tailscale-Adressen, Ports ab 1024 im Bereich des Eingangs, keine Überschneidungen; Grenzen für Verbindungen/Sessions (256 je Route) und Leerlauf (TCP 10 Min, UDP 2 Min). Keine Inhalte und keine Client-IPs im Log.
 - DNS-Token (Cloudflare/DuckDNS) verschlüsselt, nie in Antwort, Log, Audit oder Fehlertext; Anfragen nur an `api.cloudflare.com` bzw. `www.duckdns.org`, ohne Redirects.
 - Das Spiel sieht als Absender den Eingang; IP-Sperren im Spiel greifen nicht pro Spieler.

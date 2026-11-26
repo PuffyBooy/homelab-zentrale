@@ -96,6 +96,7 @@ import { installModuleGate, ModuleService } from './modules/service.js';
 import { storageRoutes } from './storage/routes.js';
 import { seedDemoRelay } from './demo/relay.js';
 import { relayRoutes } from './relay/routes.js';
+import { relayDnsFrom } from './relay/domains-dns.js';
 import { RelayService } from './relay/service.js';
 import { StorageService } from './storage/service.js';
 import { setupOps, type OpsServices } from './ops/index.js';
@@ -143,8 +144,6 @@ export interface AppDeps {
   wolUdp?: UdpSender;
   /** M12: HTTP for Discord webhooks and the Modrinth API (tests: a fake). */
   gameFetch?: FetchLike;
-  /** M15: HTTP for the DNS providers Cloudflare / DuckDNS (tests: a fake). */
-  dnsFetch?: FetchLike;
   /** Discord REST for the bot (tests: a fake; the gateway URL comes from it). */
   discordFetch?: DiscordFetch;
   /** M20/M21 modules: fake HTTP, short timers, template dirs (tests). */
@@ -664,15 +663,14 @@ export async function buildApp(config: Config, deps: AppDeps = {}): Promise<Fast
     }
   });
   // ---- M15: game relay (ingresses, fixed addresses, DNS) ------------------------
+  // DNS names go through the domains module (wired below, after setupFeatures).
   const relay = new RelayService({
     db: db.db,
-    box,
     now,
     hub,
     servers,
     games,
     log: app.log.child({ mod: 'relay' }),
-    ...(deps.dnsFetch ? { fetch: deps.dnsFetch } : {}),
   });
   games.setRelay(relay);
   // Ports, a move, a deleted game: the routes of the ingresses follow (sent only on change).
@@ -777,6 +775,12 @@ export async function buildApp(config: Config, deps: AppDeps = {}): Promise<Fast
     },
     deps.features,
   );
+  // M15 relay DNS through the domains module: immediately when it is switched on
+  // (its own listener in setupDomains ran first), else every minute (relay/service.ts).
+  relay.setDns(relayDnsFrom(features.domains.service));
+  modules.onChange((id, on) => {
+    if (id === 'domains' && on) relay.queueDns();
+  });
 
   app.decorate('hzCore', {
     scheduler,
@@ -830,6 +834,7 @@ export async function buildApp(config: Config, deps: AppDeps = {}): Promise<Fast
   });
   scheduler.every('onboarding.prune', HOUR, () => void onboarding.prune());
   scheduler.every('logs.leases', 30_000, () => logs.expireLeases());
+  scheduler.every('relay.dns', 60_000, () => relay.syncDns(), { align: true });
   // Rule set of M10 on the metrics interval (agents send metrics every 10 s).
   scheduler.every('throttle.tick', 10_000, () => throttle.tick());
   // Module switches: stop/start pollers, connections and jobs without restart.

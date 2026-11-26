@@ -350,6 +350,7 @@ export function gameRelay(over: Partial<GameRelay> = {}): GameRelay {
     state: 'ok',
     error: null,
     dnsOk: true,
+    dnsError: null,
     ...over,
   };
 }

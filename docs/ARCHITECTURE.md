@@ -99,7 +99,7 @@ design/                   Designsystem (nicht von Hand ändern, siehe design/REA
 | `server_storage` | server_id, storage_json (letztes `inventory.storage`: RAID, Volumes, Platten mit SMART), updated_at (M13, Migration 14) |
 | `game_backups` | id, game_id, path, size, created_at |
 | `server_ingress` | server_id, enabled, public_ip, port_from, port_to, updated_at (Eingang für das Game-Relay, M15, Migration 16) |
-| `game_relays` | game_id, ingress_server_id, dns_name, dns_ip (zuletzt beim Anbieter gesetzt), listen_ports_json (feste Ports am Eingang, bleiben beim Umzug), state, error, updated_at (M15) |
+| `game_relays` | game_id, ingress_server_id, dns_name, dns_ip (seit M20 ungenutzt: den A-Eintrag führt das Domains-Modul als `dns_records` mit owner `relay`), listen_ports_json (feste Ports am Eingang, bleiben beim Umzug), state, error, updated_at (M15) |
 | `game_schedules` | id, game_id, kind (`restart`/`backup`), days_json (ISO-Wochentage), time (HH:MM in `HZ_TIMEZONE`), enabled, last_run_at (M12, Migration 15) |
 | `game_notify` | game_id, discord_url_enc (AES-GCM), events_json, last_sent_at, last_error (M12) |
 | `game_player_sessions` | id, game_id, player, started_at, ended_at (aus den Status-Abfragen, 90 Tage, M12) |

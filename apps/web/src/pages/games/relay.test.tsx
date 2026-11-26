@@ -35,7 +35,26 @@ describe('M15 relay in the game pages', () => {
     expect(out).toContain('Wartet auf den Eingang');
     expect(out).toContain('mc.example.org:25565');
     expect(out).toContain('Kopieren');
-    expect(out).toContain('zeigt auf den Eingang');
+    expect(out).toContain('Zeigt auf den Eingang');
+    expect(out).toContain('hz-status-ok');
+  });
+
+  it('"Erreichbar über" shows the DNS error with shape, text and a link to the domains', () => {
+    const out = html(
+      <RelayTile
+        game={game({
+          relay: gameRelay({
+            dnsOk: false,
+            dnsError: 'Kein Anbieter mit einer Zone für mc.example.org',
+          }),
+        })}
+      />,
+    );
+    expect(out).toContain('Zeigt nicht auf den Eingang');
+    expect(out).toContain('hz-status-warn');
+    expect(out).toContain('Kein Anbieter mit einer Zone für mc.example.org');
+    expect(out).toContain('href="/internet"');
+    expect(out).toContain('Internet → Domains');
   });
 
   it('"Erreichbar über" without relay says direct', () => {

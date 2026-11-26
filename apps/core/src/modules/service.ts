@@ -75,7 +75,6 @@ const MODULE_PREFIXES: Record<ModuleId, readonly string[]> = {
     '/s',
     // M15 game relay
     '/api/relay',
-    '/api/settings/dns',
   ],
   proxmox: ['/api/proxmox'],
   dnsfilter: ['/api/dnsfilter'],

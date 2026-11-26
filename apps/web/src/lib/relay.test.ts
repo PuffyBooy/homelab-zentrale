@@ -3,7 +3,6 @@ import { ApiError } from './api.js';
 import { gameRelay, ingress } from '../test-fixtures.js';
 import {
   dnsOkText,
-  dnsStatus,
   fetchGameRelay,
   fetchIngresses,
   gameRelayErrorText,
@@ -12,13 +11,12 @@ import {
   ingressErrorText,
   ingressStatus,
   ingressSummary,
-  parseDnsDraft,
   parseDnsName,
   parseIngressDraft,
   relayChoices,
+  relayDnsStatus,
   relayStatus,
   relayVia,
-  saveDnsSettings,
   saveGameRelay,
   saveIngress,
 } from './relay.js';
@@ -32,14 +30,6 @@ function json(status: number, body: unknown): Response {
 
 afterEach(() => vi.unstubAllGlobals());
 
-const dns = {
-  provider: 'cloudflare' as const,
-  tokenSet: true,
-  zoneId: '0123456789abcdef0123456789abcdef',
-  lastError: null,
-  lastUpdateAt: null,
-};
-
 describe('relay api', () => {
   it('uses the M15 routes and methods', async () => {
     const fn = vi.fn<typeof fetch>();
@@ -47,7 +37,6 @@ describe('relay api', () => {
     fn.mockResolvedValueOnce(json(200, { ingress: ingress() }));
     fn.mockResolvedValueOnce(json(200, { relay: gameRelay() }));
     fn.mockResolvedValueOnce(json(200, { relay: null }));
-    fn.mockResolvedValueOnce(json(200, dns));
     vi.stubGlobal('fetch', fn);
     await expect(fetchIngresses()).resolves.toHaveLength(1);
     await saveIngress('srv-oracle1', {
@@ -58,19 +47,12 @@ describe('relay api', () => {
     });
     await expect(fetchGameRelay('game-000001')).resolves.toMatchObject({ state: 'ok' });
     await expect(saveGameRelay('game-000001', { ingressServerId: null })).resolves.toBeNull();
-    await saveDnsSettings({ provider: 'cloudflare', zoneId: dns.zoneId });
     expect(fn.mock.calls.map((c) => [c[0], c[1]?.method ?? 'GET'])).toEqual([
       ['/api/relay/ingresses', 'GET'],
       ['/api/servers/srv-oracle1/ingress', 'PUT'],
       ['/api/games/game-000001/relay', 'GET'],
       ['/api/games/game-000001/relay', 'PUT'],
-      ['/api/settings/dns', 'PUT'],
     ]);
-    // no token in the body when the field stays empty
-    expect(JSON.parse(String(fn.mock.calls[4]?.[1]?.body))).toEqual({
-      provider: 'cloudflare',
-      zoneId: dns.zoneId,
-    });
   });
 });
 
@@ -155,47 +137,20 @@ describe('relay per game', () => {
     expect(relayStatus(gameRelay({ state: 'error' })).status).toBe('crit');
     expect(dnsOkText(gameRelay())).toBe('zeigt auf den Eingang');
     expect(dnsOkText(gameRelay({ dnsOk: false }))).toBe('zeigt noch nicht auf den Eingang');
-    expect(dnsOkText(gameRelay({ dnsOk: null }))).toBe('kein DNS-Anbieter eingerichtet');
+    expect(dnsOkText(gameRelay({ dnsOk: false, dnsError: 'Keine Zone für mc.example.org' }))).toBe(
+      'Keine Zone für mc.example.org',
+    );
+    expect(relayDnsStatus(gameRelay())).toEqual({ status: 'ok', label: 'Zeigt auf den Eingang' });
+    expect(relayDnsStatus(gameRelay({ dnsOk: false }))?.status).toBe('warn');
+    expect(relayDnsStatus(gameRelay({ dnsName: null, dnsOk: null }))).toBeNull();
     expect(dnsOkText(gameRelay({ dnsName: null, dnsOk: null }))).toBe('kein Name');
     expect(relayVia(gameRelay())).toBe('über oracle-a1');
   });
 
-  it('DNS name: optional, lower case, DuckDNS only <name>.duckdns.org', () => {
-    expect(parseDnsName('  ', 'cloudflare')).toEqual({ ok: true, name: null });
-    expect(parseDnsName('MC.Example.org', 'cloudflare')).toEqual({
-      ok: true,
-      name: 'mc.example.org',
-    });
-    expect(parseDnsName('*.example.org', 'cloudflare').ok).toBe(false);
-    expect(parseDnsName('mc.example.org', 'duckdns').ok).toBe(false);
-    expect(parseDnsName('meinspiel.duckdns.org', 'duckdns').ok).toBe(true);
-  });
-});
-
-describe('DNS settings', () => {
-  it('keeps a stored token, needs one for a new provider, checks the zone id', () => {
-    expect(parseDnsDraft({ provider: 'none', token: '', zoneId: 'x' }, dns)).toEqual({
-      ok: true,
-      body: { provider: 'none', zoneId: null },
-    });
-    expect(
-      parseDnsDraft({ provider: 'cloudflare', token: '', zoneId: dns.zoneId.toUpperCase() }, dns),
-    ).toEqual({ ok: true, body: { provider: 'cloudflare', zoneId: dns.zoneId } });
-    const switched = parseDnsDraft({ provider: 'duckdns', token: '', zoneId: '' }, dns);
-    expect(switched.ok ? null : switched.errors.token).toBe('Token fehlt.');
-    const bad = parseDnsDraft({ provider: 'cloudflare', token: 'kurz', zoneId: '123' }, dns);
-    expect(bad.ok ? null : Object.keys(bad.errors).sort()).toEqual(['token', 'zoneId']);
-    const token = 'a'.repeat(40);
-    expect(parseDnsDraft({ provider: 'duckdns', token, zoneId: '' }, dns)).toEqual({
-      ok: true,
-      body: { provider: 'duckdns', zoneId: null, token },
-    });
-  });
-
-  it('status of the tile head', () => {
-    expect(dnsStatus({ ...dns, provider: 'none' }).label).toBe('AUS');
-    expect(dnsStatus({ ...dns, tokenSet: false }).label).toBe('KEIN TOKEN');
-    expect(dnsStatus({ ...dns, lastError: 'HTTP 403' }).status).toBe('crit');
-    expect(dnsStatus(dns).label).toBe('CLOUDFLARE');
+  it('DNS name: optional, lower case, no wildcard', () => {
+    expect(parseDnsName('  ')).toEqual({ ok: true, name: null });
+    expect(parseDnsName('MC.Example.org')).toEqual({ ok: true, name: 'mc.example.org' });
+    expect(parseDnsName('*.example.org').ok).toBe(false);
+    expect(parseDnsName('meinspiel.duckdns.org').ok).toBe(true);
   });
 });
