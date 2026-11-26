@@ -5,3 +5,5 @@ export * from './api/servers.js';
 export * from './api/alerts.js';
 export * from './live.js';
 export * from './api/containers.js';
+export * from './api/checks.js';
+export * from './api/push.js';

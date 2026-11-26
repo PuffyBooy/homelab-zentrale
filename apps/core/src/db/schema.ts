@@ -270,9 +270,81 @@ export const alerts = sqliteTable(
   ],
 );
 
+// ---- M4: checks, push ------------------------------------------------------
+
+export const checks = sqliteTable('checks', {
+  /** Random public id (base64url). */
+  id: text('id').primaryKey(),
+  name: text('name').notNull(),
+  kind: text('kind').notNull(),
+  /** Full CheckDef (shared schema) as JSON. Never contains credentials (rejected). */
+  defJson: text('def_json').notNull(),
+  /** `core` or the server id of the agent that runs the check. */
+  runFrom: text('run_from').notNull(),
+  serverId: text('server_id').references(() => servers.id, { onDelete: 'set null' }),
+  intervalS: integer('interval_s').notNull(),
+  enabled: integer('enabled', { mode: 'boolean' }).notNull().default(true),
+  /** Evaluated status (checks/evaluate.ts). */
+  status: text('status').notNull().default('busy'),
+  reason: text('reason'),
+  lastCode: integer('last_code'),
+  lastMs: real('last_ms'),
+  lastCheckedAt: integer('last_checked_at'),
+  consecutiveFailures: integer('consecutive_failures').notNull().default(0),
+  consecutiveSlow: integer('consecutive_slow').notNull().default(0),
+  /** First failure of the current failure streak. */
+  downSince: integer('down_since'),
+  createdAt: integer('created_at').notNull(),
+  updatedAt: integer('updated_at').notNull(),
+});
+
+/** Raw results, kept 30 days. `error` is the short German reason, never a response body. */
+export const checkResults = sqliteTable(
+  'check_results',
+  {
+    checkId: text('check_id')
+      .notNull()
+      .references(() => checks.id, { onDelete: 'cascade' }),
+    ts: integer('ts').notNull(),
+    ok: integer('ok', { mode: 'boolean' }).notNull(),
+    code: integer('code'),
+    ms: real('ms'),
+    error: text('error'),
+  },
+  (t) => [index('check_results_check_ts').on(t.checkId, t.ts), index('check_results_ts').on(t.ts)],
+);
+
+export const certStatus = sqliteTable('cert_status', {
+  checkId: text('check_id')
+    .primaryKey()
+    .references(() => checks.id, { onDelete: 'cascade' }),
+  sslExpiresAt: integer('ssl_expires_at'),
+  domainExpiresAt: integer('domain_expires_at'),
+  checkedAt: integer('checked_at'),
+  domainCheckedAt: integer('domain_checked_at'),
+});
+
+export const pushSubscriptions = sqliteTable('push_subscriptions', {
+  id: text('id').primaryKey(),
+  /** SHA-256 of `push:<endpoint>`, to update instead of duplicate a subscription. */
+  endpointHash: text('endpoint_hash').notNull().unique(),
+  /** Endpoint URL, encrypted (it is a capability URL). */
+  endpointEnc: text('endpoint_enc').notNull(),
+  /** Host of the endpoint only, shown in the device list. */
+  endpointHost: text('endpoint_host').notNull(),
+  /** {p256dh, auth}, encrypted. */
+  keysEnc: text('keys_enc').notNull(),
+  label: text('label').notNull().default(''),
+  createdAt: integer('created_at').notNull(),
+  lastOkAt: integer('last_ok_at'),
+});
+
 export type User = typeof users.$inferSelect;
 export type Session = typeof sessions.$inferSelect;
 export type ServerRow = typeof servers.$inferSelect;
 export type ServerStateRow = typeof serverState.$inferSelect;
 export type AlertRow = typeof alerts.$inferSelect;
 export type ContainerRow = typeof containers.$inferSelect;
+export type CheckRow = typeof checks.$inferSelect;
+export type CertStatusRow = typeof certStatus.$inferSelect;
+export type PushSubscriptionRow = typeof pushSubscriptions.$inferSelect;

@@ -16,6 +16,7 @@ import {
 import { errorText } from '../../lib/errors.js';
 import { describeUserAgent, formatAgo, formatDateTime, formatTime } from '../../lib/format.js';
 import { useAuthState } from '../../lib/useAuthState.js';
+import { NotifyTile, PushTile } from './PushTiles.js';
 
 export function SettingsPage(): ReactElement {
   return (
@@ -23,6 +24,8 @@ export function SettingsPage(): ReactElement {
       <AccountTile />
       <SessionsTile />
       <RecoveryTile />
+      <PushTile />
+      <NotifyTile />
     </div>
   );
 }

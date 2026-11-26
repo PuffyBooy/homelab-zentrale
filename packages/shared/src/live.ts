@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { alertSchema } from './api/alerts.js';
+import { checkSummarySchema } from './api/checks.js';
 import { containerSummarySchema } from './api/containers.js';
 import { serverDetailSchema, serverSummarySchema } from './api/servers.js';
 
@@ -45,6 +46,7 @@ export const liveTopicItemSchemas = {
   servers: serverSummarySchema,
   alerts: alertSchema,
   containers: containerSummarySchema,
+  checks: checkSummarySchema,
 } as const;
 
 /**

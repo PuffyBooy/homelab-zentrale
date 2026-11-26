@@ -20,8 +20,8 @@ export interface JobOptions {
 
 interface Job {
   name: string;
-  intervalMs: number;
-  align: boolean;
+  /** Next due time after `from` (interval or wall-clock rule). */
+  nextAfter: (from: number) => number;
   next: number;
   fn: JobFn;
   running: boolean;
@@ -46,19 +46,35 @@ export class Scheduler {
   /** Registers a job. Returns a function that removes it. Names are unique. */
   every(name: string, intervalMs: number, fn: JobFn, opts: JobOptions = {}): () => void {
     if (!Number.isFinite(intervalMs) || intervalMs <= 0) throw new Error('interval must be > 0');
-    if (this.jobs.has(name)) throw new Error(`job ${name} exists`);
     const align = opts.align ?? false;
+    return this.add(name, (from) => this.nextRun(from, intervalMs, align), fn, opts.immediate);
+  }
+
+  /**
+   * Registers a job that runs at times given by `nextAfter` (e.g. every day at
+   * 04:00 Vienna time, see calendar.ts). `nextAfter(t)` must return a time > t.
+   */
+  at(name: string, nextAfter: (from: number) => number, fn: JobFn): () => void {
+    return this.add(name, nextAfter, fn, false);
+  }
+
+  private add(
+    name: string,
+    nextAfter: (from: number) => number,
+    fn: JobFn,
+    immediate = false,
+  ): () => void {
+    if (this.jobs.has(name)) throw new Error(`job ${name} exists`);
     const job: Job = {
       name,
-      intervalMs,
-      align,
-      next: opts.immediate ? this.now() : this.nextRun(this.now(), intervalMs, align),
+      nextAfter,
+      next: immediate ? this.now() : nextAfter(this.now()),
       fn,
       running: false,
     };
     this.jobs.set(name, job);
     return () => {
-      this.jobs.delete(name);
+      if (this.jobs.get(name) === job) this.jobs.delete(name);
     };
   }
 
@@ -108,7 +124,7 @@ export class Scheduler {
         this.opts.onError?.(job.name, err);
       } finally {
         job.running = false;
-        job.next = this.nextRun(this.now(), job.intervalMs, job.align);
+        job.next = job.nextAfter(this.now());
       }
     }
   }

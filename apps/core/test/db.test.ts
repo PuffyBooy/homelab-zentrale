@@ -27,6 +27,10 @@ const tables = [
   schema.metrics1h,
   schema.containers,
   schema.alerts,
+  schema.checks,
+  schema.checkResults,
+  schema.certStatus,
+  schema.pushSubscriptions,
 ];
 
 describe('database', () => {

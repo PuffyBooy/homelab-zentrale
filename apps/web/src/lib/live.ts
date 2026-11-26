@@ -1,6 +1,7 @@
 import {
   LIVE_CLOSE_SESSION_ENDED,
   alertSchema,
+  checkSummarySchema,
   containerSummarySchema,
   logLineSchema,
   logSnapshotSchema,
@@ -9,6 +10,7 @@ import {
   serverDetailSchema,
   serverSummarySchema,
   type Alert,
+  type CheckSummary,
   type ContainerSummary,
   type LiveServerMessage,
   type LogLine,
@@ -28,6 +30,7 @@ import {
 } from 'react';
 import { alertsAllKey, alertsKey, isActive } from './alerts.js';
 import type { Schema } from './api.js';
+import { checksKey } from './checks.js';
 import { containersKey } from './containers.js';
 import { appendLogLines, containerLogsKey, type LogBuffer } from './logs.js';
 import { serverKey, serversKey } from './servers.js';
@@ -148,6 +151,23 @@ export function applyLiveMessage(qc: QueryClient, msg: LiveServerMessage): Apply
         old ? mergeById(old, ok, msg.remove) : old,
       );
       if (bad) void qc.invalidateQueries({ queryKey: containersKey, exact: true });
+    }
+    return result;
+  }
+
+  if (topic === 'checks') {
+    if (msg.type === 'snapshot') {
+      const raw = snapshotList(msg.data, 'checks');
+      const { ok, bad } = parseItems(checkSummarySchema, raw ?? []);
+      if (raw) qc.setQueryData<CheckSummary[]>(checksKey, ok);
+      if (!raw || bad) void qc.invalidateQueries({ queryKey: checksKey, exact: true });
+    } else {
+      const { ok, bad } = parseItems(checkSummarySchema, msg.upsert ?? []);
+      qc.setQueryData<CheckSummary[]>(checksKey, (old) =>
+        old ? mergeById(old, ok, msg.remove) : old,
+      );
+      for (const id of msg.remove ?? []) qc.removeQueries({ queryKey: [...checksKey, id] });
+      if (bad) void qc.invalidateQueries({ queryKey: checksKey, exact: true });
     }
     return result;
   }

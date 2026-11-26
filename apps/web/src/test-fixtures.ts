@@ -1,4 +1,11 @@
-import type { Alert, ContainerSummary, ServerDetail, ServerSummary } from '@hz/shared';
+import type {
+  Alert,
+  CheckDef,
+  CheckSummary,
+  ContainerSummary,
+  ServerDetail,
+  ServerSummary,
+} from '@hz/shared';
 
 /** Test data builders (unit tests only). */
 
@@ -101,5 +108,42 @@ export function container(over: Partial<ContainerSummary> = {}): ContainerSummar
     restartCount: 0,
     updatedAt: '2026-11-25T22:04:00.000Z',
     ...over,
+  };
+}
+
+let k = 0;
+export function check(
+  over: Partial<Omit<CheckSummary, 'def'>> & { def?: Partial<CheckDef> } = {},
+): CheckSummary {
+  k++;
+  const { def, ...rest } = over;
+  const base: CheckDef = {
+    kind: 'http',
+    name: `site-${k}.at`,
+    runFrom: 'core',
+    intervalS: 60,
+    enabled: true,
+    serverId: null,
+    url: `https://site-${k}.at/`,
+    expectStatusMin: 200,
+    expectStatusMax: 399,
+    certCheck: true,
+  };
+  return {
+    id: `chk-${String(k).padStart(6, '0')}`,
+    def: { ...base, ...def } as CheckDef,
+    status: 'ok',
+    reason: null,
+    lastCode: 200,
+    lastMs: 312,
+    lastCheckedAt: '2026-11-25T22:04:00.000Z',
+    consecutiveFailures: 0,
+    sslExpiresAt: '2027-01-25T22:04:00.000Z',
+    domainExpiresAt: '2027-06-25T22:04:00.000Z',
+    uptime24h: 100,
+    uptime7d: 99.95,
+    uptime30d: 99.9,
+    spark: [300, 310, 320, 312],
+    ...rest,
   };
 }

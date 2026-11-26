@@ -870,3 +870,109 @@ body,
 .app-logsearch .hz-input::-webkit-search-cancel-button {
   appearance: none;
 }
+
+/* ---------- Select (proposed, next to Field) ---------- */
+.hz-select {
+  /* Native arrow, no gradients (design/README.md, "Nicht tun"). */
+  padding-right: var(--space-2);
+  cursor: pointer;
+}
+.hz-select:disabled {
+  cursor: default;
+  color: var(--ink-muted);
+}
+.hz-select option {
+  background: var(--bg-100);
+  color: var(--ink);
+}
+
+/* Two or three fields side by side, stacked on phones. */
+.app-form-row {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(0, 1fr);
+  gap: var(--space-3);
+  align-items: start;
+}
+@media (max-width: 699px) {
+  .app-form-row {
+    grid-auto-flow: row;
+  }
+}
+
+/* ---------- Websites ---------- */
+.app-check-spark {
+  display: inline-flex;
+  align-items: center;
+  margin-right: var(--space-2);
+}
+.hz-web .hz-row-actions {
+  align-items: center;
+}
+@media (max-width: 699px) {
+  .app-check-spark {
+    display: none;
+  }
+}
+.app-range {
+  display: flex;
+  gap: var(--space-1);
+}
+.app-break {
+  overflow-wrap: anywhere;
+}
+.app-outages {
+  list-style: none;
+  margin: var(--space-2) 0 0;
+  padding: 0;
+  display: grid;
+  gap: var(--space-1);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--ink-muted);
+}
+.app-outages li {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+.app-outage-meta {
+  color: var(--ink-faint);
+}
+
+/* ---------- Alerts ---------- */
+.app-filters {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 220px));
+  gap: var(--space-3);
+}
+@media (max-width: 699px) {
+  .app-filters {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+.app-kv a {
+  color: var(--ink);
+}
+/* Phones: WebCheckRow keeps the name on the first line, the numbers move below it. */
+@media (max-width: 699px) {
+  .app-main .hz-web {
+    flex-wrap: wrap;
+    row-gap: var(--space-1);
+  }
+  .app-main .hz-web > .hz-row-main {
+    flex: 1 1 calc(100% - 56px - var(--space-3));
+  }
+  .app-main .hz-web > .hz-web-code {
+    margin-left: calc(56px + var(--space-3));
+  }
+  .app-main .hz-web > .hz-web-code,
+  .app-main .hz-web > .hz-web-ms,
+  .app-main .hz-web > .hz-web-ssl {
+    width: auto;
+    text-align: left;
+  }
+  .app-main .hz-web > .hz-row-actions {
+    margin-left: auto;
+  }
+}

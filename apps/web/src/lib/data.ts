@@ -1,8 +1,9 @@
-import type { Alert, ContainerSummary, ServerSummary } from '@hz/shared';
+import type { Alert, CheckSummary, ContainerSummary, ServerSummary } from '@hz/shared';
 import { useQuery, type UseQueryResult } from '@tanstack/react-query';
 import { useCallback } from 'react';
 import { useSearchParams } from 'react-router';
 import { alertsKey, fetchAlerts } from './alerts.js';
+import { checksKey, fetchChecks } from './checks.js';
 import { containersKey, fetchContainers } from './containers.js';
 import { useLiveState } from './live.js';
 import { ALL_SERVERS, fetchServers, serversKey } from './servers.js';
@@ -30,6 +31,18 @@ export function useContainers(enabled = true): UseQueryResult<ContainerSummary[]
     enabled,
     staleTime: live === 'open' ? Infinity : 10_000,
     refetchInterval: live === 'open' ? false : 15_000,
+  });
+}
+
+/** All checks. Callers subscribe to the live topic `checks`. */
+export function useChecks(enabled = true): UseQueryResult<CheckSummary[]> {
+  const live = useLiveState();
+  return useQuery({
+    queryKey: checksKey,
+    queryFn: ({ signal }) => fetchChecks(signal),
+    enabled,
+    staleTime: live === 'open' ? Infinity : 15_000,
+    refetchInterval: live === 'open' ? false : 30_000,
   });
 }
 

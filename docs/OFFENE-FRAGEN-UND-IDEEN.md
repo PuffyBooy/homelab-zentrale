@@ -9,6 +9,8 @@ Alles hier braucht deine Zugänge oder ist nicht rückgängig zu machen. Bis dah
 1. **Core auf dem Heimserver starten:** `.env` aus `.env.example` anlegen, `HZ_SECRET_KEY` mit `openssl rand -base64 32` erzeugen und sicher aufheben (ohne ihn sind alle gespeicherten Secrets verloren), dann `docker compose -f deploy/docker-compose.core.yml up -d --build`.
 2. **Tailscale serve einrichten:** `tailscale serve --bg --https=443 http://127.0.0.1:8080` auf dem Heimserver, MagicDNS und HTTPS-Zertifikate im Tailscale-Admin aktivieren. `HZ_BASE_URL` auf `https://heimserver.<tailnet>.ts.net` setzen.
 3. **Erstes Setup:** Den einmaligen Setup-Link aus `docker compose logs core` öffnen, Konto anlegen, TOTP in der Authenticator-App einrichten, die 10 Wiederherstellungscodes offline sichern.
+4. **Push aufs Handy (ab M4):** In `.env` `HZ_VAPID_SUBJECT=mailto:<deine Adresse>` setzen (Apple lehnt Pushes ohne echte Adresse ab). Die VAPID-Schlüssel erzeugt der Core beim ersten Start selbst und speichert sie verschlüsselt; wer sie fest haben will, erzeugt sie mit `pnpm --filter @hz/core vapid` und trägt `HZ_VAPID_PUBLIC`/`HZ_VAPID_PRIVATE` ein. Dann am Handy die Zentrale über `https://…ts.net` öffnen, „Zum Home-Bildschirm“ (iOS braucht die installierte PWA für Push) und unter Einstellungen → Push „Auf diesem Gerät aktivieren“, danach „Testnachricht senden“.
+5. **Agent neu ausrollen (ab M3):** Auf Servern, die schon einen Agent haben, `deploy/install-agent.sh` einmal erneut ausführen (neues Image mit `ping`, Schutz-Label `hz.role`).
 
 ## Offene Fragen
 
@@ -18,6 +20,8 @@ Alles hier braucht deine Zugänge oder ist nicht rückgängig zu machen. Bis dah
 - **Server hinzufügen ohne Step-up?** Das Erzeugen eines Enrollment-Tokens (15 Min, einmalig) verlangt derzeit keine erneute TOTP-Eingabe, Widerrufen und Löschen schon. Soll auch das Hinzufügen Step-up brauchen?
 - **Agent-Image:** Es gibt noch keine Registry. Annahme: Das Agent-Image wird auf jedem Server lokal gebaut (`deploy/install-agent.sh`). Alternative: GitHub Container Registry (`ghcr.io/puffybooy/homelab-agent`), dann müsste das Repo-Paket für die Server lesbar sein. Soll ich das einrichten?
 - **Neu einschreiben unter gleichem Namen:** Ein widerrufener Server muss gelöscht werden, bevor er sich unter demselben Namen neu anmelden kann (dabei geht der Verlauf verloren). Soll ein Re-Enrollment den alten Eintrag samt Verlauf übernehmen?
+- **Checks, erste Fehlschläge:** Der erste Fehlschlag zeigt `WARN` ohne Meldung, erst der zweite in Folge ist `CRIT` mit Push. Weiterleitungen (max. 5, nur http/https) werden verfolgt, ein Check kann also keinen 3xx-Code erwarten. Passt das?
+- **Ruhezeit:** warn- und info-Pushes in der Ruhezeit (23–7 Uhr) werden verworfen, nicht morgens nachgeliefert (die Meldungen selbst bleiben in der Liste). Lieber morgens gesammelt nachliefern?
 - **Level für Updates/Neustart nötig:** derzeit `warn` (wie SPEC 5.1). Mit Push ab M4 wären das gesammelte Pushes alle 30 Min. Lieber `info` (kein Push)?
 
 ## Annahmen
