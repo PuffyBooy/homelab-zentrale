@@ -107,8 +107,15 @@ Compose-Projekte werden als Gruppe erkannt (Label `com.docker.compose.project`).
 | Terraria / tModLoader | `ryshe/terraria` | 2 GB | 7777/tcp |
 | Counter-Strike 2 | `joedwards32/cs2` | 8 GB | 27015/tcp+udp |
 | Palworld | `thijsvanloef/palworld-server-docker` | 16 GB | 8211/udp |
+| Satisfactory (M12, nur amd64) | `wolveix/satisfactory-server` | 12 GB | 7777/tcp+udp, 8888/tcp |
+| Factorio (M12) | `factoriotools/factorio` | 2 GB | 34197/udp |
+| Enshrouded (M12, nur amd64) | `mornedhels/enshrouded-server` | 16 GB | 15637/udp |
+| Project Zomboid (M12, nur amd64) | `danixu86/project-zomboid-dedicated-server` | 8 GB | 16261-16262/udp |
+| ARK: Survival Evolved (M12, nur amd64) | `hermsi/ark-server` | 12 GB | 7777-7778/udp, 27015/udp |
+| Rust (M12, nur amd64) | `pfeiffermax/rust-game-server` | 12 GB | 28015/udp, 28017/udp |
+| V Rising (M12, nur amd64) | `trueosiris/vrising` | 8 GB | 9876-9877/udp |
 
-Vorlagen liegen als Dateien in `templates/games/<id>/`: `compose.yml` mit `${VAR}`-Platzhaltern und `template.json` (Name, Image, Ports, RAM, Felder für das Formular, Query-Methode, RCON-Unterstützung). Neue Vorlagen sind einfach ein neuer Ordner.
+Vorlagen liegen als Dateien in `templates/games/<id>/`: `compose.yml` mit `${VAR}`-Platzhaltern und `template.json` (Name, Image, Ports, RAM, Felder für das Formular, Query-Methode, RCON-Unterstützung). Neue Vorlagen sind einfach ein neuer Ordner. Seit M12 sagt `template.json` auch, auf welchen CPU-Architekturen das Image läuft (`arch`); nur passende Server sind wählbar.
 
 **Ablauf:**
 1. Vorlage wählen
@@ -132,6 +139,16 @@ Freunde bekommen pro Gameserver einen Link, mit dem sie **nur diesen Server** st
 - Jede Aktion wird mit Person und Zeit protokolliert und ist in der Gameserver-Detailseite sichtbar.
 - Widerrufen jederzeit. Abgelaufene Links zeigen „Link abgelaufen“.
 - **Erreichbarkeit:** Über das optionale Share-Gateway (`apps/share`, siehe `docs/NETWORK.md`). Solange das Gateway aus ist, funktionieren Links nur im Tailnet. Das ist der Standard.
+
+### 6.5 Gameserver: Schlafmodus, Zeitpläne, Mods (M12)
+- **Schlafmodus:** Nach X Min ohne Spieler (Standard 15 bei neuen Servern) stoppt die Zentrale den Server sauber und lässt den Agent auf seinen Ports lauschen. Der erste echte Verbindungsversuch weckt ihn (Minecraft: Login; Bedrock: Verbindungsanfrage; andere: erstes Spielpaket, keine Steam-Serverlisten-Abfragen). Im Schlaf zeigt die Minecraft-Serverliste „Schläft – zum Aufwecken verbinden“. Der Agent leitet nie Daten weiter. Aufwecken prüft die RAM-Reserve (6a); passt es nicht, bleibt der Server aus und es gibt eine Meldung.
+- **Zeitpläne:** Neustart oder Backup an gewählten Wochentagen um HH:MM. Vor einem Neustart warnt RCON die Spieler 5 und 1 Min vorher. Schlafende Server werden für Neustarts nicht geweckt.
+- **Discord:** pro Gameserver ein Webhook (nur `discord.com`/`discordapp.com`), Ereignisse online, offline, schläft, aufgeweckt. Die Nachricht enthält nur Name, Spiel, die eingetragene externe Adresse und die Spielerzahl.
+- **Statistik:** Spielzeit pro Spieler, Sitzungen, Ø Spieler pro Stunde, Höchststand (7 oder 30 Tage).
+- **Mods/Plugins:** Für Minecraft Java mit Paper (Plugins) oder Fabric (Mods) Suche in Modrinth, Installieren der neuesten passenden Version, Entfernen. Dateien kommen nur von `cdn.modrinth.com` und werden per sha512 geprüft.
+- **Backup wiederherstellen:** Knopf am Backup, mit Step-up und Namensbestätigung; vorher entsteht ein frisches Backup.
+- **Benutzerlinks:** zusätzliche Rechte „Welt herunterladen“ und „Whitelist-Anfrage“ (Admin bestätigt per Push-Hinweis und Knopf im Detail).
+- **Netz am Server:** zuhause / Cloud / VPS / anderes. Danach richtet sich der Hinweis zur Portweiterleitung (Router bzw. Firewall des Anbieters).
 
 ## 6a. Prioritäten und automatisches Drosseln
 

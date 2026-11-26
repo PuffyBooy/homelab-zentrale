@@ -41,6 +41,13 @@ export const sharePermSchema = z.enum([
   'console_write',
   /** whitelist add/remove (Minecraft only, player name checked strictly). */
   'whitelist',
+  /**
+   * M12: ask to be put on the whitelist; the admin approves (push). For links
+   * without `whitelist`. Minecraft only.
+   */
+  'whitelist_request',
+  /** M12: download the world as tar.zst (as long as the link is valid, 1 per hour). */
+  'world_download',
 ]);
 export type SharePerm = z.infer<typeof sharePermSchema>;
 
@@ -83,7 +90,7 @@ export const shareListResponseSchema = z.strictObject({ shares: z.array(shareLin
 // POST /api/games/:id/shares -> 201
 export const shareCreateRequestSchema = z.strictObject({
   person: sharePersonSchema,
-  perms: z.array(sharePermSchema).min(1).max(5),
+  perms: z.array(sharePermSchema).min(1).max(7),
   expires: shareExpirySchema,
   pin: sharePinSchema.optional(),
 });
@@ -106,6 +113,8 @@ export const shareAuditActionSchema = z.enum([
   'console_write',
   'whitelist_add',
   'whitelist_remove',
+  'whitelist_request',
+  'world_download',
   'pin_failed',
   'pin_locked',
   'denied',
@@ -204,7 +213,17 @@ export const shareStatusResponseSchema = z.strictObject({
       .nullable(),
     /** Whitelist editing makes sense only for Minecraft templates. */
     whitelist: z.boolean(),
+    /** M12: asleep, a start (or connecting, if wake-on-connect is on) wakes it. */
+    sleeping: z.boolean(),
   }),
+  /** M12: the friend's own whitelist request, newest first (max 5). */
+  whitelistRequests: z.array(
+    z.strictObject({
+      player: z.string(),
+      state: z.enum(['pending', 'approved', 'rejected']),
+      createdAt: z.iso.datetime(),
+    }),
+  ),
 });
 export type ShareStatus = z.infer<typeof shareStatusResponseSchema>;
 
@@ -244,3 +263,12 @@ export const shareWhitelistRequestSchema = z.strictObject({
   op: z.enum(['add', 'remove']),
   player: sharePlayerNameSchema,
 });
+
+// POST /s/api/whitelist-request { player } -> status (needs whitelist_request)
+// Max 3 pending requests per link, 5 per hour; same player twice -> 409 busy.
+export const shareWhitelistAskSchema = z.strictObject({ player: sharePlayerNameSchema });
+
+// GET /s/api/world (needs world_download) -> application/zstd stream,
+// Content-Disposition attachment "<name>-welt.tar.zst". 1 per link per hour
+// (429 rate_limited), size limit WORLD_DOWNLOAD_MAX_BYTES (503 unavailable).
+export const WORLD_DOWNLOAD_MAX_BYTES = 10 * 1024 * 1024 * 1024;

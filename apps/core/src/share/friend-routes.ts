@@ -17,6 +17,7 @@ import {
   shareConsoleResponseSchema,
   shareErrorResponseSchema,
   shareStatusResponseSchema,
+  shareWhitelistAskSchema,
   shareWhitelistRequestSchema,
 } from '@hz/shared';
 import { originAllowed } from '../auth/guard.js';
@@ -39,6 +40,8 @@ import {
   type ShareService,
   type ShareVia,
 } from './service.js';
+
+const shareEmptyQuerySchema = z.strictObject({});
 
 /** Strict CSP for the share page: own files only, no inline code, no framing. */
 export const SHARE_CSP = [
@@ -185,6 +188,30 @@ function friendApi(app: FastifyInstance, o: FriendApiOptions): void {
     const ctx = await ctxOf(request);
     const { op, player } = shareWhitelistRequestSchema.parse(request.body);
     return strictOut(shareCommandResponseSchema, await o.shares.whitelist(ctx, op, player));
+  });
+
+  // M12: whitelist request (the admin approves after a push).
+  app.post('/whitelist-request', async (request) => {
+    const ctx = await ctxOf(request);
+    const { player } = shareWhitelistAskSchema.parse(request.body);
+    return strictOut(shareStatusResponseSchema, o.shares.whitelistAsk(ctx, player));
+  });
+
+  // M12: world download, streamed (never buffered) from game.export.
+  app.get('/world', async (request, reply) => {
+    const ctx = await ctxOf(request);
+    shareEmptyQuerySchema.parse(request.query ?? {});
+    const dl = await o.shares.world(ctx);
+    reply.raw.once('close', () => {
+      if (!dl.stream.writableFinished) dl.stream.destroy();
+    });
+    return reply
+      .code(200)
+      .header('content-type', 'application/zstd')
+      .header('content-disposition', `attachment; filename="${dl.fileName}"`)
+      .header('content-length', String(dl.bytes))
+      .header('x-content-type-options', 'nosniff')
+      .send(dl.stream);
   });
 
   // Nothing else exists under this API.

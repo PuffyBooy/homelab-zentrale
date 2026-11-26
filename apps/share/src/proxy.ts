@@ -9,7 +9,9 @@ import {
   sharePinSchema,
   shareStatusResponseSchema,
   shareTokenSchema,
+  shareWhitelistAskSchema,
   shareWhitelistRequestSchema,
+  WORLD_DOWNLOAD_MAX_BYTES,
 } from '@hz/shared';
 
 export type ShareErrorBody = z.infer<typeof shareErrorResponseSchema>;
@@ -17,7 +19,7 @@ export type ShareErrorBody = z.infer<typeof shareErrorResponseSchema>;
 /** The only API routes of the gateway. Each maps to `${core}/api/share-gateway/<name>`. */
 export interface ApiRoute {
   method: 'GET' | 'POST';
-  name: 'status' | 'action' | 'console' | 'whitelist';
+  name: 'status' | 'action' | 'console' | 'whitelist' | 'whitelist-request' | 'world';
   request?: z.ZodType;
   query?: z.ZodType;
   response: z.ZodType;
@@ -25,6 +27,8 @@ export interface ApiRoute {
   freeText: boolean;
   /** GET console polls have their own, larger budget. */
   budget: 'api' | 'poll';
+  /** M12: the answer is a file (world download), streamed through, never buffered. */
+  download?: true;
 }
 
 export const API_ROUTES: readonly ApiRoute[] = [
@@ -68,7 +72,46 @@ export const API_ROUTES: readonly ApiRoute[] = [
     freeText: true,
     budget: 'api',
   },
+  {
+    method: 'POST',
+    name: 'whitelist-request',
+    request: shareWhitelistAskSchema,
+    response: shareStatusResponseSchema,
+    freeText: false,
+    budget: 'api',
+  },
+  {
+    method: 'GET',
+    name: 'world',
+    query: z.strictObject({}),
+    // Only errors are JSON; a 200 is checked by checkDownloadHeaders.
+    response: z.never(),
+    freeText: false,
+    budget: 'api',
+    download: true,
+  },
 ];
+
+/** "<game name>-welt.tar.zst", nothing else may name the file. */
+const DISPOSITION = /^attachment; filename="[a-z0-9](?:[a-z0-9-]{0,30}[a-z0-9])-welt\.tar\.zst"$/;
+
+/**
+ * Headers of a world download from the core: exactly application/zstd, a size
+ * within WORLD_DOWNLOAD_MAX_BYTES and our fixed file name. Null when anything
+ * else comes back (then the gateway answers 502 and sends no byte).
+ */
+export function checkDownloadHeaders(h: {
+  type: string | null;
+  length: string | null;
+  disposition: string | null;
+}): { length: number; disposition: string } | null {
+  if (h.type !== 'application/zstd') return null;
+  if (h.length === null || !/^\d{1,15}$/.test(h.length)) return null;
+  const length = Number(h.length);
+  if (length < 1 || length > WORLD_DOWNLOAD_MAX_BYTES) return null;
+  if (h.disposition === null || !DISPOSITION.test(h.disposition)) return null;
+  return { length, disposition: h.disposition };
+}
 
 export function findRoute(method: string, pathname: string): ApiRoute | undefined {
   return API_ROUTES.find((r) => r.method === method && `/s/api/${r.name}` === pathname);

@@ -1676,3 +1676,18 @@ body,
 a.hz-btn {
   text-decoration: none;
 }
+
+/* ---------- M12: game statistics ---------- */
+.app-stats-hours {
+  display: grid;
+  gap: var(--space-1);
+  justify-items: start;
+}
+.app-stats-axis {
+  display: flex;
+  justify-content: space-between;
+  width: 240px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--ink-faint);
+}

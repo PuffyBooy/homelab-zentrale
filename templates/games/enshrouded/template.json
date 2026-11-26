@@ -1,0 +1,70 @@
+{
+  "$schema": "../template.schema.json",
+  "id": "enshrouded",
+  "name": "Enshrouded",
+  "image": "mornedhels/enshrouded-server:1.8.1",
+  "ram": {
+    "min": "8G",
+    "recommended": "16G"
+  },
+  "ports": [
+    {
+      "name": "game",
+      "container": 15637,
+      "protocol": "udp",
+      "default": 15637,
+      "count": 1
+    }
+  ],
+  "query": {
+    "method": "gamedig",
+    "port": "game",
+    "type": "enshrouded"
+  },
+  "rcon": {
+    "supported": false
+  },
+  "wake": "raw",
+  "arch": [
+    "amd64"
+  ],
+  "dataDir": "./data",
+  "fields": [
+    {
+      "key": "SERVER_NAME",
+      "label": "Servername",
+      "type": "text",
+      "default": "Homelab",
+      "pattern": "[A-Za-z0-9 ._-]{1,40}"
+    },
+    {
+      "key": "SERVER_ROLE_0_PASSWORD",
+      "label": "Server-Passwort (leer oder mind. 8 Zeichen)",
+      "type": "text",
+      "default": "",
+      "optional": true,
+      "pattern": "[^\\s'\"$\\\\]{8,64}",
+      "secret": true
+    },
+    {
+      "key": "SERVER_SLOT_COUNT",
+      "label": "Max. Spieler",
+      "type": "number",
+      "default": 8,
+      "min": 1,
+      "max": 16
+    },
+    {
+      "key": "MEMORY",
+      "label": "RAM",
+      "type": "select",
+      "options": [
+        "8G",
+        "12G",
+        "16G",
+        "24G"
+      ],
+      "default": "16G"
+    }
+  ]
+}

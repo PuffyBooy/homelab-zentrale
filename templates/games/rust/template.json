@@ -1,0 +1,83 @@
+{
+  "$schema": "../template.schema.json",
+  "id": "rust",
+  "name": "Rust",
+  "image": "pfeiffermax/rust-game-server:build-26921919",
+  "ram": {
+    "min": "8G",
+    "recommended": "12G"
+  },
+  "ports": [
+    {
+      "name": "game",
+      "container": 28015,
+      "protocol": "udp",
+      "default": 28015,
+      "count": 1
+    },
+    {
+      "name": "query",
+      "container": 28017,
+      "protocol": "udp",
+      "default": 28017,
+      "count": 1
+    }
+  ],
+  "query": {
+    "method": "gamedig",
+    "port": "query",
+    "type": "rust"
+  },
+  "rcon": {
+    "supported": false
+  },
+  "wake": "raw",
+  "arch": [
+    "amd64"
+  ],
+  "dataDir": "./data",
+  "fields": [
+    {
+      "key": "SERVER_NAME",
+      "label": "Servername",
+      "type": "text",
+      "default": "Homelab",
+      "pattern": "[A-Za-z0-9 ._-]{1,40}"
+    },
+    {
+      "key": "MAX_PLAYERS",
+      "label": "Max. Spieler",
+      "type": "number",
+      "default": 20,
+      "min": 1,
+      "max": 200
+    },
+    {
+      "key": "WORLD_SIZE",
+      "label": "Kartengröße",
+      "type": "number",
+      "default": 3000,
+      "min": 1000,
+      "max": 6000
+    },
+    {
+      "key": "SEED",
+      "label": "Seed",
+      "type": "number",
+      "default": 12345,
+      "min": 0,
+      "max": 2147483647
+    },
+    {
+      "key": "MEMORY",
+      "label": "RAM",
+      "type": "select",
+      "options": [
+        "8G",
+        "12G",
+        "16G"
+      ],
+      "default": "12G"
+    }
+  ]
+}

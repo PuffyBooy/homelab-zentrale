@@ -81,7 +81,7 @@ design/                   Designsystem (nicht von Hand ändern, siehe design/REA
 | `sessions` | id (zufällig, öffentlich), token_hash (SHA-256 des Cookie-Werts), user_id, created_at, expires_at, last_seen, user_agent, step_up_until |
 | `recovery_codes` | id, user_id, code_hash (SHA-256), created_at, used_at |
 | `device_tokens` | id, kind (`wall`), token_hash, label, created_at, revoked_at |
-| `servers` | id, name (unique), location, arch, os, tailscale_ip, public_ip, agent_version, capabilities_json, thresholds_json (nur abweichende Schwellen), allow_terminal, created_at, last_seen |
+| `servers` | id, name (unique), location, arch, os, tailscale_ip, public_ip, agent_version, capabilities_json, thresholds_json (nur abweichende Schwellen), allow_terminal, network (`home`/`cloud`/`vps`/`other`, M12), created_at, last_seen |
 | `server_state` | server_id, metrics_json (letzte `metrics`), metrics_at, system_json, updates_json, reboot_required, ssh_failed_24h, fail2ban_banned, listening_ports_json, inventory_at (letztes `inventory`) |
 | `agent_tokens` | id, server_id, token_hash (SHA-256 von `agent:<token>`), created_at, revoked_at |
 | `enroll_tokens` | id, name, location, token_hash (SHA-256 von `enroll:<token>`), created_at, expires_at (15 Min), used_at, server_id |
@@ -91,12 +91,18 @@ design/                   Designsystem (nicht von Hand ändern, siehe design/REA
 | `metrics_raw` | server_id, ts (Empfangszeit im Core), cpu, ram, swap (Prozent), disk_max, disk_json (`[{mount, pct}]`), temp, net_in, net_out (Byte/s), 48 h |
 | `metrics_5m`, `metrics_1h` | server_id, ts (Bucket-Start), cpu, ram, swap, disk_max, temp, net_in, net_out (gemittelt, 1h gewichtet nach samples), samples; 30 Tage bzw. 1 Jahr. Pro Disk wird nur roh gespeichert. |
 | `containers` | id, server_id, docker_id (unique je Server), name, image, compose_project, state, health, ports_json, info_json (ganzes `ContainerInfo`, mit `role` aus `hz.role` und `cpuLimit`), last_mem_bytes (zuletzt bekannter Speicher, für die RAM-Reserve), updated_at |
-| `game_servers` | id, server_id, template_id, name, settings_json, ports_json, rcon_secret_enc, external_address, auto_stop_minutes, created_at, priority (`wichtig`/`normal`/`niedrig`), allow_stop, allow_stop_with_players |
+| `game_servers` | id, server_id, template_id, name, settings_json, ports_json, rcon_secret_enc, external_address, auto_stop_minutes, created_at, priority (`wichtig`/`normal`/`niedrig`), allow_stop, allow_stop_with_players, wake_on_connect, sleeping, mods_restart_needed (M12) |
 | `container_priorities` | container_id (Core-ID aus Server + Name, übersteht ein Neuerzeugen), server_id, container_name, priority, allow_stop, updated_at. Gameserver-Container nehmen die Priorität des Gameservers. |
 | `server_throttle` | server_id, settings_json (`ThrottleSettings`: Automatik, Schwellen, Minuten, `throttleCpus`, `ramReserveMb`), schedules_json (Zeitfenster pro Stufe), updated_at. Fehlt die Zeile: Standardwerte. |
 | `container_throttles` | container_id, server_id, container_name, game_id, docker_id (das Limit gehört zu diesem Docker-Container), cpus, original_cpus (wird beim Aufheben wiederhergestellt), by (`auto`/`admin`/`schedule`), reason, since, auto_stopped_at |
 | `wichtig_restarts` | id, container_id, server_id, ts, ok (Startversuche gestoppter `wichtig`-Container, 10 Min) |
 | `game_backups` | id, game_id, path, size, created_at |
+| `game_schedules` | id, game_id, kind (`restart`/`backup`), days_json (ISO-Wochentage), time (HH:MM in `HZ_TIMEZONE`), enabled, last_run_at (M12, Migration 14) |
+| `game_notify` | game_id, discord_url_enc (AES-GCM), events_json, last_sent_at, last_error (M12) |
+| `game_player_sessions` | id, game_id, player, started_at, ended_at (aus den Status-Abfragen, 90 Tage, M12) |
+| `game_player_hours` | game_id, hour (Bucket-Start), samples, players_sum, peak (Ø Spieler pro Stunde, M12) |
+| `game_mods` | game_id, kind, file_name, project_id, version_id, title, sha512, installed_at (über die Zentrale installierte Jars, M12) |
+| `whitelist_requests` | id, game_id, share_id, person, player, state (`pending`/`approved`/`rejected`), created_at, decided_at (M12) |
 | `game_migrations` | id, game_id, game_name, source/target_server_id und _name (ohne Fremdschlüssel), phase, failed_phase, bytes_done, bytes_total, sha256, error, error_text, rollback, ports_json, rcon_port, forwarding_hint (Ports am Ziel), was_running, target_touched (Import angenommen), cleanup_target, restart_source (offene Rückbau-Schritte), started_at, updated_at, finished_at (M11, Migration 13) |
 | `share_links` | id, game_id, person, token_hash (SHA-256 von `share:<token>`), pin_hash (argon2id), perms_json, expires_at, revoked_at, last_used_at, pin_failures, locked_until, created_at |
 | `share_audit` | id, share_id (ohne Fremdschlüssel, bleibt nach Löschen des Links), game_id, person, action, detail, ts, ip, via (`tailnet`/`gateway`); 90 Tage |
@@ -123,7 +129,7 @@ Die erste Nachricht muss innerhalb von 10 s ein gültiges `hello` sein. Danach a
 **Agent → Core**
 - `metrics {ts, cpu, ram, swap, disks[], temp, net}` alle 10 s
 - `inventory {containers[], updates, rebootRequired, sshFailed24h, fail2banBanned, listeningPorts[]}` alle 60 s und bei Docker-Events sofort
-- `event {kind: 'container' | 'oom' | …, data}`
+- `event {kind: 'container' | 'oom' | 'game_wake' | 'denied', …}` (`game_wake {gameId, port, protocol}`: ein schlafender Gameserver bekam einen echten Verbindungsversuch, M12; ohne Client-Adresse)
 - `rpc.result {id, ok, data | error}`
 - `stream.data {streamId, chunk}`, `stream.end {streamId, code}`
 - `transfer.begin {streamId, bytes, sha256, chunks}`, `transfer.chunk {streamId, seq, data}`, `transfer.ack {streamId, seq}`, `transfer.end {streamId, chunks, bytes, sha256}` (M11, nur für offene `game.export`/`game.import`-Streams dieser Verbindung, siehe „Umzug von Gameservern“)
@@ -141,8 +147,11 @@ Die erste Nachricht muss innerhalb von 10 s ein gültiges `hello` sein. Danach a
 | `game.backup` | `{gameDir}` → Stream |
 | `game.status` | `{gameDir, method, port, gamedigType?, tpsCommand?}` → Spieler, Version, TPS (RCON-Daten liest der Agent aus der `.env` im Ordner) |
 | `game.remove` | `{gameDir}` → `compose down` und Ordner löschen (nur unter `/opt/homelab/games/`) |
-| `game.export` | `{gameId, maxBytes}` → Stream: Archiv von `data/` des Spielordners, dann `transfer.begin/chunk/end` (M11) |
+| `game.export` | `{gameId, maxBytes, paths?}` → Stream: Archiv von `data/` des Spielordners (mit `paths` nur diese Weltordner, für den Welt-Download der Freunde, M12), dann `transfer.begin/chunk/end` (M11) |
 | `game.import` | `{gameId, bytes, sha256, chunks}` → Stream: empfängt `transfer.chunk`/`transfer.end`, prüft Größe, sha256 und jeden Archiv-Eintrag, entpackt nach `/opt/homelab/games/<gameId>/data` (M11) |
+| `game.wake.arm` / `game.wake.disarm` | `{gameId, mode, ports, motd}` / `{gameId}`: Wake-Listener eines gestoppten Gameservers nur auf seinen veröffentlichten Ports (M12, Schlafmodus) |
+| `game.mods.list` / `install` / `remove` | `{gameId, kind}` / `+ url, fileName, sha512, sizeBytes` / `+ fileName`: Jars in `data/plugins` bzw. `data/mods`, Download nur von `cdn.modrinth.com` mit sha512 (M12) |
+| `game.restore` | `{gameId, fileName}` → Stream: Backup nach `data/` zurückspielen (Spiel gestoppt, jeder Eintrag geprüft, alte Daten bleiben bei Fehler) (M12) |
 | `game.backups.purge` | `{gameId, olderThanDays}` → löscht eigene Backup-Archive dieses Gameservers unter `/opt/homelab/backups/<id>/`, die älter sind (für gelöschte Gameserver nach 30 Tagen) |
 | `deploy.run` | `{dir, repoUrl, sha, method, keyName?}` → Stream |
 | `deploy.key` | `{name}` → `{publicKey}` (ed25519, privater Schlüssel bleibt auf dem Server) |

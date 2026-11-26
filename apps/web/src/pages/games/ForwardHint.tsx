@@ -34,7 +34,7 @@ export function ForwardHint({ ports, server }: ForwardHintProps): ReactElement {
         Freigeben auf {where}:
       </p>
       {list}
-      {place !== 'oracle' ? (
+      {place === 'home' || place === 'unknown' ? (
         <>
           <h3 className="hz-label">Zuhause (Router)</h3>
           <ol className="app-howto">
@@ -50,7 +50,29 @@ export function ForwardHint({ ports, server }: ForwardHintProps): ReactElement {
           </ol>
         </>
       ) : null}
-      {place !== 'home' ? (
+      {place === 'cloud' || place === 'vps' ? (
+        <>
+          <h3 className="hz-label">
+            {place === 'cloud'
+              ? 'Cloud-VM (Firewall des Anbieters)'
+              : 'VPS (Firewall des Anbieters)'}
+          </h3>
+          <ol className="app-howto">
+            <li>
+              In der Verwaltung des Anbieters die Firewall bzw. Security Group von {where} öffnen.
+            </li>
+            <li>
+              Pro Zeile oben eine eingehende Regel: Quelle 0.0.0.0/0, Protokoll und Port wie
+              angegeben (bei TCP und UDP zwei Regeln).
+            </li>
+            <li>
+              Läuft auf {where} selbst eine Firewall (ufw, firewalld, iptables), dort dieselben
+              Ports erlauben.
+            </li>
+          </ol>
+        </>
+      ) : null}
+      {place === 'oracle' || place === 'unknown' ? (
         <>
           <h3 className="hz-label">Oracle Cloud (Security List)</h3>
           <ol className="app-howto">

@@ -6,7 +6,9 @@
   "ram": { "min": "4G", "recommended": "8G" },
   "ports": [{ "name": "game", "container": 27015, "protocol": "udp", "default": 27015, "count": 1 }],
   "query": { "method": "gamedig", "port": "game", "type": "counterstrike2" },
-  "rcon": { "supported": true, "port": 27015 },
+  "rcon": { "supported": true, "port": 27015, "sayCommand": "say {msg}" },
+  "wake": "raw",
+  "arch": ["amd64"],
   "dataDir": "./data",
   "fields": [
     {

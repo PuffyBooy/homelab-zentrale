@@ -160,6 +160,10 @@ export interface Controls {
   console: boolean;
   command: boolean;
   whitelist: boolean;
+  /** M12: ask the admin to be put on the whitelist (Minecraft, links without `whitelist`). */
+  whitelistRequest: boolean;
+  /** M12: download the world as tar.zst. */
+  worldDownload: boolean;
 }
 
 export function controlsFor(s: Pick<ShareStatus, 'perms' | 'game'>): Controls {
@@ -171,6 +175,8 @@ export function controlsFor(s: Pick<ShareStatus, 'perms' | 'game'>): Controls {
     console: p.has('console_read') || p.has('console_write'),
     command: p.has('console_write'),
     whitelist: p.has('whitelist') && s.game.whitelist,
+    whitelistRequest: p.has('whitelist_request') && !p.has('whitelist') && s.game.whitelist,
+    worldDownload: p.has('world_download'),
   };
 }
 
@@ -209,8 +215,14 @@ export function formatWhen(d: Date, now: Date = new Date()): string {
   return `${day}.${month}. ${formatTime(d)}`;
 }
 
-/** "Läuft · 2 von 20 Spielern online" */
+/** M12: asleep (sleep mode); a start, or connecting if wake-on-connect is on, wakes it. */
+export function isSleeping(g: Pick<ShareStatus['game'], 'status' | 'sleeping'>): boolean {
+  return g.status === 'off' && g.sleeping;
+}
+
+/** "Läuft · 2 von 20 Spielern online", "Schläft – Starten weckt den Server" */
 export function statusLine(g: ShareStatus['game']): string {
+  if (isSleeping(g)) return 'Schläft – Starten weckt den Server';
   if (!g.players || g.status === 'off') return g.statusText;
   const { online, max } = g.players;
   return `${g.statusText} · ${online} von ${max} ${max === 1 ? 'Spieler' : 'Spielern'} online`;
@@ -218,6 +230,62 @@ export function statusLine(g: ShareStatus['game']): string {
 
 export function expiresText(expiresAt: string | null, now: Date = new Date()): string {
   return expiresAt ? `gilt bis ${formatWhen(new Date(expiresAt), now)}` : 'läuft nicht ab';
+}
+
+// ---- M12: world download and whitelist requests ------------------------------------------
+
+const UNITS = ['B', 'KB', 'MB', 'GB', 'TB'] as const;
+const numFmt = new Intl.NumberFormat('de-AT', { maximumFractionDigits: 1, useGrouping: false });
+
+/** "7,8 GB", "512 MB", "0 B" (binary steps, like the admin app). */
+export function formatBytes(bytes: number): string {
+  let v = Math.max(0, bytes);
+  let i = 0;
+  while (v >= 1024 && i < UNITS.length - 1) {
+    v /= 1024;
+    i++;
+  }
+  const r = v >= 100 || i === 0 ? Math.round(v) : Math.round(v * 10) / 10;
+  return `${numFmt.format(r)} ${UNITS[i] ?? 'B'}`;
+}
+
+/** "1,2 GB von 3,4 GB" or "1,2 GB" without a known total. */
+export function progressText(loaded: number, total: number | null): string {
+  return total ? `${formatBytes(loaded)} von ${formatBytes(total)}` : formatBytes(loaded);
+}
+
+const SAFE_FILE = /^[A-Za-z0-9._-]{1,120}$/;
+
+/**
+ * File name from Content-Disposition (`attachment; filename="survival-welt.tar.zst"`),
+ * only plain characters; otherwise "<game>-welt.tar.zst".
+ */
+export function downloadName(header: string | null, game: string): string {
+  const m = header ? /filename="?([^";]+)"?/i.exec(header) : null;
+  const name = m?.[1]?.trim() ?? '';
+  if (SAFE_FILE.test(name) && !name.startsWith('.')) return name;
+  const base = game.replace(/[^A-Za-z0-9_-]/g, '').slice(0, 60) || 'welt';
+  return `${base}-welt.tar.zst`;
+}
+
+export const REQUEST_STATE_TEXT: Record<
+  ShareStatus['whitelistRequests'][number]['state'],
+  { status: GameStatus; text: string }
+> = {
+  pending: { status: 'warn', text: 'wartet auf Bestätigung' },
+  approved: { status: 'ok', text: 'bestätigt' },
+  rejected: { status: 'off', text: 'abgelehnt' },
+};
+
+/** Inline text for a failed world download. */
+export function downloadErrorLine(f: Failure): string {
+  if (f.error === 'rate_limited') {
+    return `Die Welt geht nur 1× pro Stunde. Wieder möglich in ${retryMinutes(f.retryAfter)} Min.`;
+  }
+  if (f.error === 'unavailable') {
+    return 'Download gerade nicht möglich (Server offline oder Welt zu groß). Später erneut versuchen.';
+  }
+  return errorLine(f);
 }
 
 const PLAYER = /^[A-Za-z0-9_]{3,16}$/;
@@ -258,7 +326,16 @@ export function mergeLines(
 const isObj = (x: unknown): x is Record<string, unknown> => typeof x === 'object' && x !== null;
 const isStr = (x: unknown): x is string => typeof x === 'string';
 const STATUSES = new Set<string>(['ok', 'warn', 'crit', 'off', 'busy']);
-const PERMS = new Set<string>(['power', 'restart', 'console_read', 'console_write', 'whitelist']);
+const PERMS = new Set<string>([
+  'power',
+  'restart',
+  'console_read',
+  'console_write',
+  'whitelist',
+  'whitelist_request',
+  'world_download',
+]);
+const REQUEST_STATES = new Set<string>(['pending', 'approved', 'rejected']);
 
 export function isShareStatus(x: unknown): x is ShareStatus {
   if (!isObj(x) || !isStr(x.person) || !Array.isArray(x.perms) || !isObj(x.game)) return false;
@@ -269,7 +346,17 @@ export function isShareStatus(x: unknown): x is ShareStatus {
   if (!isStr(g.status) || !STATUSES.has(g.status)) return false;
   if (g.version !== null && !isStr(g.version)) return false;
   if (g.address !== null && !isStr(g.address)) return false;
-  if (typeof g.whitelist !== 'boolean') return false;
+  if (typeof g.whitelist !== 'boolean' || typeof g.sleeping !== 'boolean') return false;
+  if (!Array.isArray(x.whitelistRequests)) return false;
+  const reqOk = x.whitelistRequests.every(
+    (r) =>
+      isObj(r) &&
+      isStr(r.player) &&
+      isStr(r.createdAt) &&
+      isStr(r.state) &&
+      REQUEST_STATES.has(r.state),
+  );
+  if (!reqOk) return false;
   if (g.players !== null) {
     const p = g.players;
     if (!isObj(p) || typeof p.online !== 'number' || typeof p.max !== 'number') return false;

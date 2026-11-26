@@ -53,6 +53,12 @@ const tables = [
   schema.serverAllowedPorts,
   schema.serverPortAudit,
   schema.gameMigrations,
+  schema.gameSchedules,
+  schema.gameNotify,
+  schema.gamePlayerSessions,
+  schema.gamePlayerHours,
+  schema.gameMods,
+  schema.whitelistRequests,
 ];
 
 describe('database', () => {

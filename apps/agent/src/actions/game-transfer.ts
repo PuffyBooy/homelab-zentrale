@@ -38,6 +38,9 @@ export const TAR_TIMEOUT_MS = 2 * 60 * 60_000;
 export const MAX_LIST_LINE = ARCHIVE_MAX_PATH * 4 + 512;
 export const EXPORT_FILE_RE = /^\.export-[A-Za-z0-9_-]{8,64}\.tar\.zst$/;
 export const STAGING_DIR_RE = new RegExp(`^\\${IMPORT_STAGING_PREFIX}[A-Za-z0-9_-]{8,64}$`);
+/** Staging folder of game.restore (M12): /opt/homelab/games/.restore-<streamId>/. */
+export const RESTORE_STAGING_PREFIX = '.restore-';
+export const RESTORE_STAGING_RE = /^\.restore-[A-Za-z0-9_-]{8,64}$/;
 
 export function exportFileName(streamId: string): string {
   return `.export-${streamId}.tar.zst`;
@@ -66,9 +69,86 @@ function mustBeAbsolute(...paths: string[]): void {
   }
 }
 
-/** tar arguments of game.export: only the `data` member of the game folder. */
-export function exportTarArgs(archive: string, gameDir: string, c: Compression = 'zstd'): string[] {
+/**
+ * Checks the world paths of game.export (M12 world download) below <gameDir>/data and
+ * returns the tar members (`data/<path>`). Every path component is checked with lstat
+ * from data/ down: a symlink anywhere is refused (bad_path), a missing path is skipped,
+ * and the realpath must stay below data/. Throws not_found when nothing is left.
+ * tar gets the members on its command line without --dereference, so even a link
+ * swapped in later is stored as a link (and refused on import), never followed.
+ */
+export async function resolveWorldMembers(
+  gameDir: string,
+  paths: readonly string[],
+): Promise<string[]> {
+  mustBeAbsolute(gameDir);
+  const data = path.join(gameDir, GAME_ARCHIVE_ROOT);
+  const dst = await lstat(data).catch(() => null);
+  if (!dst?.isDirectory() || (await realpath(data).catch(() => null)) !== data) {
+    throw new ActionError('bad_path', 'data must be a real directory');
+  }
+  const members: string[] = [];
+  for (const p of paths) {
+    const segs = p.split('/');
+    if (
+      p.length === 0 ||
+      p.length > 120 ||
+      segs.some(
+        (seg) => seg === '' || seg === '.' || seg === '..' || !/^[A-Za-z0-9._-]+$/.test(seg),
+      )
+    ) {
+      throw new ActionError('invalid_params', 'invalid world path');
+    }
+    let cur = data;
+    let missing = false;
+    for (let i = 0; i < segs.length; i++) {
+      cur = path.join(cur, segs[i] as string);
+      const st = await lstat(cur).catch(() => null);
+      if (!st) {
+        missing = true;
+        break;
+      }
+      if (st.isSymbolicLink()) throw new ActionError('bad_path', `world path ${p} is a symlink`);
+      const last = i === segs.length - 1;
+      if (!last && !st.isDirectory()) {
+        missing = true;
+        break;
+      }
+      if (last && !st.isDirectory() && !st.isFile()) {
+        throw new ActionError('bad_path', `world path ${p} is not a file or folder`);
+      }
+    }
+    if (missing) continue;
+    const real = await realpath(cur).catch(() => null);
+    if (real === null || !real.startsWith(`${data}/`)) {
+      throw new ActionError('bad_path', `world path ${p} leaves data/`);
+    }
+    const member = `${GAME_ARCHIVE_ROOT}/${p}`;
+    if (!members.includes(member)) members.push(member);
+  }
+  if (members.length === 0) throw new ActionError('not_found', 'no world data found', false);
+  return members;
+}
+
+/**
+ * tar arguments of game.export: the `data` member of the game folder, or only the
+ * given `data/<path>` members (world download, from resolveWorldMembers).
+ */
+export function exportTarArgs(
+  archive: string,
+  gameDir: string,
+  c: Compression = 'zstd',
+  members: readonly string[] = [GAME_ARCHIVE_ROOT],
+): string[] {
   mustBeAbsolute(archive, gameDir);
+  for (const m of members) {
+    if (m !== GAME_ARCHIVE_ROOT && !m.startsWith(`${GAME_ARCHIVE_ROOT}/`)) {
+      throw new ActionError('bad_path', 'members must be below data/');
+    }
+    if (m.split('/').some((seg) => seg === '' || seg === '.' || seg === '..')) {
+      throw new ActionError('bad_path', 'invalid member');
+    }
+  }
   return [
     '--create',
     compressFlag(c),
@@ -80,7 +160,7 @@ export function exportTarArgs(archive: string, gameDir: string, c: Compression =
     '--directory',
     gameDir,
     '--',
-    GAME_ARCHIVE_ROOT,
+    ...members,
   ];
 }
 
@@ -351,7 +431,8 @@ async function clearSpecialBits(p: string, mode: number): Promise<void> {
 }
 
 /**
- * On agent start: deletes import staging folders (/opt/homelab/games/.import-<id>/) and
+ * On agent start: deletes import and restore staging folders
+ * (/opt/homelab/games/.import-<id>/, .restore-<id>/) and
  * export temp archives (/opt/homelab/backups/<name>/.export-<id>.tar.zst) that a
  * crashed agent left behind. No transfer runs yet. Never follows symlinks (lstat; rm
  * removes links instead of following them). Returns the deleted paths. Never throws.
@@ -367,7 +448,7 @@ export async function cleanupStaleTransfers(homelabRoot: string): Promise<string
   const games = path.join(root, 'games');
   if ((await lstat(games).catch(() => null))?.isDirectory()) {
     for (const name of await readdir(games).catch(() => [] as string[])) {
-      if (!STAGING_DIR_RE.test(name)) continue;
+      if (!STAGING_DIR_RE.test(name) && !RESTORE_STAGING_RE.test(name)) continue;
       const p = path.join(games, name);
       if (!(await lstat(p).catch(() => null))?.isDirectory()) continue;
       try {

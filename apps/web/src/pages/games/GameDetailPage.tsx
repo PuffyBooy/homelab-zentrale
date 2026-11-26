@@ -7,8 +7,8 @@ import { FormError } from '../../components/FormError.js';
 import { useGames, useServers, useTemplates } from '../../lib/data.js';
 import { errorText } from '../../lib/errors.js';
 import { formatAgo, formatWhen } from '../../lib/format.js';
+import { sleepModeText, sleepText } from '../../lib/gameFeatures.js';
 import {
-  autoStopText,
   gameEventsKey,
   gamePorts,
   portLabel,
@@ -16,6 +16,7 @@ import {
   type GameEventBuffer,
 } from '../../lib/games.js';
 import { useLiveTopic } from '../../lib/live.js';
+import { permsFor } from '../../lib/shares.js';
 import { priorityText } from '../../lib/throttle.js';
 import { isMigrationActive } from '../../lib/migrate.js';
 import { useNow } from '../../lib/useNow.js';
@@ -28,7 +29,12 @@ import { MigrateDialog } from './MigrateDialog.js';
 import { MigrationTile, useMigration } from './MigrationTile.js';
 import { GamePriorityTile } from '../throttle/PriorityTile.js';
 import { PortsTile } from './PortsTile.js';
+import { ModsTile } from './ModsTile.js';
+import { NotifyTile } from './NotifyTile.js';
+import { SchedulesTile } from './SchedulesTile.js';
 import { SettingsTile } from './SettingsTile.js';
+import { StatsTile } from './StatsTile.js';
+import { WhitelistRequestsTile } from './WhitelistRequestsTile.js';
 import { ShareAuditTile, ShareLinksTile } from './ShareLinksTile.js';
 import { SetupTile } from './SetupTile.js';
 
@@ -118,7 +124,7 @@ function Detail({ game }: { game: GameSummary }): ReactElement {
         <dl className="app-kv">
           <dt>Status</dt>
           <dd>
-            <StatusDot status={game.status} label={game.statusText} className="app-status-auto" />
+            <StatusDot status={game.status} label={sleepText(game)} className="app-status-auto" />
           </dd>
           <dt>Spiel</dt>
           <dd>
@@ -135,8 +141,8 @@ function Detail({ game }: { game: GameSummary }): ReactElement {
           <dd>{ports.map((p) => portLabel(p.port, p.protocol, p.count)).join(' · ')}</dd>
           <dt>Priorität</dt>
           <dd>{priorityText(game)}</dd>
-          <dt>Auto-Stopp</dt>
-          <dd>{autoStopText(game.autoStopMinutes)}</dd>
+          <dt>Schlafmodus</dt>
+          <dd>{sleepModeText(game, tpl?.wake ?? false)}</dd>
           <dt>Konsole</dt>
           <dd>{game.rcon ? 'RCON und Log' : 'nur Log (kein RCON)'}</dd>
           <dt>Letztes Backup</dt>
@@ -152,10 +158,17 @@ function Detail({ game }: { game: GameSummary }): ReactElement {
       <div className="hz-span-4 app-anchor" id="konsole" ref={consoleAnchor}>
         <ConsoleTile ref={consoleInput} game={game} events={list} />
       </div>
+      {permsFor(game.templateId).includes('whitelist_request') ? (
+        <WhitelistRequestsTile game={game} now={now} />
+      ) : null}
+      <StatsTile game={game} now={now} />
       <ShareLinksTile game={game} now={now} />
       <ShareAuditTile game={game} now={now} />
       <BackupsTile game={game} now={now} />
       <SettingsTile game={game} tpl={tpl} />
+      <SchedulesTile game={game} now={now} />
+      <NotifyTile game={game} now={now} />
+      {game.modsKind ? <ModsTile game={game} kind={game.modsKind} /> : null}
       <GamePriorityTile game={game} />
       <PortsTile game={game} tpl={tpl} />
       <Tile title="Von außen erreichbar" icon="globe" span={2}>

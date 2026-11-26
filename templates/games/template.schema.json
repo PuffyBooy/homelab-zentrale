@@ -31,7 +31,10 @@
           "pattern": "^\\d{1,3}G$"
         }
       },
-      "required": ["min", "recommended"],
+      "required": [
+        "min",
+        "recommended"
+      ],
       "additionalProperties": false
     },
     "ports": {
@@ -52,7 +55,11 @@
           },
           "protocol": {
             "type": "string",
-            "enum": ["tcp", "udp", "tcp+udp"]
+            "enum": [
+              "tcp",
+              "udp",
+              "tcp+udp"
+            ]
           },
           "default": {
             "type": "integer",
@@ -70,7 +77,12 @@
             "type": "boolean"
           }
         },
-        "required": ["name", "container", "protocol", "default"],
+        "required": [
+          "name",
+          "container",
+          "protocol",
+          "default"
+        ],
         "additionalProperties": false
       }
     },
@@ -79,17 +91,34 @@
       "properties": {
         "method": {
           "type": "string",
-          "enum": ["minecraft", "minecraft-bedrock", "gamedig", "none"]
+          "enum": [
+            "minecraft",
+            "minecraft-bedrock",
+            "gamedig",
+            "none"
+          ]
         },
         "port": {
           "type": "string"
         },
         "type": {
           "type": "string",
-          "enum": ["valheim", "counterstrike2", "palworld"]
+          "enum": [
+            "valheim",
+            "counterstrike2",
+            "palworld",
+            "satisfactory",
+            "enshrouded",
+            "projectzomboid",
+            "ase",
+            "rust",
+            "vrising"
+          ]
         }
       },
-      "required": ["method"],
+      "required": [
+        "method"
+      ],
       "additionalProperties": false
     },
     "rcon": {
@@ -106,10 +135,94 @@
         "tpsCommand": {
           "type": "string",
           "maxLength": 40
+        },
+        "sayCommand": {
+          "type": "string",
+          "maxLength": 40,
+          "pattern": "^[A-Za-z0-9_/ -]*\\{msg\\}$"
+        },
+        "whitelistAddCommand": {
+          "type": "string",
+          "maxLength": 60,
+          "pattern": "^[A-Za-z0-9_/ -]*\\{player\\}$"
         }
       },
-      "required": ["supported"],
+      "required": [
+        "supported"
+      ],
       "additionalProperties": false
+    },
+    "wake": {
+      "default": "raw",
+      "type": "string",
+      "enum": [
+        "minecraft",
+        "minecraft-bedrock",
+        "raw",
+        "none"
+      ]
+    },
+    "mods": {
+      "type": "object",
+      "properties": {
+        "typeField": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+        },
+        "versionField": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+        },
+        "plugins": {
+          "maxItems": 5,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "maxLength": 20
+          }
+        },
+        "mods": {
+          "maxItems": 5,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "maxLength": 20
+          }
+        }
+      },
+      "required": [
+        "typeField",
+        "versionField",
+        "plugins",
+        "mods"
+      ],
+      "additionalProperties": false
+    },
+    "worldPaths": {
+      "minItems": 1,
+      "maxItems": 10,
+      "type": "array",
+      "items": {
+        "type": "string",
+        "maxLength": 120,
+        "pattern": "^[A-Za-z0-9_-][A-Za-z0-9._-]*(?:\\/[A-Za-z0-9_-][A-Za-z0-9._-]*)*$"
+      }
+    },
+    "arch": {
+      "default": [
+        "amd64",
+        "arm64"
+      ],
+      "minItems": 1,
+      "maxItems": 2,
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": [
+          "amd64",
+          "arm64"
+        ]
+      }
     },
     "dataDir": {
       "type": "string",
@@ -150,7 +263,12 @@
                 "type": "boolean"
               }
             },
-            "required": ["key", "label", "type", "default"],
+            "required": [
+              "key",
+              "label",
+              "type",
+              "default"
+            ],
             "additionalProperties": false
           },
           {
@@ -181,7 +299,12 @@
                 "type": "boolean"
               }
             },
-            "required": ["key", "label", "type", "default"],
+            "required": [
+              "key",
+              "label",
+              "type",
+              "default"
+            ],
             "additionalProperties": false
           },
           {
@@ -216,7 +339,13 @@
                 "type": "boolean"
               }
             },
-            "required": ["key", "label", "type", "options", "default"],
+            "required": [
+              "key",
+              "label",
+              "type",
+              "options",
+              "default"
+            ],
             "additionalProperties": false
           },
           {
@@ -241,13 +370,28 @@
                 "type": "boolean"
               }
             },
-            "required": ["key", "label", "type", "default"],
+            "required": [
+              "key",
+              "label",
+              "type",
+              "default"
+            ],
             "additionalProperties": false
           }
         ]
       }
     }
   },
-  "required": ["id", "name", "image", "ram", "ports", "query", "rcon", "dataDir", "fields"],
+  "required": [
+    "id",
+    "name",
+    "image",
+    "ram",
+    "ports",
+    "query",
+    "rcon",
+    "dataDir",
+    "fields"
+  ],
   "additionalProperties": false
 }

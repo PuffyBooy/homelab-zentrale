@@ -24,7 +24,7 @@ services:
       CS2_PORT: '27015'
       CS2_LAN: '0'
       TV_ENABLE: '0'
-      TZ: Europe/Vienna
+      TZ: ${TZ}
     ports:
       - '${PORT_GAME}:27015/udp'
       - '127.0.0.1:${PORT_RCON}:27015/tcp'

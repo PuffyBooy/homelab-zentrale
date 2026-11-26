@@ -1,0 +1,34 @@
+# Rendered by the core (see templates/games/README.md).
+# - ${RCON_PASSWORD} below is a runtime placeholder: the core leaves it as is and
+#   docker compose fills it from the 0600 .env at `up` (admin and RCON password of
+#   the image). PASSWORD (secret field, join password) comes from .env via env_file.
+# - Both UDP ports are the same inside and outside. RCON only on 127.0.0.1.
+# - The world (Zomboid/) is in ./data (backed up); the server files are in the image.
+# - The image is amd64 only.
+services:
+  server:
+    image: danixu86/project-zomboid-dedicated-server:42.20.4-release-2
+    container_name: game-${GAME_NAME}
+    restart: unless-stopped
+    mem_limit: ${MEMORY}
+    stop_grace_period: 120s
+    env_file:
+      - .env
+    environment:
+      PORT: ${PORT_GAME}
+      UDPPORT: ${PORT_DIRECT}
+      DISPLAYNAME: ${DISPLAYNAME}
+      PUBLIC: ${PUBLIC}
+      ADMINUSERNAME: admin
+      ADMINPASSWORD: ${RCON_PASSWORD}
+      RCONPASSWORD: ${RCON_PASSWORD}
+      TZ: ${TZ}
+    ports:
+      - '${PORT_GAME}:${PORT_GAME}/udp'
+      - '${PORT_DIRECT}:${PORT_DIRECT}/udp'
+      - '127.0.0.1:${PORT_RCON}:27015/tcp'
+    volumes:
+      - ./data:/home/steam/Zomboid
+    labels:
+      homelab.game: ${GAME_NAME}
+      homelab.template: project-zomboid

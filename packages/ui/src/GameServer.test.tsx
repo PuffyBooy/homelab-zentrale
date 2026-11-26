@@ -123,4 +123,12 @@ describe('GameServer additions (handlers, formatted TPS)', () => {
       '<span class="hz-usage-val">—</span>',
     );
   });
+
+  it('shows an own status text with the off shape (sleeping)', () => {
+    const out = html(<GameServer {...base} status="off" statusLabel="Schläft" />);
+    expect(out).toContain('hz-status-off');
+    expect(out).toContain('>Schläft<');
+    expect(out).not.toContain('>OFF<');
+    expect(html(<GameServer {...base} status="off" />)).toContain('>OFF<');
+  });
 });

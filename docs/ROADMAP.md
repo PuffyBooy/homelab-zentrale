@@ -114,6 +114,21 @@ Arbeite die Meilensteine **in dieser Reihenfolge** ab. Jeder Meilenstein bekommt
 
 ---
 
+## M12: Gameserver komplett
+- **Schlafmodus:** Neue Gameserver schlafen nach 15 Min ohne Spieler (einstellbar, 0 = nie). Solange sie schlafen, lauscht der Agent auf ihren Ports (`game.wake.arm`): Minecraft zeigt in der Serverliste „Schläft“, der erste Login (bzw. bei anderen Spielen das erste Spielpaket) weckt den Server; der Spieler bekommt „Server startet, bitte in 1 Minute neu verbinden“. Aufwecken beachtet die RAM-Reserve (M10). Status „Schläft“ in Kachel, Detail und Benutzerlink.
+- **Zeitpläne pro Gameserver:** Neustart und Backup an Wochentagen zu einer Uhrzeit (`HZ_TIMEZONE`), Neustart mit Warnung an die Spieler 5 und 1 Min vorher (RCON `say`); schlafende Server werden nicht geweckt.
+- **Discord-Webhook:** „Server ist online“, offline, schläft, aufgeweckt; URL verschlüsselt, nur Discord-Hosts, nur Name, Spiel, externe Adresse und Spielerzahl.
+- **Spielerstatistik:** Spielzeit pro Spieler, Sitzungen, Spitzenzeiten (Ø Spieler pro Stunde), Höchststand; 7 oder 30 Tage, Daten 90 Tage.
+- **Mods und Plugins (Modrinth):** Für Paper (Plugins) und Fabric (Mods) suchen, installieren (nur `cdn.modrinth.com`, sha512 geprüft), entfernen; Hinweis „Neustart nötig“.
+- **Benutzerlinks:** neue Rechte „Welt herunterladen“ (tar.zst, 1×/Stunde, so lange der Link gilt) und „Whitelist-Anfrage“ (Freund trägt Namen ein, Admin bestätigt nach Push).
+- **Backup wiederherstellen per Knopf** (Step-up, Name bestätigen, vorher frisches Backup).
+- **7 neue Vorlagen:** Satisfactory, Factorio, Enshrouded, Project Zomboid, ARK: Survival Evolved, Rust, V Rising (mit Architektur-Angabe, nur passende Server wählbar).
+- **Netz am Server** (zuhause/Cloud/VPS) für den richtigen Hinweis zur Portweiterleitung; Gameserver-Container werden über das Label `homelab.game` erkannt.
+
+**Abnahme:** Ein Minecraft-Server schläft nach der eingestellten Zeit ohne Spieler ein, ein Login-Versuch weckt ihn, danach läuft er; die Serverliste zeigt im Schlaf „Schläft“. Ein Zeitplan-Backup läuft zur eingestellten Minute. Ein Plugin wird aus Modrinth installiert und wieder entfernt. Ein Freund lädt über den Link die Welt herunter und stellt eine Whitelist-Anfrage, die der Admin bestätigt. Ein Backup wird wiederhergestellt. Sicherheitstests: Wake-Listener nur auf Ports des eigenen Spiels, keine Weiterleitung von Daten, Größen- und Verbindungsgrenzen, kein Wecken über Serverlisten-Pings; Mod-URLs nur von Modrinth mit Hash; Discord-URL nicht im Log und in keiner Antwort; Welt-Download nur mit Recht und Limit; Restore nur mit Step-up und ohne Pfade außerhalb des Spielordners.
+
+---
+
 ## Definition of Done (für jeden PR)
 - Code, Tests und Doku sind aktuell (`docs/` mitpflegen, wenn sich etwas ändert)
 - Keine `any`, keine auskommentierten Blöcke, keine TODOs ohne Issue

@@ -6,8 +6,12 @@
   "ram": { "min": "4G", "recommended": "6G" },
   "ports": [{ "name": "game", "container": 25565, "protocol": "tcp", "default": 25565, "count": 1 }],
   "query": { "method": "minecraft", "port": "game" },
-  "rcon": { "supported": true, "port": 25575, "tpsCommand": "tps" },
+  "rcon": { "supported": true, "port": 25575, "tpsCommand": "tps", "sayCommand": "say {msg}", "whitelistAddCommand": "whitelist add {player}" },
+  "wake": "minecraft",
+  "mods": { "typeField": "TYPE", "versionField": "VERSION", "plugins": ["PAPER"], "mods": ["FABRIC"] },
+  "arch": ["amd64", "arm64"],
   "dataDir": "./data",
+  "worldPaths": ["world", "world_nether", "world_the_end"],
   "fields": [
     {
       "key": "TYPE",

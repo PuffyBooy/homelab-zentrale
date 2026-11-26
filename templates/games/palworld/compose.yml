@@ -28,7 +28,7 @@ services:
       REST_API_ENABLED: 'true'
       REST_API_PORT: '8212'
       BACKUP_ENABLED: 'false'
-      TZ: Europe/Vienna
+      TZ: ${TZ}
     ports:
       - '${PORT_GAME}:8211/udp'
       - '127.0.0.1:${PORT_API}:8212/tcp'

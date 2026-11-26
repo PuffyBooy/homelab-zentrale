@@ -80,7 +80,7 @@ test('the form comes from template.json and checks input before sending', async 
   await expect(page.getByText('Von außen erreichbar')).toBeVisible();
 
   await page.getByLabel('Name', { exact: true }).fill('Survival Welt');
-  await page.getByLabel('Auto-Stopp (Minuten ohne Spieler)').fill('5000');
+  await page.getByLabel('Schlafen nach … Min ohne Spieler').fill('5000');
   await page
     .getByLabel(/^Port /)
     .first()
@@ -91,7 +91,7 @@ test('the form comes from template.json and checks input before sending', async 
     page.getByText('Nur Kleinbuchstaben, Ziffern und Bindestrich (2–32 Zeichen).'),
   ).toBeVisible();
   await expect(page.getByText('Server auswählen.')).toBeVisible();
-  await expect(page.getByText('Ganze Minuten von 0 bis 1440 (0 = aus).')).toBeVisible();
+  await expect(page.getByText('Ganze Minuten von 0 bis 1440 (0 = nie).')).toBeVisible();
   await expect(page.getByText(/^Port von 1024 bis/)).toBeVisible();
   await expect(page.getByText(/Felder prüfen\./)).toBeVisible();
   // The first invalid field gets the focus.

@@ -264,6 +264,7 @@ export function seedDemo(deps: {
         allowTerminal: false,
         createdAt: t0,
         lastSeen: t0,
+        network: s.name === 'oracle-a1' ? 'cloud' : 'home',
       };
       db.insert(servers).values(row).run();
       // 24 h of history, one sample per minute, so the sparklines have data.

@@ -21,6 +21,7 @@
 
 - Der Agent verbindet sich ausgehend zu `wss://heimserver.<tailnet>.ts.net/agent`.
 - Auf keinem Server wird ein Port für den Agent geöffnet.
+- **Ausnahme Schlafmodus (M12):** Solange ein Gameserver schläft, lauscht der Agent auf genau den Spielports dieses Gameservers (die ohnehin für Freunde weitergeleitet sind), damit der erste Verbindungsversuch ihn weckt. Er antwortet nur mit „Schläft“ bzw. „Server startet“, leitet nie Daten weiter, begrenzt Größe, Zeit und Verbindungen und schließt die Ports, bevor das Spiel startet. Kein anderer Port, nie die Agent-Verbindung selbst. Wer das nicht will, schaltet „Beim Verbinden aufwecken“ aus.
 
 ## Router-Einstellungen
 

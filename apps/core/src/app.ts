@@ -30,6 +30,14 @@ import { githubRoutes } from './github/routes.js';
 import { GithubService } from './github/service.js';
 import type { FetchLike as GithubFetch } from './github/client.js';
 import { gameRoutes } from './games/routes.js';
+import { gameFeatureRoutes } from './games/feature-routes.js';
+import { GameModsService } from './games/mods.js';
+import { GameNotifier } from './games/notify.js';
+import { GameScheduleService } from './games/schedules.js';
+import { GameStatsService } from './games/stats.js';
+import { WhitelistRequests } from './games/whitelist-requests.js';
+import { nextWallClock } from './calendar.js';
+import { seedDemoGames } from './demo/games.js';
 import { migrateRoutes } from './games/migrate-routes.js';
 import { GameService } from './games/service.js';
 import { loadTemplates } from './games/templates.js';
@@ -101,6 +109,8 @@ export interface AppDeps {
   /** Home Assistant client timers (tests: short backoff and heartbeat). */
   haOptions?: HaClientOptions;
   consoleOptions?: ConsoleOptions;
+  /** M12: HTTP for Discord webhooks and the Modrinth API (tests: a fake). */
+  gameFetch?: FetchLike;
 }
 
 /** Core services, decorated on the app as `hzCore` (routes, tests). */
@@ -119,6 +129,11 @@ export interface CoreServices {
   notifier: Notifier;
   github: GithubService;
   games: GameService;
+  gameSchedules: GameScheduleService;
+  gameNotifier: GameNotifier;
+  gameStats: GameStatsService;
+  gameMods: GameModsService;
+  whitelistRequests: WhitelistRequests;
   shares: ShareService;
   ha: HaService;
   consoles: ConsoleService;
@@ -459,6 +474,33 @@ export async function buildApp(config: Config, deps: AppDeps = {}): Promise<Fast
     if (deleted) games.forgetServer(id);
     else games.queueRefresh();
   });
+  // ---- M12: sleep mode, schedules, Discord, statistics, mods, whitelist requests --
+  servers.onGameWake((serverId, e) => games.onWake(serverId, e.gameId));
+  servers.onAgentConnected((serverId) => games.rearmServer(serverId));
+  const gameLog = app.log.child({ mod: 'games' });
+  const gameSchedules = new GameScheduleService({ db: db.db, now, games, scheduler, log: gameLog });
+  const gameNotifier = new GameNotifier({
+    db: db.db,
+    box,
+    now,
+    games,
+    log: gameLog,
+    ...(deps.gameFetch ? { fetch: deps.gameFetch } : {}),
+  });
+  const gameStats = new GameStatsService({ db: db.db, now, games });
+  const gameMods = new GameModsService({
+    db: db.db,
+    now,
+    games,
+    log: gameLog,
+    ...(deps.gameFetch ? { fetch: deps.gameFetch } : {}),
+  });
+  const whitelistRequests = new WhitelistRequests({ db: db.db, now, games, alerts });
+  scheduler.at(
+    'games.statsPrune',
+    (from) => nextWallClock(from, { hour: 5, minute: 10 }),
+    () => void gameStats.prune(),
+  );
 
   // ---- M10: priorities and automatic throttling ------------------------------------
   const throttle = new ThrottleService({
@@ -492,6 +534,8 @@ export async function buildApp(config: Config, deps: AppDeps = {}): Promise<Fast
     games,
     logs,
     log: app.log.child({ mod: 'share' }),
+    whitelist: whitelistRequests,
+    hub,
   });
 
   // ---- M8: Home Assistant -------------------------------------------------------
@@ -573,6 +617,11 @@ export async function buildApp(config: Config, deps: AppDeps = {}): Promise<Fast
     notifier,
     github,
     games,
+    gameSchedules,
+    gameNotifier,
+    gameStats,
+    gameMods,
+    whitelistRequests,
     shares,
     ha,
     consoles,
@@ -622,6 +671,7 @@ export async function buildApp(config: Config, deps: AppDeps = {}): Promise<Fast
   checks.start();
   github.start();
   games.start();
+  gameSchedules.start();
   scheduler.every('ha.tick', 1_000, () => ha.tick());
   scheduler.every('push.warnBundle', 60_000, () => {
     notifier.flush();
@@ -640,7 +690,8 @@ export async function buildApp(config: Config, deps: AppDeps = {}): Promise<Fast
     alerts.log('report:weekly', 'info', title, body, null, 'system');
   });
   if (config.demo) {
-    seedDemo({ db: db.db, now, servers, metrics, scheduler, logs });
+    const demoIds = seedDemo({ db: db.db, now, servers, metrics, scheduler, logs });
+    seedDemoGames({ db: db.db, now, serverIds: demoIds, templates: games.templates, box });
     app.log.warn('HZ_DEMO=1: demo servers with simulated metrics');
   }
 
@@ -656,7 +707,7 @@ export async function buildApp(config: Config, deps: AppDeps = {}): Promise<Fast
     scheduler.stop();
     // Let running checks and pushes finish before the database closes (bounded).
     await Promise.race([
-      Promise.all([checks.idle(), push.idle(), github.idle(), games.idle()]),
+      Promise.all([checks.idle(), push.idle(), github.idle(), games.idle(), gameNotifier.idle()]),
       new Promise((r) => setTimeout(r, 3_000).unref()),
     ]);
     ha.stop();
@@ -727,6 +778,17 @@ export async function buildApp(config: Config, deps: AppDeps = {}): Promise<Fast
   await app.register(pushRoutes, { prefix: '/api', db: db.db, now, push });
   await app.register(githubRoutes, { prefix: '/api', db: db.db, now, github });
   await app.register(gameRoutes, { prefix: '/api', db: db.db, now, games });
+  await app.register(gameFeatureRoutes, {
+    prefix: '/api',
+    db: db.db,
+    now,
+    games,
+    schedules: gameSchedules,
+    notifier: gameNotifier,
+    stats: gameStats,
+    mods: gameMods,
+    whitelist: whitelistRequests,
+  });
   await app.register(migrateRoutes, {
     prefix: '/api',
     db: db.db,

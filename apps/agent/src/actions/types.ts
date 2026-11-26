@@ -3,6 +3,7 @@ import type { RunOptions, RunResult, Spawner } from '../exec.js';
 import type { HostContext } from '../host.js';
 import type { Logger } from '../log.js';
 import type { StreamManager } from '../streams.js';
+import type { WakeManager } from './game-wake.js';
 import type { PtyManager } from './pty.js';
 
 /** Thrown by actions; becomes rpc.result {ok:false, error:{code, message}}. */
@@ -39,6 +40,8 @@ export interface ActionContext {
   dataDir: string;
   /** Web console sessions (actions/pty.ts); only set when HZ_AGENT_ALLOW_TERMINAL=1. */
   pty?: PtyManager;
+  /** Wake listeners of sleeping games (game.wake.*); set by index.ts. */
+  wake?: WakeManager;
 }
 
 export type ActionHandler<A extends RpcAction> = (
