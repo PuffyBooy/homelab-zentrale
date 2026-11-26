@@ -42,6 +42,7 @@ describe('optional modules', () => {
       github: false,
       homeassistant: false,
       games: true,
+      storage: true,
     });
     const state = await t.app.inject({
       method: 'GET',
@@ -63,7 +64,9 @@ describe('optional modules', () => {
   });
 
   it('routes of disabled modules are unreachable even with a valid session (404 module_disabled)', async () => {
-    t = await makeApp({ modules: { github: false, homeassistant: false, games: false } });
+    t = await makeApp({
+      modules: { github: false, homeassistant: false, games: false, storage: false },
+    });
     const { cookie } = await completeSetup(t);
     const routes = t.app.hzRoutes.filter((r) => moduleOfPath(r.url) !== null);
     // Every module has routes; all of them are gated.
@@ -119,6 +122,7 @@ describe('optional modules', () => {
       github: false,
       homeassistant: false,
       games: true,
+      storage: true,
     });
     // Off and games on: no step-up.
     expect((await put(t, cookie, { games: false })).statusCode).toBe(200);
@@ -126,6 +130,7 @@ describe('optional modules', () => {
       github: false,
       homeassistant: false,
       games: true,
+      storage: true,
     });
     // Invalid input.
     for (const body of [{}, { shell: true }, { github: 'yes' }, []]) {

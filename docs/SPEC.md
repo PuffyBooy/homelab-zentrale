@@ -89,6 +89,15 @@ Alles aktualisiert sich live über WebSocket. Es gibt kein Neuladen.
 2. Die Zentrale zeigt einen Einzeiler zum Kopieren: `docker run …` bzw. ein Compose-Snippet mit `HZ_CORE_URL` und Token
 3. Der Agent meldet sich, tauscht das Einmal-Token gegen ein dauerhaftes Agent-Token und erscheint in der Liste
 
+### 5.4 Speicher und NAS (M13)
+Für Server mit Festplatten, vor allem ein NAS wie das UGREEN NASync (UGOS Pro ist ein Debian mit md-RAID, LVM und btrfs/ext4 unter `/volume1`; eine offene Schnittstelle bietet UGOS nicht, deshalb liest der Agent den Host selbst):
+- **Anbinden:** Wie jeder Server: in UGOS SSH einschalten (Systemsteuerung → Terminal), Docker ist dabei. Dann den Einzeiler aus „Server hinzufügen“ per SSH als root ausführen. Auf einem UGREEN-NAS schaltet der Einzeiler SMART selbst ein; sonst `--smart` anhängen.
+- **Anzeige** im Serverdetail, Abschnitt „Speicher“: RAID-Arrays (Level, Platten x/y, Zustand, Fortschritt bei Neuaufbau oder Prüfung), Volumes (belegt/gesamt), Platten (Modell, Größe, HDD/SSD/NVMe, SMART-Zustand, defekte Sektoren, Betriebsstunden, Abnutzung, Temperatur, „schläft“). Übersicht: Kachel „Speicher“ mit allen Servern, die RAID haben oder ein NAS sind, Probleme zuerst.
+- **Meldungen:** RAID beschädigt/inaktiv und SMART-Ausfall `crit`; defekte Sektoren, Medienfehler, SSD-Abnutzung ab 90 % `warn`; Temperatur je nach Plattenart (HDD warn 50 °C / crit 60 °C, SATA-SSD 60/70, NVMe 70/80). Erholt sich etwas, kommt eine OK-Meldung.
+- **Schlafende Platten** werden nie geweckt: SMART wird mit `--nocheck=standby` gelesen und höchstens alle 10 Min; während die Platte schläft, bleiben die letzten Werte stehen, die Temperatur zeigt „schläft“.
+- Nur lesend: Die Zentrale ändert nichts am RAID und an den Platten.
+- Modul „NAS und Speicher“ (Standard an), unter Einstellungen → Module abschaltbar.
+
 ## 6. Container und Gameserver
 
 ### 6.1 Container

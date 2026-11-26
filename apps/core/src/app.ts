@@ -68,6 +68,8 @@ import { throttleRoutes } from './throttle/routes.js';
 import { ThrottleService } from './throttle/service.js';
 import { moduleRoutes } from './modules/routes.js';
 import { installModuleGate, ModuleService } from './modules/service.js';
+import { storageRoutes } from './storage/routes.js';
+import { StorageService } from './storage/service.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 
@@ -557,6 +559,27 @@ export async function buildApp(config: Config, deps: AppDeps = {}): Promise<Fast
       );
     }
   });
+  // ---- M13: NAS und Speicher -------------------------------------------------
+  const storage = new StorageService({
+    db: db.db,
+    now,
+    alerts,
+    log: app.log.child({ mod: 'storage' }),
+  });
+  storage.setEnabled(modules.enabled('storage'));
+  servers.onInventoryStored((id, inv) => {
+    try {
+      storage.onInventory(id, inv.storage);
+    } catch (err) {
+      app.log.error(
+        {
+          serverId: id,
+          err: err instanceof Error ? { name: err.name, stack: err.stack } : 'error',
+        },
+        'storage update failed',
+      );
+    }
+  });
 
   app.decorate('hzCore', {
     scheduler,
@@ -616,7 +639,8 @@ export async function buildApp(config: Config, deps: AppDeps = {}): Promise<Fast
   modules.onChange((m, on) => {
     if (m === 'github') github.setEnabled(on);
     else if (m === 'games') games.setEnabled(on);
-    else ha.setEnabled(on);
+    else if (m === 'homeassistant') ha.setEnabled(on);
+    else storage.setEnabled(on);
     app.log.info({ module: m, on }, 'module switched');
   });
   checks.start();
@@ -705,6 +729,7 @@ export async function buildApp(config: Config, deps: AppDeps = {}): Promise<Fast
   await app.register(installScriptRoutes, { onboarding });
   await app.register(portRoutes, { prefix: '/api', db: db.db, now, servers, ports });
   await app.register(moduleRoutes, { prefix: '/api', db: db.db, now, modules });
+  await app.register(storageRoutes, { prefix: '/api', storage });
   await app.register(alertRoutes, { prefix: '/api', db: db.db, now, alerts });
   await app.register(containerRoutes, {
     prefix: '/api',

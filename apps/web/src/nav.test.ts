@@ -68,7 +68,12 @@ describe('shortcuts', () => {
   });
 
   it('numbers only the visible items when modules are off', () => {
-    const items = visibleNavItems(navItems, { github: false, homeassistant: false, games: true });
+    const items = visibleNavItems(navItems, {
+      github: false,
+      homeassistant: false,
+      games: true,
+      storage: true,
+    });
     expect(items.map((i) => i.id)).toEqual([
       'overview',
       'servers',
