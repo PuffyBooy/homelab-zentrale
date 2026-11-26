@@ -14,6 +14,7 @@ export const FAKE_PVE_TOKEN_ID = 'hz@pve!zentrale';
 export const FAKE_PVE_SECRET = ['1f2e3d4c', '5b6a', '4789', '8a7b', '6c5d4e3f2a1b'].join('-');
 export const FAKE_PIHOLE_PASSWORD = `app-${'pw'}-e2e-0123456789`;
 export const FAKE_FRITZ_USER = 'zentrale';
+// HA1 below (FAKE_FRITZ_HA1) is MD5(zentrale:F!Box SOAP-Auth:<this password>); change both together.
 export const FAKE_FRITZ_PASSWORD = `fritz-${'e2e'}-passwort`;
 export const FAKE_KUMA_KEY = `uk1_${'e2eFakeKumaKey'}0123456789abcdef`;
 
@@ -216,7 +217,35 @@ export class FakePihole extends FakeServer {
 
 // ---- FRITZ!Box TR-064 ------------------------------------------------------------------------
 
+// Digest auth is MD5 by protocol (RFC 2617, as the FRITZ!Box speaks it). The fake never hashes
+// the password itself: like the box it only knows HA1 = MD5(user:realm:password), precomputed.
 const md5 = (s: string): string => createHash('md5').update(s).digest('hex');
+const FAKE_FRITZ_HA1 = '267a0a37c43d219f5bb937c79fd209da';
+
+/** `key="value"` / `key=value` pairs of a Digest header, without regex backtracking. */
+function digestParams(header: string): Map<string, string> {
+  const out = new Map<string, string>();
+  let i = 0;
+  while (i < header.length && out.size < 20) {
+    while (header[i] === ' ' || header[i] === ',') i++;
+    const eq = header.indexOf('=', i);
+    if (eq < 0) break;
+    const key = header.slice(i, eq).trim();
+    let value: string;
+    if (header[eq + 1] === '"') {
+      const end = header.indexOf('"', eq + 2);
+      if (end < 0) break;
+      value = header.slice(eq + 2, end);
+      i = end + 1;
+    } else {
+      const end = header.indexOf(',', eq + 1);
+      value = header.slice(eq + 1, end < 0 ? header.length : end).trim();
+      i = end < 0 ? header.length : end + 1;
+    }
+    out.set(key, value);
+  }
+  return out;
+}
 
 function soap(action: string, service: string, fields: Record<string, string | number>): string {
   const inner = Object.entries(fields)
@@ -237,13 +266,20 @@ export class FakeFritz extends FakeServer {
   private authorized(req: IncomingMessage): boolean {
     const h = req.headers.authorization ?? '';
     if (!h.startsWith('Digest ')) return false;
-    const p: Record<string, string> = {};
-    for (const m of h.slice(7).matchAll(/(\w+)=(?:"([^"]*)"|([^,\s]+))/g)) {
-      p[m[1] as string] = m[2] ?? m[3] ?? '';
-    }
+    const params = digestParams(h.slice(7, 2000));
+    const p = {
+      username: params.get('username'),
+      nonce: params.get('nonce'),
+      realm: params.get('realm'),
+      uri: params.get('uri'),
+      qop: params.get('qop'),
+      nc: params.get('nc'),
+      cnonce: params.get('cnonce'),
+      response: params.get('response'),
+    };
     if (p.username !== FAKE_FRITZ_USER || p.nonce !== this.nonce || p.realm !== this.realm)
       return false;
-    const ha1 = md5(`${FAKE_FRITZ_USER}:${this.realm}:${FAKE_FRITZ_PASSWORD}`);
+    const ha1 = FAKE_FRITZ_HA1;
     const ha2 = md5(`${req.method ?? 'POST'}:${p.uri ?? ''}`);
     const expected = p.qop
       ? md5(`${ha1}:${this.nonce}:${p.nc ?? ''}:${p.cnonce ?? ''}:${p.qop}:${ha2}`)
