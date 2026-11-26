@@ -39,9 +39,15 @@ describe('SMART override (security)', () => {
     expect(body).not.toMatch(/privileged|devices:|\/dev:/);
   });
 
-  it('install.sh accepts only `<code>` or `<code> --smart`', () => {
+  it('install.sh accepts only `<code>` with --smart / --allow-relay', () => {
     const tpl = readFileSync(INSTALL_TEMPLATE_PATH, 'utf8');
-    for (const args of [['ABCD-EFGH', '--evil'], ['ABCD-EFGH', '--smart', 'x'], []]) {
+    for (const args of [
+      ['ABCD-EFGH', '--evil'],
+      ['ABCD-EFGH', '--smart', 'x'],
+      ['ABCD-EFGH', '--allow-relay', '--smart', '--smart'],
+      ['ABCD-EFGH', '--allow-relay=1'],
+      [],
+    ]) {
       let status = 0;
       let stderr = '';
       try {
@@ -54,5 +60,23 @@ describe('SMART override (security)', () => {
       expect(status, args.join(' ')).toBe(1);
       expect(stderr).toContain('Aufruf:');
     }
+  });
+
+  it('install.sh takes --allow-relay (M15) and writes HZ_AGENT_ALLOW_RELAY', () => {
+    const tpl = readFileSync(INSTALL_TEMPLATE_PATH, 'utf8');
+    for (const args of [
+      ['ABCD-EFGH', '--allow-relay'],
+      ['ABCD-EFGH', '--smart', '--allow-relay'],
+    ]) {
+      let stderr = '';
+      try {
+        execFileSync('sh', ['-s', '--', ...args], { input: tpl, stdio: 'pipe' });
+      } catch (e) {
+        stderr = (e as { stderr: Buffer }).stderr.toString();
+      }
+      // Past the argument check (the unrendered code pattern fails afterwards).
+      expect(stderr, args.join(' ')).not.toContain('Aufruf:');
+    }
+    expect(tpl).toContain(`printf 'HZ_AGENT_ALLOW_RELAY=%s\\n' "$allow_relay"`);
   });
 });

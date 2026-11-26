@@ -1558,6 +1558,18 @@ body,
 .app-consumers-col + .app-consumers-col {
   border-left: 1px solid var(--line);
 }
+/* A throttled row's meta ("CPU 88 % · gedrosselt (2 Kerne) · niedrig") plus two
+   buttons is wider than a column: the meta wraps and the name keeps some room
+   instead of the buttons overflowing into the RAM column. */
+.app-consumers .hz-row-main {
+  min-width: 6rem;
+}
+.app-consumers .hz-row-meta {
+  flex: 0 1 auto;
+  min-width: 0;
+  white-space: normal;
+  text-align: right;
+}
 .app-consumers-head {
   margin: 0;
   padding: 0 var(--space-3) var(--space-1);

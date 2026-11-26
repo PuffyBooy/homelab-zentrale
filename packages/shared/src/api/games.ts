@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { gamedigTypeSchema, worldPathSchema } from '../agent-protocol.js';
+import { gameRelaySchema } from './relay.js';
 import { prioritySchema, throttledSchema } from './throttle.js';
 
 /**
@@ -262,6 +263,11 @@ export const gameSummarySchema = z.strictObject({
    * statusText "Schläft".
    */
   sleeping: z.boolean(),
+  /**
+   * M15: relay through an ingress, null without. When set, `address` is the relay
+   * address and the share page shows it as the external address.
+   */
+  relay: gameRelaySchema.nullable(),
   /** M12: Modrinth mods/plugins possible for this game (Paper or Fabric). */
   modsKind: z.enum(['plugins', 'mods']).nullable(),
   /** As set by the admin; empty: the address uses the Tailscale IP. */

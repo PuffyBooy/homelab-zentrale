@@ -44,6 +44,11 @@ Die Zentrale hat Root-ähnliche Macht über alle Server. Diese Regeln sind **nic
 - `system.upgrade` ruft nur `apt-get update` und `apt-get -y upgrade` mit festen Argumenten auf (kein `dist-upgrade`, keine Entfernungen).
 - Ergebnis-Events (`update_result`) zählen nur für einen bekannten, laufenden Lauf desselben Servers und Ziels.
 - Neustart-Automatik nach Updates einschalten braucht Step-up.
+## Game-Relay (M15)
+- Relay nur mit `HZ_AGENT_ALLOW_RELAY=1` am Eingang und Step-up für Eingänge, Relays und DNS-Einstellungen.
+- Ziele nur Tailscale-Adressen, Ports ab 1024 im Bereich des Eingangs, keine Überschneidungen; Grenzen für Verbindungen/Sessions (256 je Route) und Leerlauf (TCP 10 Min, UDP 2 Min). Keine Inhalte und keine Client-IPs im Log.
+- DNS-Token (Cloudflare/DuckDNS) verschlüsselt, nie in Antwort, Log, Audit oder Fehlertext; Anfragen nur an `api.cloudflare.com` bzw. `www.duckdns.org`, ohne Redirects.
+- Das Spiel sieht als Absender den Eingang; IP-Sperren im Spiel greifen nicht pro Spieler.
 
 ## Benutzerlinks
 - Token mit ≥ 128 Bit Zufall, gespeichert nur als Hash.

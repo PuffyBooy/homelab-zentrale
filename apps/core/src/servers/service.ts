@@ -156,6 +156,11 @@ export class ServerService implements AgentSink {
     this.virtual.add(serverId);
   }
 
+  /** Demo server without agent (HZ_DEMO=1): counts as connected, RPCs fail. */
+  isVirtual(serverId: string): boolean {
+    return this.virtual.has(serverId);
+  }
+
   onChange(fn: ServerListener): () => void {
     this.listeners.add(fn);
     return () => this.listeners.delete(fn);

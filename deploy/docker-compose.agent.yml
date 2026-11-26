@@ -2,10 +2,13 @@
 #   docker compose -f deploy/docker-compose.agent.yml up -d
 # Local build instead of the GHCR image:
 #   docker compose -f deploy/docker-compose.agent.yml -f deploy/docker-compose.agent.build.yml up -d --build
-# Config (HZ_CORE_URL, HZ_AGENT_TOKEN, HZ_AGENT_NAME, HZ_AGENT_ALLOW_TERMINAL) comes from
+# Config (HZ_CORE_URL, HZ_AGENT_TOKEN, HZ_AGENT_NAME, HZ_AGENT_ALLOW_TERMINAL,
+# HZ_AGENT_ALLOW_RELAY) comes from
 # /etc/homelab-agent/agent.env (mode 0600, outside /opt/homelab so no action can rewrite it).
 #
-# The agent opens no port. It dials out to wss://<core>.ts.net/agent (docs/NETWORK.md).
+# The agent opens no port for itself. It dials out to wss://<core>.ts.net/agent (docs/NETWORK.md).
+# Only on a game ingress (HZ_AGENT_ALLOW_RELAY=1, below) it listens on the game ports the core
+# sets with relay.set.
 #
 # Why each right is needed (everything else is dropped):
 # - /var/run/docker.sock        containers: inventory, events, start/stop/restart, logs, image
@@ -18,6 +21,8 @@
 #                               of sleeping games bind their published host ports (>= 1024 only,
 #                               no data is ever forwarded). Also wol.send: Wake-on-LAN broadcasts
 #                               must leave on the host LAN.
+#                               M15 relay listeners on an ingress bind the public game ports
+#                               (>= 1024 only).
 # - /proc -> /host/proc:ro      host mount table and network counters, read-only.
 # - /sys -> /host/sys:ro        hardware sensors (systeminformation also reads /sys), read-only.
 # - /opt/homelab (same path)    the only directory actions may write to (compose.write, games).
@@ -57,6 +62,13 @@
 # ones above. The shell runs as root but inherits this container's capability bounding set and
 # no-new-privileges (no CAP_KILL, NET_ADMIN, SYS_MODULE, SYS_BOOT ...; setuid binaries do not
 # gain rights). For full root work use SSH; the agent's rights are not widened for the console.
+#
+# Game relay (HZ_AGENT_ALLOW_RELAY, default 0 = relay.set is refused): set it to 1 in agent.env
+# (install-agent.sh --allow-relay) ONLY on the ingress, i.e. the server with a public IPv4 whose
+# provider firewall opens the game port range. The agent then listens on 0.0.0.0:<game port>
+# (>= 1024) and forwards TCP/UDP byte for byte to the game's server, targets only inside the
+# tailnet (100.64.0.0/10, fd7a:115c:a1e0::/48). It needs no extra right (ports >= 1024,
+# network_mode: host above). Never set it on the home server: friends would reach it directly.
 name: homelab-agent
 
 services:

@@ -306,6 +306,17 @@ describe('top consumers', () => {
       isGame: false,
       gameId: null,
     });
+    // Per server (the overview with ?server=): ranked only among that server's containers.
+    const own = topConsumersResponseSchema.parse(
+      (await req(s, 'GET', `/api/overview/top-consumers?serverId=${s.serverId}`)).json(),
+    );
+    expect(own.byCpu.map((c) => c.containerName)).toEqual(['b', 'c', 'd']);
+    const other = topConsumersResponseSchema.parse(
+      (await req(s, 'GET', '/api/overview/top-consumers?serverId=srv-other-0001')).json(),
+    );
+    expect(other.byCpu).toEqual([]);
+    expect(other.byRam).toEqual([]);
+    expect((await req(s, 'GET', '/api/overview/top-consumers?serverId=../x')).statusCode).toBe(400);
   });
 });
 
