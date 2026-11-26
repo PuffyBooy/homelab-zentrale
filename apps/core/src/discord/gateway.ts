@@ -96,7 +96,11 @@ const frameSchema = z.object({
   s: z.number().int().nonnegative().nullable().optional(),
   t: z.string().max(64).nullable().optional(),
 });
-const helloSchema = z.object({ heartbeat_interval: z.number().int().min(1).max(600_000) });
+/** Upper bound for Discord's heartbeat interval (it sends about 41 s). */
+const MAX_HEARTBEAT_MS = 600_000;
+const helloSchema = z.object({
+  heartbeat_interval: z.number().int().min(1).max(MAX_HEARTBEAT_MS),
+});
 const readySchema = z.object({
   session_id: z.string().min(1).max(128),
   resume_gateway_url: z.string().max(512).optional(),
@@ -316,6 +320,9 @@ export class DiscordGateway {
 
   private scheduleHeartbeat(ws: WebSocket, delay: number): void {
     if (this.heartbeatTimer) clearTimeout(this.heartbeatTimer);
+    // The interval comes from Discord: clamp it here too (helloSchema already caps it).
+    let ms = MAX_HEARTBEAT_MS;
+    if (delay >= 0 && delay <= MAX_HEARTBEAT_MS) ms = delay;
     this.heartbeatTimer = setTimeout(() => {
       if (this.ws !== ws) return;
       // No ACK for the last heartbeat: zombie connection, reconnect and resume.
@@ -323,7 +330,7 @@ export class DiscordGateway {
       this.acked = false;
       this.send(ws, { op: 1, d: this.seq });
       this.scheduleHeartbeat(ws, this.interval);
-    }, delay);
+    }, ms);
     this.heartbeatTimer.unref();
   }
 
