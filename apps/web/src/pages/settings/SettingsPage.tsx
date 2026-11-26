@@ -31,6 +31,8 @@ import { HaEntitiesTile, HaSettingsTile } from './HaTiles.js';
 import { NotifyTile, PushTile } from './PushTiles.js';
 import { ShareGatewayTile } from './ShareGatewayTile.js';
 import { ModulesTile } from './ModulesTile.js';
+import { DiscordBotTile } from './DiscordBotTile.js';
+import { VoiceTile } from './VoiceTile.js';
 import { useModules } from '../../lib/useModules.js';
 
 /** Sections of SPEC 13, in that order. Ids are the anchors (`/settings#server`). */
@@ -43,8 +45,10 @@ export const SETTINGS_SECTIONS: readonly { id: string; label: string; module?: M
   { id: 'checks', label: 'Checks' },
   { id: 'push', label: 'Push' },
   { id: 'ha', label: 'Home Assistant', module: 'homeassistant' },
+  { id: 'sprachsteuerung', label: 'Sprachsteuerung', module: 'voice' },
   { id: 'wandmodus', label: 'Wandmodus' },
   { id: 'share-gateway', label: 'Share-Gateway', module: 'games' },
+  { id: 'discord-bot', label: 'Discord-Bot', module: 'discordbot' },
   { id: 'backup', label: 'Backup' },
 ];
 
@@ -114,11 +118,13 @@ export function SettingsPage(): ReactElement {
             <HaEntitiesTile />
           </>
         ) : null}
+        {modules.voice ? <VoiceTile /> : null}
         {/* Wide: each device row has a pairing badge and two actions. */}
         <Anchor id="wandmodus" wide>
           <WallDevicesTile />
         </Anchor>
         {modules.games ? <ShareGatewayTile /> : null}
+        {modules.discordbot ? <DiscordBotTile /> : null}
         <Anchor id="backup">
           <BackupTile />
         </Anchor>

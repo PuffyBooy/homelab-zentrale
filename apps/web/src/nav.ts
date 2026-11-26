@@ -11,6 +11,10 @@ export const navItems: NavItem[] = [
   { id: 'home', label: 'Wohnung', icon: 'home', href: '/home' },
   { id: 'alerts', label: 'Meldungen', icon: 'bell', href: '/alerts' },
   { id: 'console', label: 'Konsole', icon: 'terminal', href: '/console', key: '`' },
+  // Operations modules (off by default). After the console, with letter keys, so the
+  // digits 1–9 keep their places (docs/QUESTIONS.md).
+  { id: 'logs', label: 'Log-Suche', icon: 'terminal', href: '/logs', key: 'l' },
+  { id: 'security', label: 'Sicherheit', icon: 'lock', href: '/security', key: 's' },
 ];
 
 /** No gear icon in the design set yet (docs/QUESTIONS.md), so settings is text only. */

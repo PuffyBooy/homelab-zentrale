@@ -23,6 +23,8 @@ describe('navigation', () => {
       'Wohnung',
       'Meldungen',
       'Konsole',
+      'Log-Suche',
+      'Sicherheit',
     ]);
   });
 
@@ -45,6 +47,13 @@ describe('shortcuts', () => {
     expect(shortcutTarget('`')).toBe('/console');
     expect(shortcutTarget('0')).toBeUndefined();
     expect(shortcutTarget('a')).toBeUndefined();
+  });
+
+  it('opens Log-Suche with l and Sicherheit with s', () => {
+    expect(shortcutTarget('l')).toBe('/logs');
+    expect(shortcutTarget('s')).toBe('/security');
+    expect(activeNavId('/logs')).toBe('logs');
+    expect(activeNavId('/security')).toBe('security');
   });
 
   it('ignores plain keys while typing', () => {
@@ -73,6 +82,11 @@ describe('shortcuts', () => {
       homeassistant: false,
       games: true,
       storage: true,
+      logsearch: false,
+      vulnscan: false,
+      fail2ban: false,
+      discordbot: false,
+      voice: false,
     });
     expect(items.map((i) => i.id)).toEqual([
       'overview',

@@ -20,8 +20,8 @@ function shownError(err: unknown): string | null {
 }
 
 /**
- * Settings → Module (decision 2026-11-26): GitHub, Home Assistant and Gameserver can be
- * switched off. Switching GitHub or Home Assistant on needs step-up (api() asks).
+ * Settings → Module (decision 2026-11-26): every optional module can be switched. Switching
+ * one of MODULES_ENABLE_STEP_UP on needs step-up (api() asks).
  */
 export function ModulesTile(): ReactElement {
   const qc = useQueryClient();
@@ -44,8 +44,8 @@ export function ModulesTile(): ReactElement {
     <Tile title="Module" icon="cpu">
       <p className="app-text">
         Ausgeschaltete Module verschwinden aus Navigation und Übersicht, ihre Abfragen und Jobs
-        ruhen. Daten und Einstellungen bleiben erhalten. GitHub und Home Assistant einschalten
-        braucht einen Code.
+        ruhen. Daten und Einstellungen bleiben erhalten. GitHub, Home Assistant, Discord-Bot und
+        Sprachsteuerung einschalten braucht einen Code.
       </p>
       {modules.isError ? <FormError title={errorText(modules.error)} /> : null}
       {m ? (
