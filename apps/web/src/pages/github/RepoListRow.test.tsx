@@ -42,6 +42,13 @@ describe('RepoListRow', () => {
     }
   });
 
+  it('offers Deploy for a repo without CI and shows "kein CI"', () => {
+    const r = repo({ ci: 'off', targets: [target({ behind: 1 })] });
+    const out = html(<RepoListRow repo={r} now={NOW} onDeploy={noop} />);
+    expect(out).toContain('>kein CI<');
+    expect(out).toContain('>Deploy<');
+  });
+
   it('shows "Deploy läuft" instead of the button while a deploy runs', () => {
     const r = repo({ targets: [target({ behind: 2, deploying: true })] });
     const out = html(<RepoListRow repo={r} now={NOW} onDeploy={noop} />);

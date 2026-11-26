@@ -305,8 +305,12 @@ describe('deploy.run dir', () => {
         ['compose.up', { dir }],
       ] as const) {
         const res = await d.handle({ type: 'rpc', id: 'rpc_git00001', action, params: p });
-        expect(res).toMatchObject({ ok: false, error: { code: 'bad_path' } });
-        expect(res.ok === false && res.error.message).toMatch(/\.git/);
+        // The shared schema already refuses it (invalid_params); the dispatcher check
+        // (bad_path) is the second line for resolved paths.
+        expect(res.ok).toBe(false);
+        expect(res.ok === false && ['invalid_params', 'bad_path']).toContain(
+          res.ok === false ? res.error.code : '',
+        );
       }
     }
     expect(fallbackCalls).toHaveLength(0);

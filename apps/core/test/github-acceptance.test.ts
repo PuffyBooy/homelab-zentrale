@@ -72,11 +72,15 @@ describe('M5 acceptance', () => {
 
     const streamId = rpc?.id as string;
     s.agent.send({ type: 'stream.data', streamId, channel: 'stdout', chunk: 'Cloning into…\n' });
-    s.agent.send({ type: 'stream.data', streamId, channel: 'stderr', chunk: ' Container blog Started\n' });
+    s.agent.send({
+      type: 'stream.data',
+      streamId,
+      channel: 'stderr',
+      chunk: ' Container blog Started\n',
+    });
     const upd = await browser.next(
       (m) =>
-        m.type === 'update' &&
-        JSON.stringify(m.upsert ?? []).includes('Container blog Started'),
+        m.type === 'update' && JSON.stringify(m.upsert ?? []).includes('Container blog Started'),
     );
     expect(upd.topic).toBe(`deploy:${deploy.id}`);
 
@@ -168,6 +172,43 @@ describe('M5 acceptance', () => {
     expect(target(s, repo.id, tg.id).deploying).toBe(false);
   });
 
+  it('CI off (no workflow runs) may be deployed by hand, busy may not; auto-deploy only on ok', async () => {
+    const { s, repo, tg } = await blogSetup();
+    const running = s.gh.push('alex/blog', 'Still testing');
+    s.gh.ci(running, 'in_progress');
+    await pollOnce(s);
+    expect(s.t.app.hzCore.github.summary(repo.id)?.ci).toBe('busy');
+    const busy = await deployRequest(s, tg.id);
+    expect(busy.statusCode).toBe(409);
+    expect(busy.json()).toEqual({ ok: false, error: 'ci_not_green' });
+
+    const noCi = s.gh.push('alex/blog', 'Docs only, no workflow');
+    await pollOnce(s);
+    expect(s.t.app.hzCore.github.summary(repo.id)?.ci).toBe('off');
+    const d = await deployAndWait(s, tg.id);
+    expect(d).toMatchObject({ sha: noCi, trigger: 'manual' });
+    expect(target(s, repo.id, tg.id).liveSha).toBe(noCi);
+
+    // Auto-deploy ignores a head without CI.
+    const put = await s.t.app.inject({
+      method: 'PUT',
+      url: `/api/github/targets/${tg.id}`,
+      headers: s.headers,
+      payload: {
+        serverId: s.serverId,
+        path: '/opt/homelab/apps/blog',
+        branch: 'main',
+        autoDeploy: true,
+      },
+    });
+    expect(put.statusCode).toBe(200);
+    s.gh.push('alex/blog', 'Another commit without CI');
+    await pollOnce(s);
+    await pollOnce(s);
+    expect(s.t.app.hzCore.github.deployList({ limit: 10 })).toHaveLength(1);
+    expect(target(s, repo.id, tg.id).behind).toBe(1);
+  });
+
   it('auto-deploys a new head once its CI is green, once per sha', async () => {
     const { s, repo, tg } = await blogSetup({ autoDeploy: true });
     // The first poll after creating the target deploys the green head.
@@ -198,7 +239,10 @@ describe('M5 acceptance', () => {
     await pollOnce(s);
     const all = s.t.app.hzCore.github.deployList({ limit: 10 });
     expect(all.filter((d) => d.sha === third)).toHaveLength(1);
-    expect(all[0]).toMatchObject({ status: 'failed', summary: 'compose up fehlgeschlagen (Exit 1)' });
+    expect(all[0]).toMatchObject({
+      status: 'failed',
+      summary: 'compose up fehlgeschlagen (Exit 1)',
+    });
     const crit = s.t.app.hzCore.alerts.active(`deploy:${tg.id}:failed`);
     expect(crit).toMatchObject({
       level: 'crit',

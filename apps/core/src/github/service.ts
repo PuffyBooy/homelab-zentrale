@@ -3,6 +3,8 @@ import type { FastifyBaseLogger } from 'fastify';
 import { z } from 'zod';
 import {
   commitInfoSchema,
+  deployKeyDataSchema,
+  repoUrlSchema,
   type CiStatus,
   type CommitInfo,
   type Deploy,
@@ -16,7 +18,6 @@ import type { AgentHub } from '../agents/hub.js';
 import type { AlertService } from '../alerts/service.js';
 import type { Clock } from '../clock.js';
 import { DecryptError, randomToken, type SecretBox } from '../crypto.js';
-import { writeAudit } from '../db/audit.js';
 import type { Db } from '../db/index.js';
 import {
   deployTargets,
@@ -69,6 +70,14 @@ export function behindCount(commits: readonly { sha: string }[], liveSha: string
   const i = commits.findIndex((c) => c.sha === liveSha);
   // Not among the last 30: at least 30 behind ("30+" in the UI).
   return i === -1 ? COMMITS_PER_BRANCH : Math.min(i, COMMITS_PER_BRANCH);
+}
+
+/** Both clone URLs of the repo are accepted by the agent protocol. */
+function cloneable(fullName: string): boolean {
+  return (
+    repoUrlSchema.safeParse(`https://github.com/${fullName}.git`).success &&
+    repoUrlSchema.safeParse(`git@github.com:${fullName}.git`).success
+  );
 }
 
 /** True if one path equals the other or lies inside it. */
@@ -395,6 +404,8 @@ export class GithubService {
   }
 
   async addRepo(fullName: string): Promise<RepoSummary> {
+    // The agent only clones URLs that pass repoUrlSchema (no leading dash or dot).
+    if (!cloneable(fullName)) throw new HttpError(400, 'invalid_input');
     this.requireToken();
     const exists = (name: string): boolean =>
       this.deps.db
@@ -409,6 +420,7 @@ export class GithubService {
     } catch (err) {
       throw this.githubHttpError(err);
     }
+    if (!cloneable(info.fullName)) throw new HttpError(400, 'invalid_input');
     if (exists(info.fullName)) throw new HttpError(409, 'conflict');
     const row: GithubRepoRow = {
       id: randomToken(12),
@@ -768,8 +780,8 @@ export class GithubService {
 
   /**
    * Starts a deploy (button or rollback). Lock per target (409 busy). A normal
-   * deploy needs a commit from the branch (default: head) with green CI (409
-   * ci_not_green); a rollback needs a sha that was deployed successfully on
+   * deploy needs a commit from the branch (default: head) whose CI is ok or
+   * off (no workflow runs); crit or busy is 409 ci_not_green; a rollback needs a sha that was deployed successfully on
    * this target before (409 conflict) and skips the CI rule.
    */
   async deploy(targetId: string, req: DeployRequest): Promise<Deploy> {
@@ -804,7 +816,9 @@ export class GithubService {
             this.logError(err);
           }
         }
-        if (ci !== 'ok') throw new HttpError(409, 'ci_not_green');
+        // SPEC 7: red CI is never offered. Running CI is not green yet. A repo
+        // without any workflow runs (off) may be deployed by hand.
+        if (ci === 'crit' || ci === 'busy') throw new HttpError(409, 'ci_not_green');
       }
       const current = this.targetRow(target.id);
       if (!current) throw new HttpError(404, 'not_found');
@@ -835,11 +849,3 @@ export class GithubService {
     return this.deployer.countSince(this.deps.now() - sinceMs);
   }
 }
-
-/** deploy.key result from the agent: only an ed25519 public key is accepted. */
-export const deployKeyDataSchema = z.object({
-  publicKey: z
-    .string()
-    .max(200)
-    .regex(/^ssh-ed25519 [A-Za-z0-9+/]{20,100}={0,3}( [A-Za-z0-9@._-]{1,60})?$/),
-});

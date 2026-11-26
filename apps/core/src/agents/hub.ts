@@ -85,6 +85,8 @@ export interface StreamChunk {
 export interface StreamEndInfo {
   code: number;
   error?: string;
+  /** Agent message of an rpc.result error for this stream (never contains core secrets). */
+  detail?: string;
 }
 
 /**
@@ -432,7 +434,12 @@ export class AgentHub {
         const s = conn.streams.get(msg.id);
         if (s) {
           if (msg.ok) s.stream.pushResult(msg.data);
-          else this.endStream(conn, msg.id, { code: -1, error: msg.error.code });
+          else
+            this.endStream(conn, msg.id, {
+              code: -1,
+              error: msg.error.code,
+              detail: msg.error.message,
+            });
         }
         // Late results (after a timeout) are ignored.
         return;

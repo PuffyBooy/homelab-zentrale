@@ -165,3 +165,42 @@ describe('message parsing', () => {
     expect(m?.type).toBe('metrics');
   });
 });
+
+describe('deploy schemas', () => {
+  it('refuses .git segments in homelab paths', async () => {
+    const { homelabPathSchema } = await import('./agent-protocol.js');
+    for (const p of [
+      '/opt/homelab/app/.git',
+      '/opt/homelab/app/.git/hooks',
+      '/opt/homelab/.GIT/x',
+    ]) {
+      expect(homelabPathSchema.safeParse(p).success).toBe(false);
+    }
+    expect(homelabPathSchema.safeParse('/opt/homelab/apps/web.github').success).toBe(true);
+  });
+
+  it('accepts only plain github repo urls', async () => {
+    const { repoUrlSchema } = await import('./agent-protocol.js');
+    for (const u of [
+      'https://github.com/puffybooy/homelab-zentrale',
+      'https://github.com/puffybooy/homelab-zentrale.git',
+      'git@github.com:puffybooy/sc-ball.at.git',
+    ]) {
+      expect(repoUrlSchema.safeParse(u).success, u).toBe(true);
+    }
+    for (const u of [
+      'https://github.com/-x/y',
+      'https://github.com/./y',
+      'https://github.com/a/..',
+      'https://github.com/a/.git',
+      'https://github.com/a/..git',
+      'git@github.com:a/-y.git',
+      'https://user:tok@github.com/a/b',
+      'file:///opt/x',
+      'ext::sh -c x',
+      'https://github.com/a/b;x',
+    ]) {
+      expect(repoUrlSchema.safeParse(u).success, u).toBe(false);
+    }
+  });
+});

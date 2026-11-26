@@ -450,6 +450,39 @@ describe('deploys', () => {
     expect(actions.filter((a) => a === 'deploy.finished')).toHaveLength(2);
   });
 
+  it('maps agent refusals and exit codes to German summaries', async () => {
+    const s = await setup();
+    const { repo } = await blog(s);
+    const tg = await addTarget(s, repo.id);
+    const cases: [GithubSetup['behaviour']['deploy'], string][] = [
+      [
+        {
+          kind: 'refuse',
+          code: 'not_allowed',
+          message: 'dir is not empty and not a git repository',
+        },
+        'Zielordner ist nicht leer und kein Git-Repo',
+      ],
+      [
+        {
+          kind: 'refuse',
+          code: 'not_allowed',
+          message: 'origin https://github.com/alex/other.git does not match',
+        },
+        'Zielordner gehört zu einem anderen Repo',
+      ],
+      [{ kind: 'fail', code: 124 }, 'Zeitüberschreitung im Agent (Exit 124)'],
+      [{ kind: 'fail', code: 127 }, 'Programm fehlt auf dem Server (Exit 127)'],
+    ];
+    for (const [behaviour, summary] of cases) {
+      s.behaviour.deploy = behaviour;
+      const res = await deployRequest(s, tg.id);
+      const id = deployResponseSchema.parse(res.json()).deploy.id;
+      await deployDone(s, tg.id);
+      expect(s.t.app.hzCore.github.deployer.row(id)).toMatchObject({ status: 'failed', summary });
+    }
+  });
+
   it('lists deploys and shows one with its log', async () => {
     const s = await setup();
     const { repo } = await blog(s);
@@ -477,7 +510,11 @@ describe('deploys', () => {
     const res = await deployRequest(s, tg.id);
     const id = deployResponseSchema.parse(res.json()).deploy.id;
     await deployDone(s, tg.id);
-    const row = s.t.db.db.select().from(deploys).all().find((d) => d.id === id);
+    const row = s.t.db.db
+      .select()
+      .from(deploys)
+      .all()
+      .find((d) => d.id === id);
     expect(Buffer.byteLength(row?.logText ?? '')).toBeLessThanOrEqual(DEPLOY_LOG_MAX_BYTES);
     expect(row?.logText.length).toBeGreaterThan(200 * 1024);
     expect(row?.logText.endsWith('Deploy erfolgreich (' + row.sha.slice(0, 7) + ')\n')).toBe(true);
@@ -505,9 +542,7 @@ describe('deploys', () => {
       status: 'failed',
       summary: 'Zeitüberschreitung nach 20 Min',
     });
-    await until(() =>
-      s.agent.received.some((m) => m.type === 'stream.cancel'),
-    );
+    await until(() => s.agent.received.some((m) => m.type === 'stream.cancel'));
   });
 
   it('agent disconnect during a deploy: failed, lock released', async () => {

@@ -86,8 +86,14 @@ describe('deploy button rule', () => {
     expect(showDeployButton(repo({ targets: [target({ liveSha: null })] }))).toBe(true);
   });
 
-  it('never offers deploy on red, running or missing CI', () => {
-    for (const ci of ['crit', 'busy', 'off'] as const) {
+  it('offers deploy for a repo without CI (off)', () => {
+    const r = repo({ ci: 'off', targets: [behind()] });
+    expect(showDeployButton(r)).toBe(true);
+    expect(deployBlock(r, r.targets[0] ?? target())).toBe('ok');
+  });
+
+  it('never offers deploy on red or running CI', () => {
+    for (const ci of ['crit', 'busy'] as const) {
       const r = repo({ ci, targets: [behind()] });
       expect(showDeployButton(r)).toBe(false);
       expect(deployBlock(r, r.targets[0] ?? target())).toBe(`ci_${ci}`);

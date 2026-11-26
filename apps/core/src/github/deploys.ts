@@ -1,11 +1,6 @@
 import { and, desc, eq, gte, inArray, sql } from 'drizzle-orm';
 import type { FastifyBaseLogger } from 'fastify';
-import type {
-  Deploy,
-  RpcParamsInput,
-  deployLogChunkSchema,
-  deployTriggerSchema,
-} from '@hz/shared';
+import type { Deploy, RpcParamsInput, deployLogChunkSchema, deployTriggerSchema } from '@hz/shared';
 import type { z } from 'zod';
 import { RpcError, type AgentHub, type RpcStream, type StreamChunk } from '../agents/hub.js';
 import type { AlertService } from '../alerts/service.js';
@@ -52,7 +47,8 @@ export function tailBytes(text: string, max = DEPLOY_LOG_MAX_BYTES): string {
 
 function splitText(text: string): string[] {
   const out: string[] = [];
-  for (let i = 0; i < text.length; i += CHUNK_MAX_CHARS) out.push(text.slice(i, i + CHUNK_MAX_CHARS));
+  for (let i = 0; i < text.length; i += CHUNK_MAX_CHARS)
+    out.push(text.slice(i, i + CHUNK_MAX_CHARS));
   return out;
 }
 
@@ -74,10 +70,17 @@ export function toDeploy(row: DeployRow): Deploy {
 /** Short German summary of a failed stream end. */
 export function failureSummary(
   method: string,
-  end: { code: number; error?: string },
+  end: { code: number; error?: string; detail?: string },
   timedOut: boolean,
 ): string {
   if (timedOut) return 'Zeitüberschreitung nach 20 Min';
+  const detail = end.detail ?? '';
+  // Refusals of deploy.run by the agent (rpc error not_allowed with a message).
+  if (/not empty and not a git repository/i.test(detail))
+    return 'Zielordner ist nicht leer und kein Git-Repo';
+  if (/origin\b.*does not match/i.test(detail)) return 'Zielordner gehört zu einem anderen Repo';
+  if (end.code === 124) return 'Zeitüberschreitung im Agent (Exit 124)';
+  if (end.code === 127) return 'Programm fehlt auf dem Server (Exit 127)';
   switch (end.error) {
     case 'disconnected':
       return 'Verbindung zum Agent verloren';
@@ -201,7 +204,12 @@ export class Deployer {
         actor: 'system',
         action: 'deploy.finished',
         target: row.id,
-        details: { targetId: row.targetId, sha: row.sha, status: 'failed', summary: RESTART_SUMMARY },
+        details: {
+          targetId: row.targetId,
+          sha: row.sha,
+          status: 'failed',
+          summary: RESTART_SUMMARY,
+        },
       });
       const ctx = this.context(row.targetId);
       if (ctx) this.failureAlert(ctx.target, ctx.repo, ctx.serverName, row.sha, RESTART_SUMMARY);
@@ -409,7 +417,9 @@ export class Deployer {
       const code = err instanceof RpcError ? err.code : 'failed';
       finishWith(
         'failed',
-        code === 'offline' ? 'Agent offline' : failureSummary(target.method, { code: -1, error: code }, false),
+        code === 'offline'
+          ? 'Agent offline'
+          : failureSummary(target.method, { code: -1, error: code }, false),
       );
       return this.result(row.id);
     }
@@ -477,7 +487,9 @@ export class Deployer {
     const now = this.deps.now();
     this.progress(
       run,
-      status === 'ok' ? `Deploy erfolgreich (${shortSha(sha)})` : `Deploy fehlgeschlagen: ${summary}`,
+      status === 'ok'
+        ? `Deploy erfolgreich (${shortSha(sha)})`
+        : `Deploy fehlgeschlagen: ${summary}`,
     );
     run.stream?.removeAllListeners('data');
     run.stream = null;
@@ -520,7 +532,8 @@ export class Deployer {
       : `Läuft seit ${clockTime(this.deps.now())} in ${target.path}.`;
     const failedKey = `deploy:${target.id}:failed`;
     if (this.deps.alerts.active(failedKey)) this.deps.alerts.resolve(failedKey, { title, body });
-    else this.deps.alerts.log(`deploy:${target.id}`, 'info', title, body, target.serverId, 'github');
+    else
+      this.deps.alerts.log(`deploy:${target.id}`, 'info', title, body, target.serverId, 'github');
   }
 
   private failureAlert(

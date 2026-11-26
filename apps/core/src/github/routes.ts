@@ -176,4 +176,3 @@ export const githubRoutes: FastifyPluginAsync<GithubRoutesOptions> = async (app,
     });
   });
 };
-

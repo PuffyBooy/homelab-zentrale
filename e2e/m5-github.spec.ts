@@ -76,11 +76,13 @@ test('settings tile says "kein Token" and checks the token format', async () => 
 });
 
 test('overview GitHub tile points to the settings', async () => {
-  const res = await page.request.get('/api/servers');
-  const { servers } = (await res.json()) as { servers: unknown[] };
+  await page.goto('/');
+  const servers = await page.evaluate(async () => {
+    const res = await fetch('/api/servers', { credentials: 'same-origin' });
+    return ((await res.json()) as { servers: unknown[] }).servers;
+  });
   // Without servers the overview shows the enrollment hint instead of the tiles.
   test.skip(servers.length === 0, 'no server enrolled in this run');
-  await page.goto('/');
   const tile = page.locator('.hz-tile').filter({ has: page.getByText('GitHub', { exact: true }) });
   await expect(tile.getByText('Kein Token hinterlegt.')).toBeVisible();
   await expect(tile.getByRole('link', { name: 'Alle Repos' })).toBeVisible();

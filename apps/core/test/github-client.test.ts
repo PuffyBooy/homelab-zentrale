@@ -21,7 +21,12 @@ function setup(token: string | null = TOKEN) {
   const clock = { t: T0 };
   const gh = new FakeGithub(() => clock.t);
   const etags = memoryEtags();
-  const client = new GithubClient({ token: () => token, etags, now: () => clock.t, fetch: gh.fetch });
+  const client = new GithubClient({
+    token: () => token,
+    etags,
+    now: () => clock.t,
+    fetch: gh.fetch,
+  });
   return { clock, gh, etags, client };
 }
 
@@ -54,11 +59,14 @@ describe('CI status from workflow runs', () => {
       ]),
     ).toBe('ok');
     // Two workflows: one red makes the commit red, one running makes it busy.
-    expect(ciOf([run({ workflowId: 1 }), run({ id: 2, workflowId: 2, conclusion: 'failure' })])).toBe(
-      'crit',
-    );
     expect(
-      ciOf([run({ workflowId: 1 }), run({ id: 2, workflowId: 2, status: 'queued', conclusion: null })]),
+      ciOf([run({ workflowId: 1 }), run({ id: 2, workflowId: 2, conclusion: 'failure' })]),
+    ).toBe('crit');
+    expect(
+      ciOf([
+        run({ workflowId: 1 }),
+        run({ id: 2, workflowId: 2, status: 'queued', conclusion: null }),
+      ]),
     ).toBe('busy');
   });
 });
@@ -167,7 +175,8 @@ describe('GitHub client', () => {
       }),
       new Response('{}', { status: 502 }),
     ];
-    const f: FetchLike = () => Promise.resolve(answers.shift() ?? new Response('', { status: 500 }));
+    const f: FetchLike = () =>
+      Promise.resolve(answers.shift() ?? new Response('', { status: 500 }));
     const client = new GithubClient({
       token: () => TOKEN,
       etags: memoryEtags(),
@@ -186,7 +195,9 @@ describe('GitHub client', () => {
     const { gh, client } = setup();
     gh.addRepo('alex/blog');
     await client.commits('alex/blog', 'feature/a+b').catch(() => undefined);
-    expect(gh.requests.at(-1)?.path).toBe('/repos/alex/blog/commits?sha=feature%2Fa%2Bb&per_page=30');
+    expect(gh.requests.at(-1)?.path).toBe(
+      '/repos/alex/blog/commits?sha=feature%2Fa%2Bb&per_page=30',
+    );
   });
 });
 
@@ -211,7 +222,9 @@ describe('deploy helpers', () => {
   });
 
   it('writes short German failure summaries', () => {
-    expect(failureSummary('compose', { code: 1 }, false)).toBe('compose up fehlgeschlagen (Exit 1)');
+    expect(failureSummary('compose', { code: 1 }, false)).toBe(
+      'compose up fehlgeschlagen (Exit 1)',
+    );
     expect(failureSummary('script', { code: 2 }, false)).toBe('deploy.sh fehlgeschlagen (Exit 2)');
     expect(failureSummary('compose', { code: -1, error: 'disconnected' }, false)).toBe(
       'Verbindung zum Agent verloren',
@@ -220,7 +233,11 @@ describe('deploy helpers', () => {
       'Zeitüberschreitung nach 20 Min',
     );
     expect(
-      failureSummary('compose', { code: 128, error: 'git fetch https://user:pw@github.com/x failed' }, false),
+      failureSummary(
+        'compose',
+        { code: 128, error: 'git fetch https://user:pw@github.com/x failed' },
+        false,
+      ),
     ).toBe('git fetch https://github.com/x failed (Exit 128)');
   });
 });

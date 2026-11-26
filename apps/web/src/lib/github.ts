@@ -214,11 +214,12 @@ export function needsDeploy(t: Pick<DeployTarget, 'liveSha' | 'behind'>): boolea
   return t.liveSha === null || t.behind > 0;
 }
 
-export type DeployBlock = 'ok' | 'no_commit' | 'ci_crit' | 'ci_busy' | 'ci_off' | 'deploying';
+export type DeployBlock = 'ok' | 'no_commit' | 'ci_crit' | 'ci_busy' | 'deploying';
 
 /**
- * Deploy rule (SPEC 7, RepoRow.md): only with green CI, never while a deploy runs on
- * that target (lock per target). Running, red and missing CI all block the button.
+ * Deploy rule (SPEC 7, RepoRow.md): green CI, or no CI at all (`off`, repo without
+ * workflows; decided in docs/QUESTIONS.md, manual deploys only). Red or running CI and a
+ * running deploy on that target (lock per target) block the button.
  */
 export function deployBlock(
   r: Pick<RepoSummary, 'ci' | 'lastCommit'>,
@@ -228,7 +229,6 @@ export function deployBlock(
   if (!r.lastCommit) return 'no_commit';
   if (r.ci === 'crit') return 'ci_crit';
   if (r.ci === 'busy') return 'ci_busy';
-  if (r.ci === 'off') return 'ci_off';
   return 'ok';
 }
 
@@ -236,7 +236,6 @@ export const DEPLOY_BLOCK_TEXT: Record<Exclude<DeployBlock, 'ok'>, string> = {
   no_commit: 'Noch kein Commit bekannt.',
   ci_crit: 'CI ist rot. Erst den Build reparieren.',
   ci_busy: 'CI läuft noch. Deploy geht, sobald es grün ist.',
-  ci_off: 'Kein CI-Ergebnis. Deploy per Knopf nur mit grünem CI.',
   deploying: 'Deploy läuft.',
 };
 

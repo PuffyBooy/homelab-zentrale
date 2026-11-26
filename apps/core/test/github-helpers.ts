@@ -20,7 +20,7 @@ export const GH_BASE = 'https://api.github.com';
 export const TOKEN = 'github_pat_11AAAAAAA0123456789_abcdefghijklmnopqrstuvwxyzABCDEFGHIJ';
 export const OTHER_TOKEN = 'ghp_ZYXWVUTSRQPONMLKJIHGFEDCBA9876543210';
 export const PUBLIC_KEY =
-  'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGx0ZXN0a2V5dGVzdGtleXRlc3RrZXl0ZXN0a2V5 deploy@heimserver';
+  'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGx0ZXN0a2V5dGVzdGtleXRlc3RrZXl0ZXN0a2V5 homelab-zentrale deploy-key';
 
 export interface FakeCommit {
   sha: string;
@@ -184,7 +184,9 @@ export class FakeGithub {
     }
     const m = /^\/repos\/([^/]+)\/([^/]+)(\/.*)?$/.exec(p);
     if (!m) return null;
-    const repo = this.repos.get(`${decodeURIComponent(m[1] ?? '')}/${decodeURIComponent(m[2] ?? '')}`.toLowerCase());
+    const repo = this.repos.get(
+      `${decodeURIComponent(m[1] ?? '')}/${decodeURIComponent(m[2] ?? '')}`.toLowerCase(),
+    );
     if (!repo) return null;
     const rest = m[3] ?? '';
     if (rest === '') return this.repoJson(repo);
@@ -208,7 +210,8 @@ export class FakeGithub {
       const branch = u.searchParams.get('branch');
       const headSha = u.searchParams.get('head_sha');
       const runs = this.runs.filter(
-        (r) => (branch === null || r.branch === branch) && (headSha === null || r.headSha === headSha),
+        (r) =>
+          (branch === null || r.branch === branch) && (headSha === null || r.headSha === headSha),
       );
       return {
         total_count: runs.length,
@@ -250,6 +253,8 @@ function json(status: number, body: unknown, headers: Record<string, string>): R
 export type DeployBehaviour =
   | { kind: 'ok'; lines?: string[] }
   | { kind: 'fail'; code: number; error?: string; lines?: string[] }
+  /** The agent refuses deploy.run with an rpc error. */
+  | { kind: 'refuse'; code: string; message: string }
   /** The test drives the stream itself (stream.data / stream.end). */
   | { kind: 'manual' };
 
@@ -310,6 +315,15 @@ export async function withGithub(
     if (m.action === 'deploy.run') {
       const b = behaviour.deploy;
       if (b.kind === 'manual') return;
+      if (b.kind === 'refuse') {
+        e.agent.send({
+          type: 'rpc.result',
+          id,
+          ok: false,
+          error: { code: b.code, message: b.message },
+        });
+        return;
+      }
       for (const line of b.lines ?? ['git fetch\n', 'docker compose up -d --build\n']) {
         e.agent.send({ type: 'stream.data', streamId: id, channel: 'stdout', chunk: line });
       }

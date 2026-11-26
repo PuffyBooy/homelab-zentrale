@@ -48,7 +48,11 @@ export const homelabPathSchema = z
   .refine((p) => !p.split('/').some((seg) => seg === '..' || seg === '.'), {
     message: 'path must be normalized',
   })
-  .refine((p) => !p.includes('//'), { message: 'path must be normalized' });
+  .refine((p) => !p.includes('//'), { message: 'path must be normalized' })
+  // Writing below .git would let compose.write or a deploy plant git hooks/config.
+  .refine((p) => !p.split('/').some((seg) => seg.toLowerCase() === '.git'), {
+    message: 'no .git in path',
+  });
 
 /** Single file name (no directories). */
 export const fileNameSchema = z
@@ -361,11 +365,20 @@ export const composeFilesSchema = z
     message: '1 to 20 files',
   });
 
+/** GitHub owner/repo segment: no leading dash or dot, not ".git" itself. */
+const GH_SEG = '[A-Za-z0-9_][A-Za-z0-9_.-]*';
 export const repoUrlSchema = z
   .string()
   .max(300)
   .regex(
-    /^(https:\/\/github\.com\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+(\.git)?|git@github\.com:[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+(\.git)?)$/,
+    new RegExp(`^(https://github\\.com/${GH_SEG}/${GH_SEG}|git@github\\.com:${GH_SEG}/${GH_SEG})$`),
+  )
+  .refine(
+    (u) => {
+      const parts = u.replace(/^.*github\.com[:/]/, '').split('/');
+      return parts.every((p) => p.replace(/\.git$/, '').length > 0 && !p.includes('..'));
+    },
+    { message: 'invalid repo url' },
   );
 
 const ptySize = { cols: z.number().int().min(10).max(500), rows: z.number().int().min(5).max(200) };
@@ -409,7 +422,7 @@ export const rpcParamsByAction = {
     repoUrl: repoUrlSchema,
     sha: shaSchema,
     method: z.enum(['compose', 'script']),
-    /** Deploy key on the agent (from deploy.key); required for git@github.com URLs. */
+    /** Deploy key on the agent (from deploy.key); required for and only allowed with git@github.com URLs. */
     keyName: fileNameSchema.optional(),
   }),
   /**
@@ -539,6 +552,13 @@ export const backupDoneDataSchema = z.strictObject({
   sizeBytes: nonNeg,
 });
 export const ptyOpenDataSchema = z.strictObject({ streamId: streamIdSchema });
+/** Result of deploy.key: only the public half. */
+export const deployKeyDataSchema = z.strictObject({
+  publicKey: z
+    .string()
+    .max(200)
+    .regex(/^ssh-ed25519 [A-Za-z0-9+/]+=* homelab-zentrale [A-Za-z0-9._-]+$/),
+});
 
 /** Parses a raw frame from the agent. Returns null for invalid JSON or schema mismatch. */
 export function parseAgentMessage(raw: string): AgentToCore | null {
