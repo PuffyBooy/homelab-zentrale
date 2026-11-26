@@ -64,6 +64,15 @@ describe('agent protocol allowlist', () => {
         'system.cleanup',
         'system.cleanupPreview',
         'system.reboot',
+        'system.du',
+        'system.dockerDf',
+        'system.services',
+        'system.service',
+        'system.processes',
+        'system.shutdown',
+        'system.upgrade',
+        'update.check',
+        'update.apply',
       ].sort(),
     );
   });
