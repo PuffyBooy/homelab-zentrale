@@ -243,6 +243,7 @@ export function game(over: Partial<GameSummary> = {}): GameSummary {
     ramLimitBytes: 8 * 1024 ** 3,
     rcon: true,
     autoStopMinutes: 0,
+    externalAddress: '',
     values: { TYPE: 'PAPER', MAX_PLAYERS: 20 },
     lastBackupAt: null,
     createdAt: '2026-11-20T18:00:00.000Z',
@@ -257,7 +258,7 @@ export function template(over: Partial<TemplateInfo> = {}): TemplateInfo {
     name: 'Minecraft Java',
     image: 'itzg/minecraft-server',
     ram: { min: '4G', recommended: '6G' },
-    ports: [{ name: 'game', protocol: 'tcp', default: 25565, count: 1 }],
+    ports: [{ name: 'game', protocol: 'tcp', default: 25565, count: 1, local: false }],
     rcon: true,
     fields: [
       {

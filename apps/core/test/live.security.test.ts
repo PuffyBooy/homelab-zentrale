@@ -121,7 +121,7 @@ describe('/live topics', () => {
     const live = await openLive(url, browser(cookie));
     live.send({ type: 'subscribe', topics: ['server:AAAAAAAAAAAAAAAAAAAAAA'] });
     expect(await live.nextOfType('error')).toEqual({ type: 'error', code: 'unknown_topic' });
-    live.send({ type: 'subscribe', topics: ['games'] });
+    live.send({ type: 'subscribe', topics: ['ha'] });
     expect(await live.nextOfType('error')).toEqual({ type: 'error', code: 'unknown_topic' });
     live.send({ type: 'subscribe', topics: ['container-logs:AAAAAAAAAAAAAAAAAAAAAA'] });
     expect(await live.nextOfType('error')).toEqual({ type: 'error', code: 'unknown_topic' });

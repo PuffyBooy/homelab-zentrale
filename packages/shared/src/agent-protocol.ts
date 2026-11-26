@@ -431,10 +431,7 @@ export const rpcParamsByAction = {
     gameDir: homelabPathSchema,
     method: z.enum(['minecraft', 'minecraft-bedrock', 'gamedig', 'none']),
     port: z.number().int().min(1).max(65535),
-    gamedigType: z
-      .string()
-      .regex(/^[a-z0-9]{2,40}$/)
-      .optional(),
+    gamedigType: z.enum(['valheim', 'counterstrike2', 'palworld']).optional(),
     tpsCommand: z.enum(['tps']).optional(),
     timeoutMs: z.number().int().min(500).max(15_000).default(5000),
   }),

@@ -6,7 +6,14 @@
   "ram": { "min": "8G", "recommended": "16G" },
   "ports": [
     { "name": "game", "container": 8211, "protocol": "udp", "default": 8211, "count": 1 },
-    { "name": "api", "container": 8212, "protocol": "tcp", "default": 8212, "count": 1 }
+    {
+      "name": "api",
+      "container": 8212,
+      "protocol": "tcp",
+      "default": 8212,
+      "count": 1,
+      "local": true
+    }
   ],
   "query": { "method": "gamedig", "port": "api", "type": "palworld" },
   "rcon": { "supported": true, "port": 25575 },

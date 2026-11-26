@@ -64,6 +64,7 @@ import {
   type HostPort,
   type ValidatedValues,
 } from './render.js';
+import { parseBackupResult, translateProgress, type BackupDone } from './agent-text.js';
 import { gameState, type GamePhase } from './status.js';
 import type { LoadedTemplate } from './templates.js';
 
@@ -98,6 +99,8 @@ const INTENT_TTL_MS = 5 * 60_000;
 const EVENT_BUFFER = 200;
 const EVENT_MAX_CHARS = 16 * 1024;
 const RESTART_REASON = 'Zentrale neu gestartet';
+/** game.backup not_found: the template has no ./data (CS2) or the folder is gone. */
+export const NOTHING_TO_BACK_UP = 'Keine Weltdaten zum Sichern';
 
 const HOSTNAME_RE =
   /^(?=.{1,253}$)[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*$/;
@@ -351,6 +354,7 @@ export class GameService {
         protocol: p.protocol,
         default: p.default,
         count: p.count,
+        local: p.local,
       })),
       rcon: t.rcon.supported,
       fields: t.fields,
@@ -365,7 +369,10 @@ export class GameService {
       .where(
         and(
           eq(containers.serverId, row.serverId),
-          or(eq(containers.composeDir, gameDirOf(row.name)), eq(containers.name, `game-${row.name}`)),
+          or(
+            eq(containers.composeDir, gameDirOf(row.name)),
+            eq(containers.name, `game-${row.name}`),
+          ),
         ),
       )
       .all();
@@ -379,7 +386,10 @@ export class GameService {
       .where(
         and(
           eq(containers.serverId, row.serverId),
-          or(eq(containers.composeDir, gameDirOf(row.name)), eq(containers.name, `game-${row.name}`)),
+          or(
+            eq(containers.composeDir, gameDirOf(row.name)),
+            eq(containers.name, `game-${row.name}`),
+          ),
         ),
       )
       .all()
@@ -417,7 +427,11 @@ export class GameService {
       now: this.deps.now(),
     });
     const host = row.externalAddress || server?.tailscaleIp || server?.name || row.serverId;
-    const main = ports[0];
+    // Local ports (127.0.0.1 only) are neither in the address nor in the forwarding hint.
+    const tplPorts = new Map((tpl?.ports ?? []).map((p) => [p.name, p]));
+    const isLocal = (p: HostPort): boolean => p.local ?? tplPorts.get(p.name)?.local ?? false;
+    const publicPorts = ports.filter((p) => !isLocal(p));
+    const main = publicPorts[0];
     const mem = values.MEMORY;
     const memMatch = typeof mem === 'string' ? /^(\d{1,3})([GM])$/.exec(mem) : null;
     const lastBackup = this.lastBackupAt(row.id);
@@ -431,7 +445,7 @@ export class GameService {
       serverId: row.serverId,
       serverName: server?.name ?? row.serverId,
       address: main ? `${host}:${main.port}` : host,
-      ports: ports.map((p) => ({ name: p.name, port: p.port, protocol: p.protocol })),
+      ports: publicPorts.map((p) => ({ name: p.name, port: p.port, protocol: p.protocol })),
       status: state.status,
       statusText: state.statusText,
       players: state.live && status?.players ? status.players : null,
@@ -442,6 +456,7 @@ export class GameService {
         : null,
       rcon: tpl?.rcon.supported ?? row.rconSecretEnc !== null,
       autoStopMinutes: row.autoStopMinutes,
+      externalAddress: row.externalAddress,
       values,
       lastBackupAt: lastBackup === null ? null : iso(lastBackup),
       createdAt: iso(row.createdAt),
@@ -632,7 +647,7 @@ export class GameService {
         port = s;
       }
       markUsed(own, { port, protocol: p.protocol, count: p.count });
-      ports.push({ name: p.name, port, protocol: p.protocol, count: p.count });
+      ports.push({ name: p.name, port, protocol: p.protocol, count: p.count, local: p.local });
     }
     const rconPort = suggestRconPort(t, mergeUsed(used, own));
     if (t.rcon.supported && rconPort === null) throw new HttpError(409, 'conflict');
@@ -1083,27 +1098,64 @@ export class GameService {
       return fail(rpcReason(err, 'Backup', secrets), err instanceof RpcError ? err.code : 'failed');
     }
     this.event(row.id, 'progress', 'Backup läuft');
+    // Progress lines are translated; the last one carries the result and is never shown.
+    let resultLine: BackupDone | 'invalid' | null = null;
+    let partial = '';
+    const onLine = (line: string): void => {
+      const r = parseBackupResult(line);
+      if (r !== null) {
+        resultLine = r;
+        return;
+      }
+      const text = translateProgress(scrub(line, secrets));
+      this.event(row.id, 'progress', text);
+      if (/MiB geschrieben$/.test(text) && this.busy.get(row.id)?.startsWith('Backup')) {
+        this.busy.set(row.id, `Backup läuft: ${text.replace(' geschrieben', '')}`);
+        this.emit(row.id);
+      }
+    };
     stream.on('data', (c: StreamChunk) => {
-      this.event(row.id, c.channel === 'progress' ? 'progress' : 'console', scrub(c.chunk, secrets));
+      if (c.channel !== 'progress') {
+        this.event(row.id, 'console', scrub(c.chunk, secrets));
+        return;
+      }
+      const lines = (partial + c.chunk).split('\n');
+      partial = lines.pop() ?? '';
+      for (const line of lines) if (line !== '') onLine(line);
     });
     const end = await stream.done;
     stream.removeAllListeners('data');
+    if (partial !== '') onLine(partial);
     const result = await stream.result;
     if (end.code !== 0) {
       const code = end.error ?? 'failed';
-      const reason =
-        code === 'not_found'
-          ? 'Weltordner nicht gefunden'
-          : rpcReason(new RpcError(code as RpcFailure, end.detail ?? ''), 'Backup', secrets);
+      if (code === 'not_found') return fail(NOTHING_TO_BACK_UP, code);
+      const reason = rpcReason(
+        new RpcError(code as RpcFailure, end.detail ?? ''),
+        'Backup',
+        secrets,
+      );
       return fail(end.code > 0 ? `${reason} (Exit ${end.code})` : reason, code);
     }
-    const data = backupDoneDataSchema.safeParse(result);
-    if (!data.success || !data.data.path.startsWith(BACKUPS_ROOT)) {
+    const fromResult = backupDoneDataSchema.safeParse(result);
+    const done: BackupDone | null = fromResult.success
+      ? fromResult.data
+      : resultLine === 'invalid'
+        ? null
+        : resultLine;
+    if (!done || !done.path.startsWith(BACKUPS_ROOT)) {
       return fail('keine gültige Antwort vom Agent', 'failed');
     }
+    const data = { data: done };
     if (!this.row(row.id)) return fail('Gameserver gelöscht', 'failed');
     const now = this.deps.now();
-    const b = { id: randomToken(12), gameId: row.id, path: data.data.path, size: data.data.sizeBytes, createdAt: now };
+    const b = {
+      id: randomToken(12),
+      gameId: row.id,
+      path: data.data.path,
+      size: data.data.sizeBytes,
+      createdAt: now,
+    };
     this.deps.db.insert(gameBackups).values(b).run();
     // Keep the last 7 entries (the agent deletes the older files).
     const keep = this.deps.db
@@ -1114,7 +1166,8 @@ export class GameService {
       .all()
       .slice(BACKUP_KEEP)
       .map((r) => r.id);
-    if (keep.length > 0) this.deps.db.delete(gameBackups).where(inArray(gameBackups.id, keep)).run();
+    if (keep.length > 0)
+      this.deps.db.delete(gameBackups).where(inArray(gameBackups.id, keep)).run();
     this.event(row.id, 'progress', `Backup erstellt: ${basename(b.path)}`);
     writeAudit(this.deps.db, now, {
       actor: 'system',

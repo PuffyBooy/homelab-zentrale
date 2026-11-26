@@ -8,12 +8,43 @@
   "rcon": { "supported": true, "port": 25575, "tpsCommand": "tps" },
   "dataDir": "./data",
   "fields": [
-    { "key": "TYPE", "label": "Server-Typ", "type": "select", "options": ["PAPER", "VANILLA", "FABRIC"], "default": "PAPER" },
-    { "key": "VERSION", "label": "Version", "type": "text", "default": "LATEST", "pattern": "LATEST|[0-9]+\\.[0-9]+(\\.[0-9]+)?" },
-    { "key": "MAX_PLAYERS", "label": "Max. Spieler", "type": "number", "default": 20, "min": 1, "max": 100 },
-    { "key": "MEMORY", "label": "RAM", "type": "select", "options": ["4G", "6G", "8G"], "default": "6G" },
+    {
+      "key": "TYPE",
+      "label": "Server-Typ",
+      "type": "select",
+      "options": ["PAPER", "VANILLA", "FABRIC"],
+      "default": "PAPER"
+    },
+    {
+      "key": "VERSION",
+      "label": "Version",
+      "type": "text",
+      "default": "LATEST",
+      "pattern": "LATEST|[0-9]+\\.[0-9]+(\\.[0-9]+)?"
+    },
+    {
+      "key": "MAX_PLAYERS",
+      "label": "Max. Spieler",
+      "type": "number",
+      "default": 20,
+      "min": 1,
+      "max": 100
+    },
+    {
+      "key": "MEMORY",
+      "label": "RAM",
+      "type": "select",
+      "options": ["4G", "6G", "8G"],
+      "default": "6G"
+    },
     { "key": "SEED", "label": "Seed", "type": "text", "default": "", "optional": true },
-    { "key": "MOTD", "label": "Beschreibung", "type": "text", "default": "Ein Homelab-Server", "optional": true },
+    {
+      "key": "MOTD",
+      "label": "Beschreibung",
+      "type": "text",
+      "default": "Ein Homelab-Server",
+      "optional": true
+    },
     { "key": "LEVEL", "label": "Weltname", "type": "text", "default": "world" },
     { "key": "ENABLE_WHITELIST", "label": "Whitelist", "type": "boolean", "default": true },
     { "key": "ONLINE_MODE", "label": "Online-Mode", "type": "boolean", "default": true }

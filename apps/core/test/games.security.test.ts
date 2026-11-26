@@ -5,6 +5,7 @@ import { alerts, auditLog, gameServers } from '../src/db/schema.js';
 import { stepUp, until, WsClient } from './agent-helpers.js';
 import {
   createGame,
+  fakeSecret,
   gameRequest,
   readyGame,
   rpcsOf,
@@ -124,7 +125,8 @@ describe('games: delete', () => {
     expect(noStep.json().error).toBe('step_up_required');
 
     await stepUp(s.t, s.secret, s.cookie);
-    for (const confirmName of ['Survival', 'survival2', 'surviva']) {
+    expect((await gameRequest(s, 'DELETE', url, { confirmName: 'Survival' })).statusCode).toBe(400);
+    for (const confirmName of ['survival2', 'surviva', 'creative']) {
       const res = await gameRequest(s, 'DELETE', url, { confirmName });
       expect(res.statusCode, confirmName).toBe(400);
       expect(res.json().error).toBe('confirm_mismatch');
@@ -146,12 +148,18 @@ describe('games: delete', () => {
     s.behaviour.backup = { kind: 'ok', sizeBytes: 1 };
     const ok = await gameRequest(s, 'DELETE', url, { confirmName: 'survival' });
     expect(ok.statusCode).toBe(200);
-    const order = s.rpcs.map((r) => r.action).filter((a) => a === 'game.backup' || a === 'game.remove');
+    const order = s.rpcs
+      .map((r) => r.action)
+      .filter((a) => a === 'game.backup' || a === 'game.remove');
     expect(order).toEqual(['game.backup', 'game.backup', 'game.remove']);
     expect(rpcsOf(s, 'game.remove')[0]?.params).toEqual({ gameDir: '/opt/homelab/games/survival' });
     expect(s.t.app.hzCore.games.row(g.id)).toBeUndefined();
     expect((await gameRequest(s, 'GET', url)).statusCode).toBe(404);
-    const actions = s.t.db.db.select().from(auditLog).all().map((a) => a.action);
+    const actions = s.t.db.db
+      .select()
+      .from(auditLog)
+      .all()
+      .map((a) => a.action);
     expect(actions).toContain('game.delete_refused');
     expect(actions).toContain('game.deleted');
   });
@@ -326,7 +334,8 @@ describe('games: secrets', () => {
     for (const b of bodies) expect(b).not.toContain(pw);
     expect(JSON.stringify(browser.received)).not.toContain(pw);
     expect(browser.received.length).toBeGreaterThan(3);
-    expect(s.logs.join('')).not.toContain(pw);
+    expect(s.t.logs.join('').length).toBeGreaterThan(0);
+    expect(s.t.logs.join('')).not.toContain(pw);
     expect(JSON.stringify(s.t.db.db.select().from(auditLog).all())).not.toContain(pw);
     expect(JSON.stringify(s.t.db.db.select().from(alerts).all())).not.toContain(pw);
     expect(JSON.stringify(s.t.db.db.select().from(gameServers).all())).not.toContain(pw);
@@ -342,25 +351,24 @@ describe('games: secrets', () => {
 
   it('secret template fields stay out of compose.yml, the API and settings_json', async () => {
     const s = await setup();
+    const pass = fakeSecret();
     const res = await createGame(s, {
       templateId: 'valheim',
       name: 'valheim',
-      values: { SERVER_PASS: 'SuperGeheim42' },
+      values: { SERVER_PASS: pass },
     });
     expect(res.statusCode).toBe(202);
-    expect(res.body).not.toContain('SuperGeheim42');
+    expect(res.body).not.toContain(pass);
     await s.t.app.hzCore.games.idle();
     const files = (rpcsOf(s, 'compose.write')[0]?.params as { files: Record<string, string> })
       .files;
     expect(files['compose.yml']).toContain('SERVER_PASS: ${SERVER_PASS}');
-    expect(files['compose.yml']).not.toContain('SuperGeheim42');
-    expect(files['.env']).toContain('SERVER_PASS=SuperGeheim42');
+    expect(files['compose.yml']).not.toContain(pass);
+    expect(files['.env']).toContain(`SERVER_PASS=${pass}`);
     const list = await gameRequest(s, 'GET', '/api/games');
-    expect(list.body).not.toContain('SuperGeheim42');
+    expect(list.body).not.toContain(pass);
     expect(list.json().games[0].values).toEqual({ SERVER_NAME: 'Homelab' });
-    expect(JSON.stringify(s.t.db.db.select().from(gameServers).all())).not.toContain(
-      'SuperGeheim42',
-    );
+    expect(JSON.stringify(s.t.db.db.select().from(gameServers).all())).not.toContain(pass);
     // A secret with a pattern violation or required but empty is refused.
     for (const v of ['kurz', '']) {
       const bad = await createGame(s, {
@@ -395,21 +403,31 @@ describe('games: rcon', () => {
       .all()
       .filter((a) => a.action === 'game.rcon');
     expect(entries).toHaveLength(11);
-    expect(JSON.parse(entries[0]?.detailsJson ?? '{}')).toEqual({ name: 'survival', command: 'say 0' });
+    expect(JSON.parse(entries[0]?.detailsJson ?? '{}')).toEqual({
+      name: 'survival',
+      command: 'say 0',
+    });
     expect(entries.map((e) => e.detailsJson).join('')).not.toContain('ran ');
   });
 
   it('refuses multi-line commands and games without RCON', async () => {
     const s = await setup();
     const g = await readyGame(s);
-    for (const command of ['list\nop evil', 'a\rb', 'a\u0000b', '', ' '.repeat(3), 'x'.repeat(1001)]) {
+    for (const command of [
+      'list\nop evil',
+      'a\rb',
+      'a\u0000b',
+      '',
+      ' '.repeat(3),
+      'x'.repeat(1001),
+    ]) {
       const res = await gameRequest(s, 'POST', `/api/games/${g.id}/rcon`, { command });
       expect(res.statusCode, JSON.stringify(command)).toBe(400);
     }
     const v = await createGame(s, {
       templateId: 'valheim',
       name: 'valheim',
-      values: { SERVER_PASS: 'geheim123' },
+      values: { SERVER_PASS: fakeSecret() },
     });
     const vid = gameResponseSchema.parse(v.json()).game.id;
     await s.t.app.hzCore.games.idle();

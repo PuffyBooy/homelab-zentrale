@@ -777,7 +777,12 @@ export interface ConsoleEntry {
   error: string | null;
 }
 
-/** Console events of the topic and own commands, in time order. */
+/**
+ * Console events of the topic and own commands, in time order. The core echoes an RCON
+ * command as a console event "> <command>" followed by the output; once that echo is
+ * there, the local entry is hidden so nothing shows twice. Pending and failed commands
+ * stay local.
+ */
 export function consoleLines(
   events: readonly GameEvent[],
   entries: readonly ConsoleEntry[],
@@ -785,11 +790,25 @@ export function consoleLines(
   type Item = { ts: string; order: number; lines: TerminalLine[] };
   const items: Item[] = [];
   let order = 0;
+  const echoes: { ts: string; command: string; used: boolean }[] = [];
   for (const e of events) {
     if (e.kind !== 'console') continue;
+    const echo = /^> (.*)$/s.exec(e.text);
+    if (echo?.[1] !== undefined) {
+      echoes.push({ ts: e.ts, command: echo[1].trim(), used: false });
+      items.push({ ts: e.ts, order: order++, lines: [{ text: echo[1], kind: 'cmd' }] });
+      continue;
+    }
     items.push({ ts: e.ts, order: order++, lines: splitLines(e.text).map((text) => ({ text })) });
   }
   for (const c of entries) {
+    if (c.output !== null && !c.error) {
+      const echo = echoes.find((x) => !x.used && x.command === c.command);
+      if (echo) {
+        echo.used = true;
+        continue;
+      }
+    }
     const lines: TerminalLine[] = [{ text: c.command, kind: 'cmd' }];
     if (c.error) lines.push({ text: c.error, kind: 'err' });
     else if (c.output === null) lines.push({ text: '…', kind: 'dim' });

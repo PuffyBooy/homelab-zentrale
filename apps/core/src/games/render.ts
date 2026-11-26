@@ -32,14 +32,14 @@ export class ValueError extends Error {
 
 /** Values inside a larger plain scalar (`game-${X}`). */
 const EMBED_RE = /^(?:[A-Za-z0-9][A-Za-z0-9._-]*)?$/;
-/** .env values that need no quotes. */
-const ENV_PLAIN_RE = /^[A-Za-z0-9._/:@+,-]*$/;
 
 export interface HostPort {
   name: string;
   port: number;
   protocol: GameTemplate['ports'][number]['protocol'];
   count: number;
+  /** Published on 127.0.0.1 only (template `ports[].local`). */
+  local?: boolean;
 }
 
 export interface ValidatedValues {
@@ -80,6 +80,8 @@ export function validateValues(
         }
         if (isSecret) {
           if (v === '' && !f.optional) throw new ValueError(f.key, 'required');
+          // Written unquoted into .env: no whitespace, no comment character.
+          if (/[\s#]/u.test(v)) throw new ValueError(f.key, 'invalid characters');
           secrets[f.key] = v;
         } else values[f.key] = v;
         break;
@@ -117,7 +119,7 @@ export interface RenderInput {
   rconPassword: string | null;
 }
 
-/** All variables (system values, fields and secrets) for .env. */
+/** All variables (system values, fields and secrets). */
 function allVars(l: LoadedTemplate, input: RenderInput): Map<string, FieldValue> {
   const out = new Map<string, FieldValue>();
   out.set(GAME_NAME_KEY, input.name);
@@ -177,13 +179,28 @@ export function renderCompose(l: LoadedTemplate, input: RenderInput): string {
   return out;
 }
 
-/** .env of the game folder (Compose interpolation and `env_file`). Contains the secrets. */
+/**
+ * .env of the game folder (mode 0600, written by the agent): only RCON_PASSWORD,
+ * PORT_RCON and the secret fields, one `KEY=value` per line, unquoted. Compose
+ * reads it for the `${SECRET}` runtime placeholders and `env_file: .env`; the
+ * agent reads RCON port and password from it.
+ */
 export function renderEnv(l: LoadedTemplate, input: RenderInput): string {
   const lines = ['# Written by homelab-zentrale. Contains secrets; do not edit or share.'];
-  for (const [k, v] of allVars(l, input)) {
+  const add = (k: string, v: FieldValue): void => {
     const text = String(v);
-    if (!isSafeText(text)) throw new ValueError(k, 'invalid characters or too long');
-    lines.push(ENV_PLAIN_RE.test(text) ? `${k}=${text}` : `${k}='${text}'`);
+    if (!isSafeText(text) || /[\s#]/u.test(text)) {
+      throw new ValueError(k, 'invalid characters or too long');
+    }
+    lines.push(`${k}=${text}`);
+  };
+  if (l.template.rcon.supported) {
+    if (input.rconPort === null || input.rconPassword === null) {
+      throw new ValueError(RCON_PORT_KEY, 'rcon missing');
+    }
+    add(RCON_PASSWORD_KEY, input.rconPassword);
+    add(RCON_PORT_KEY, input.rconPort);
   }
+  for (const [k, v] of Object.entries(input.values.secrets)) add(k, v);
   return `${lines.join('\n')}\n`;
 }

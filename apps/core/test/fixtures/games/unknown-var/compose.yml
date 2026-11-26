@@ -6,7 +6,7 @@ services:
     restart: unless-stopped
     env_file: .env
     environment:
-      EULA: "TRUE"
+      EULA: 'TRUE'
       TYPE: ${TYPE}
       VERSION: ${VERSION}
       MAX_PLAYERS: ${MAX_PLAYERS}
@@ -16,11 +16,11 @@ services:
       LEVEL: world-${LEVEL}
       ENABLE_WHITELIST: ${ENABLE_WHITELIST}
       ONLINE_MODE: ${ONLINE_MODE}
-      ENABLE_RCON: "true"
+      ENABLE_RCON: 'true'
       TZ: Europe/Vienna
     ports:
-      - "${PORT_GAME}:25565/tcp"
-      - "127.0.0.1:${PORT_RCON}:25575/tcp"
+      - '${PORT_GAME}:25565/tcp'
+      - '127.0.0.1:${PORT_RCON}:25575/tcp'
     volumes:
       - ./data:/data
     labels:

@@ -11,9 +11,10 @@ import {
 } from '@hz/shared';
 import { createSecretBox } from '../src/crypto.js';
 import { auditLog, gameServers } from '../src/db/schema.js';
-import { until, WsClient } from './agent-helpers.js';
+import { stepUp, until, WsClient } from './agent-helpers.js';
 import {
   createGame,
+  fakeSecret,
   gameRequest,
   ONLINE,
   readyGame,
@@ -74,8 +75,8 @@ describe('M6 acceptance: Minecraft Paper from the UI flow', () => {
     expect(params.dir).toBe('/opt/homelab/games/survival');
     const compose = params.files['compose.yml'] ?? '';
     const env = params.files['.env'] ?? '';
-    expect(compose).toContain('- "25566:25565/tcp"');
-    expect(compose).toContain('- "127.0.0.1:25575:25575/tcp"');
+    expect(compose).toContain("- '25566:25565/tcp'");
+    expect(compose).toContain("- '127.0.0.1:25575:25575/tcp'");
     expect(compose).toContain('TYPE: "PAPER"');
     expect(compose).toContain('MAX_PLAYERS: 10');
     expect(compose).toContain('ENABLE_WHITELIST: "true"');
@@ -118,6 +119,7 @@ describe('M6 acceptance: Minecraft Paper from the UI flow', () => {
       ramBytes: 3 * 1024 ** 3,
       ramLimitBytes: 6 * 1024 ** 3,
       rcon: true,
+      externalAddress: '',
     });
     const status = rpcsOf(s, 'game.status')[0]?.params;
     expect(status).toMatchObject({
@@ -153,6 +155,16 @@ describe('M6 acceptance: Minecraft Paper from the UI flow', () => {
     expect(backups).toHaveLength(1);
     expect(backups[0]).toMatchObject({ fileName: 'survival-001.tar.zst', sizeBytes: 123_456 });
     expect(s.t.app.hzCore.games.summary(created.id)?.lastBackupAt).toBe(backups[0]?.createdAt);
+    const texts = s.t.app.hzCore.games.eventsOf(created.id).map((e) => `${e.kind}:${e.text}`);
+    expect(texts).toEqual(
+      expect.arrayContaining([
+        'console:> list',
+        'console:ran list',
+        'progress:12,5 MiB geschrieben',
+        'progress:Backup erstellt: survival-001.tar.zst',
+      ]),
+    );
+    expect(texts.join('\n')).not.toContain('result ');
 
     const actions = s.t.db.db
       .select()
@@ -198,7 +210,8 @@ describe('M6 acceptance: Minecraft Paper from the UI flow', () => {
       ),
     );
     const upd = browser.received.filter((m) => m.type === 'update' && m.topic === 'games');
-    for (const m of upd) for (const g of (m.upsert as unknown[]) ?? []) liveTopicItemSchemas.games.parse(g);
+    for (const m of upd)
+      for (const g of (m.upsert as unknown[]) ?? []) liveTopicItemSchemas.games.parse(g);
     // Unknown game topic.
     browser.send({ type: 'subscribe', topics: ['game:doesnotexist1'] });
     const err = await browser.next((m) => m.type === 'error');
@@ -271,11 +284,13 @@ describe('games: status, actions, settings', () => {
     const files = (w.at(-1)?.params as { files: Record<string, string> }).files;
     expect(files['compose.yml']).toContain('MAX_PLAYERS: 42');
     expect(files['compose.yml']).toContain('MOTD: "Hallo: Welt # mit Doppelpunkt"');
-    expect(files['.env']).toContain("MOTD='Hallo: Welt # mit Doppelpunkt'");
+    expect(files['.env']).not.toContain('MOTD');
     // Same RCON password as before.
-    const pw = (s.rpcs.find((r) => r.action === 'compose.write')?.params as {
-      files: Record<string, string>;
-    }).files['.env'];
+    const pw = (
+      s.rpcs.find((r) => r.action === 'compose.write')?.params as {
+        files: Record<string, string>;
+      }
+    ).files['.env'];
     expect(files['.env']).toContain(/^RCON_PASSWORD=.*$/m.exec(pw ?? '')?.[0] ?? 'x');
     expect(rpcsOf(s, 'compose.up').length).toBe(ups + 1);
 
@@ -339,10 +354,32 @@ describe('games: status, actions, settings', () => {
   });
 });
 
+describe('games: templates without world data (CS2)', () => {
+  it('backup not_found: German message, delete still works', async () => {
+    const s = await setup();
+    const g = await readyGame(s);
+    s.behaviour.backup = { kind: 'refuse', code: 'not_found', message: 'no data directory' };
+    expect((await gameRequest(s, 'POST', `/api/games/${g.id}/backup`)).statusCode).toBe(200);
+    await s.t.app.hzCore.games.idle();
+    expect(s.t.app.hzCore.games.eventsOf(g.id).at(-1)?.text).toBe(
+      'Backup fehlgeschlagen: Keine Weltdaten zum Sichern',
+    );
+    expect(s.t.app.hzCore.games.backups(g.id)).toEqual([]);
+    await stepUp(s.t, s.secret, s.cookie);
+    const del = await gameRequest(s, 'DELETE', `/api/games/${g.id}`, { confirmName: 'survival' });
+    expect(del.statusCode).toBe(200);
+    expect(del.json()).toEqual({ ok: true });
+    expect(rpcsOf(s, 'game.remove')).toHaveLength(1);
+  });
+});
+
 describe('games: setup failures', () => {
   it('a failing pull fails the setup with a crit alert', async () => {
     const s = await setup();
-    s.behaviour.fail['compose.pull'] = { code: 'failed', message: 'compose pull failed: manifest unknown' };
+    s.behaviour.fail['compose.pull'] = {
+      code: 'failed',
+      message: 'compose pull failed: manifest unknown',
+    };
     const res = await createGame(s);
     const { game } = gameResponseSchema.parse(res.json());
     await s.t.app.hzCore.games.idle();
@@ -409,7 +446,7 @@ describe('games: setup failures', () => {
     const v = await createGame(s, {
       templateId: 'valheim',
       name: 'valheim',
-      values: { SERVER_PASS: 'geheim123' },
+      values: { SERVER_PASS: fakeSecret() },
     });
     expect(v.statusCode).toBe(202);
     expect(gameResponseSchema.parse(v.json()).game.ports).toEqual([
@@ -417,6 +454,6 @@ describe('games: setup failures', () => {
     ]);
     await s.t.app.hzCore.games.idle();
     const vw = rpcsOf(s, 'compose.write').at(-1)?.params as { files: Record<string, string> };
-    expect(vw.files['compose.yml']).toContain('- "2458-2460:2456-2458/udp"');
+    expect(vw.files['compose.yml']).toContain("- '2458-2460:2456-2458/udp'");
   });
 });

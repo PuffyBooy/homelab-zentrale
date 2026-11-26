@@ -1,3 +1,4 @@
+import { randomBytes } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { gameResponseSchema, type ContainerInfo, type GameSummary } from '@hz/shared';
 import {
@@ -10,6 +11,9 @@ import {
   type WsClient,
 } from './agent-helpers.js';
 import { authHeaders, completeSetup, makeApp, type TestApp } from './helpers.js';
+
+/** Fake secret generated at runtime (no secret-looking literals in the repo, gitleaks). */
+export const fakeSecret = (): string => randomBytes(8).toString('hex');
 
 export const FIXTURE_TEMPLATES = fileURLToPath(new URL('./fixtures/games', import.meta.url));
 export const REPO_TEMPLATES = fileURLToPath(new URL('../../../templates/games', import.meta.url));
@@ -35,6 +39,8 @@ export interface AgentBehaviour {
   backup:
     | { kind: 'ok'; sizeBytes: number }
     | { kind: 'fail'; code: number; error?: string }
+    /** Refused before streaming (rpc error), e.g. not_found for a template without ./data. */
+    | { kind: 'refuse'; code: string; message: string }
     /** No answer: the test ends the stream itself. */
     | { kind: 'hold' };
   /** Docker memory of the game container. */
@@ -160,6 +166,15 @@ export async function withGames(
       case 'game.backup': {
         const b = behaviour.backup;
         if (b.kind === 'hold') return;
+        if (b.kind === 'refuse') {
+          e.agent.send({
+            type: 'rpc.result',
+            id,
+            ok: false,
+            error: { code: b.code, message: b.message },
+          });
+          return;
+        }
         e.agent.send({
           type: 'stream.data',
           streamId: id,
@@ -168,10 +183,18 @@ export async function withGames(
         });
         if (b.kind === 'ok') {
           backupSeq += 1;
-          ok({
-            path: `/opt/homelab/backups/${name}-${String(backupSeq).padStart(3, '0')}.tar.zst`,
-            sizeBytes: b.sizeBytes,
-          });
+          // Like apps/agent/src/actions/game-backup.ts: rpc.result first, then progress lines,
+          // the last one carries the result.
+          ok(null);
+          const progress = (chunk: string) =>
+            e.agent.send({ type: 'stream.data', streamId: id, channel: 'progress', chunk });
+          progress('backup: 12.5 MiB written\n');
+          progress(
+            `result ${JSON.stringify({
+              path: `/opt/homelab/backups/${name}/${name}-${String(backupSeq).padStart(3, '0')}.tar.zst`,
+              sizeBytes: b.sizeBytes,
+            })}\n`,
+          );
           e.agent.send({ type: 'stream.end', streamId: id, code: 0 });
         } else {
           e.agent.send({

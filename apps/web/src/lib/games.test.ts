@@ -31,6 +31,7 @@ import {
   validatePorts,
   validateSettings,
   emptyGameEvents,
+  withoutError,
   type GameEvent,
 } from './games.js';
 
@@ -213,8 +214,8 @@ describe('create form', () => {
 
   it('checks port ranges and overlaps (Valheim uses three ports)', () => {
     const ports = [
-      { name: 'game', protocol: 'udp' as const, default: 2456, count: 3 },
-      { name: 'extra', protocol: 'tcp' as const, default: 2460, count: 1 },
+      { name: 'game', protocol: 'udp' as const, default: 2456, count: 3, local: false },
+      { name: 'extra', protocol: 'tcp' as const, default: 2460, count: 1, local: false },
     ];
     expect(validatePorts(ports, { game: '2456', extra: '2460' })).toEqual({
       ports: { game: 2456, extra: 2460 },
@@ -370,7 +371,9 @@ describe('ports and forwarding hint', () => {
     const g = game({ ports: [{ name: 'game', port: 2456, protocol: 'udp' }] });
     const ports = gamePorts(
       g,
-      template({ ports: [{ name: 'game', protocol: 'udp', default: 2456, count: 3 }] }),
+      template({
+        ports: [{ name: 'game', protocol: 'udp', default: 2456, count: 3, local: false }],
+      }),
     );
     expect(forwardRules(ports)).toEqual([{ name: 'game', ports: '2456–2458', protocol: 'UDP' }]);
   });
@@ -443,6 +446,39 @@ describe('live events of game:<id>', () => {
       { text: 'x', kind: 'cmd' },
       { text: 'Agent offline.', kind: 'err' },
     ]);
+  });
+});
+
+describe('console echo from the core', () => {
+  it('hides an answered command once the core echoed it, keeps pending ones', () => {
+    const events = [
+      ev('1', 'console', '> list', '2026-11-26T22:01:01.000Z'),
+      ev('2', 'console', 'There are 1 of 20', '2026-11-26T22:01:01.000Z'),
+    ];
+    const lines = consoleLines(events, [
+      {
+        id: 'c1',
+        ts: '2026-11-26T22:01:00.000Z',
+        command: 'list',
+        output: 'There are 1 of 20',
+        error: null,
+      },
+      { id: 'c2', ts: '2026-11-26T22:02:00.000Z', command: 'list', output: null, error: null },
+    ]);
+    expect(lines).toEqual([
+      { text: 'list', kind: 'cmd' },
+      { text: 'There are 1 of 20' },
+      { text: 'list', kind: 'cmd' },
+      { text: '…', kind: 'dim' },
+    ]);
+  });
+});
+
+describe('withoutError', () => {
+  it('drops one key and keeps the object when it is missing', () => {
+    const e = { name: 'x', serverId: 'y' };
+    expect(withoutError(e, 'name')).toEqual({ serverId: 'y' });
+    expect(withoutError(e, 'other')).toBe(e);
   });
 });
 

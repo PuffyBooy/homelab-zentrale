@@ -79,6 +79,8 @@ export const gameTemplateSchema = z.strictObject({
         default: z.number().int().min(1024).max(65535),
         /** Consecutive ports from `default` (Valheim: 3). */
         count: z.number().int().min(1).max(10).default(1),
+        /** Bound to 127.0.0.1 only (e.g. Palworld REST API): no forwarding hint, not in the address. */
+        local: z.boolean().default(false),
       }),
     )
     .min(1)
@@ -87,8 +89,8 @@ export const gameTemplateSchema = z.strictObject({
     method: queryMethodSchema,
     /** Port name from `ports`. */
     port: z.string().optional(),
-    /** GameDig game type, e.g. "valheim", "terraria", "counterstrike2". */
-    type: z.string().max(40).optional(),
+    /** GameDig game type (allowlist, enforced by the agent too). */
+    type: z.enum(['valheim', 'counterstrike2', 'palworld']).optional(),
   }),
   rcon: z.strictObject({
     supported: z.boolean(),
@@ -117,6 +119,7 @@ export const gameTemplateListResponseSchema = z.strictObject({
           protocol: portProtocolSchema,
           default: z.number().int(),
           count: z.number().int(),
+          local: z.boolean(),
         }),
       ),
       rcon: z.boolean(),
@@ -188,6 +191,8 @@ export const gameSummarySchema = z.strictObject({
   ramLimitBytes: z.number().nullable(),
   rcon: z.boolean(),
   autoStopMinutes: z.number().int(),
+  /** As set by the admin; empty: the address uses the Tailscale IP. */
+  externalAddress: z.string(),
   values: z.record(z.string(), fieldValueSchema),
   lastBackupAt: z.iso.datetime().nullable(),
   createdAt: z.iso.datetime(),

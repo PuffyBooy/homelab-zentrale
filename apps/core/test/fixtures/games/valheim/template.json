@@ -9,6 +9,13 @@
   "dataDir": "./config",
   "fields": [
     { "key": "SERVER_NAME", "label": "Servername", "type": "text", "default": "Homelab" },
-    { "key": "SERVER_PASS", "label": "Passwort", "type": "text", "default": "", "secret": true, "pattern": "[A-Za-z0-9]{5,40}" }
+    {
+      "key": "SERVER_PASS",
+      "label": "Passwort",
+      "type": "text",
+      "default": "",
+      "secret": true,
+      "pattern": "[A-Za-z0-9]{5,40}"
+    }
   ]
 }

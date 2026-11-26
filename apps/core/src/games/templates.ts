@@ -77,7 +77,10 @@ export function templateVars(t: GameTemplate): Map<string, VarKind> {
     if (vars.has(f.key) || f.key.startsWith('PORT_') || f.key === RCON_PASSWORD_KEY) {
       throw new TemplateError(`field ${f.key} collides with a system value`);
     }
-    vars.set(f.key, f.type === 'text' && f.secret ? { kind: 'secret' } : { kind: 'field', field: f });
+    vars.set(
+      f.key,
+      f.type === 'text' && f.secret ? { kind: 'secret' } : { kind: 'field', field: f },
+    );
   }
   return vars;
 }
@@ -208,7 +211,10 @@ export function checkTemplate(t: GameTemplate, tokens: ComposeToken[]): Map<stri
         if (f.min !== undefined && f.max !== undefined && f.min > f.max) {
           throw new TemplateError(`field ${f.key}: min > max`);
         }
-        if ((f.min !== undefined && f.default < f.min) || (f.max !== undefined && f.default > f.max)) {
+        if (
+          (f.min !== undefined && f.default < f.min) ||
+          (f.max !== undefined && f.default > f.max)
+        ) {
           throw new TemplateError(`field ${f.key}: default out of range`);
         }
         break;
@@ -229,9 +235,21 @@ export function checkTemplate(t: GameTemplate, tokens: ComposeToken[]): Map<stri
   }
   // RCON must only ever be published on the loopback interface.
   const text = tokens.map((tok) => (tok.kind === 'text' ? tok.text : `\${${tok.name}}`)).join('');
+  // [placeholder, the placeholder that must follow `127.0.0.1:` on the same line]
+  const loopbackOnly: [string, string][] = [
+    [RCON_PORT_KEY, RCON_PORT_KEY],
+    ...t.ports
+      .filter((p) => p.local)
+      .flatMap((p): [string, string][] => [
+        [portKey(p.name), portKey(p.name)],
+        [portEndKey(p.name), portKey(p.name)],
+      ]),
+  ];
   for (const line of text.split('\n')) {
-    if (line.includes(`\${${RCON_PORT_KEY}}`) && !line.includes(`127.0.0.1:\${${RCON_PORT_KEY}}`)) {
-      throw new TemplateError('PORT_RCON must be published on 127.0.0.1 only');
+    for (const [key, anchor] of loopbackOnly) {
+      if (line.includes(`\${${key}}`) && !line.includes(`127.0.0.1:\${${anchor}}`)) {
+        throw new TemplateError(`${key} must be published on 127.0.0.1 only`);
+      }
     }
   }
   return vars;
@@ -283,7 +301,9 @@ export function loadTemplates(dir: string, log: TemplateLog): Map<string, Loaded
   }
   const loaded: LoadedTemplate[] = [];
   // Dirent.isDirectory() is false for symlinks: only real folders count.
-  for (const e of entries.filter((d) => d.isDirectory()).sort((a, b) => (a.name < b.name ? -1 : 1))) {
+  for (const e of entries
+    .filter((d) => d.isDirectory())
+    .sort((a, b) => (a.name < b.name ? -1 : 1))) {
     if (!ID_RE.test(e.name)) {
       log.warn({ template: e.name.slice(0, 60) }, 'game template skipped: invalid folder name');
       continue;
