@@ -11,7 +11,8 @@ Alles hier braucht deine Zugänge oder ist nicht rückgängig zu machen. Bis dah
 3. **Erstes Setup:** Den einmaligen Setup-Link aus `docker compose logs core` öffnen, Konto anlegen, TOTP in der Authenticator-App einrichten, die 10 Wiederherstellungscodes offline sichern.
 4. **Push aufs Handy (ab M4):** In `.env` `HZ_VAPID_SUBJECT=mailto:<deine Adresse>` setzen (Apple lehnt Pushes ohne echte Adresse ab). Die VAPID-Schlüssel erzeugt der Core beim ersten Start selbst und speichert sie verschlüsselt; wer sie fest haben will, erzeugt sie mit `pnpm --filter @hz/core vapid` und trägt `HZ_VAPID_PUBLIC`/`HZ_VAPID_PRIVATE` ein. Dann am Handy die Zentrale über `https://…ts.net` öffnen, „Zum Home-Bildschirm“ (iOS braucht die installierte PWA für Push) und unter Einstellungen → Push „Auf diesem Gerät aktivieren“, danach „Testnachricht senden“.
 5. **GitHub verbinden (ab M5):** Auf github.com unter Settings → Developer settings → Fine-grained tokens einen Token anlegen: nur die gewünschten Repos, Rechte *Contents: Read*, *Actions: Read*, *Metadata: Read*. In der Zentrale unter Einstellungen → GitHub eintragen (fragt nach dem TOTP-Code). Für private Repos pro Deploy-Ziel „Deploy-Key erzeugen“ und den angezeigten Schlüssel im Repo unter Settings → Deploy keys eintragen (ohne Schreibrecht). Zielordner unter `/opt/homelab/apps/` am besten vom ersten Deploy anlegen lassen; ein von Hand angelegter Ordner muss leer sein (außer `.env`) und root gehören, sonst lehnt git ihn ab. Gelöschte Deploy-Ziele lassen ihren privaten Key auf dem Server unter `/data/deploy-keys/` liegen (bei GitHub den Deploy-Key dann auch entfernen).
-6. **Agent neu ausrollen (ab M3):** Auf Servern, die schon einen Agent haben, `deploy/install-agent.sh` einmal erneut ausführen (neues Image mit `ping`, Schutz-Label `hz.role`).
+6. **Agent neu ausrollen (ab M3, erneut ab M6):** Auf Servern, die schon einen Agent haben, `deploy/install-agent.sh` erneut ausführen (neues Image mit `ping`, Schutz-Label `hz.role`, ab M6 `tar`/`zstd` für Gameserver-Backups). Valheim und CS2 gibt es nur für amd64, also nicht auf dem Raspberry Pi und der Oracle-ARM-VM.
+7. **Gameserver für Freunde erreichbar machen (ab M6):** Die Zentrale zeigt pro Gameserver, welche Ports weitergeleitet werden müssen. Das machst du selbst: am Heimserver im Deco-Router (Portweiterleitung auf die feste LAN-IP des Heimservers), bei Oracle in der Security List der VM *und* in iptables auf der VM. Für eine schöne Adresse (z. B. `mc.<deine-domain>`) einen DNS-/DDNS-Eintrag anlegen und im Gameserver unter Einstellungen als externe Adresse eintragen. Die Zentrale selbst bleibt dabei nur über Tailscale erreichbar.
 
 **Noch von Hand abzunehmen** (braucht echte Zugänge): Push am Handy (M4); ein echter Deploy eines Test-Repos mit `compose.yml` auf den Heimserver-Agent (M5, automatisiert nur mit Fake-GitHub, Fake-Agent und echtem git gegen ein lokales Repo getestet).
 
@@ -26,6 +27,8 @@ Alles hier braucht deine Zugänge oder ist nicht rückgängig zu machen. Bis dah
 - **Checks, erste Fehlschläge:** Der erste Fehlschlag zeigt `WARN` ohne Meldung, erst der zweite in Folge ist `CRIT` mit Push. Weiterleitungen (max. 5, nur http/https) werden verfolgt, ein Check kann also keinen 3xx-Code erwarten. Passt das?
 - **Deploy ohne CI:** Repos ganz ohne GitHub Actions dürfen per Knopf deployt werden (rotes oder laufendes CI nicht). Auto-Deploy nur bei grünem CI. Rollback ignoriert den CI-Status. Passt das?
 - **Ruhezeit:** warn- und info-Pushes in der Ruhezeit (23–7 Uhr) werden verworfen, nicht morgens nachgeliefert (die Meldungen selbst bleiben in der Liste). Lieber morgens gesammelt nachliefern?
+- **Gameserver-Ports ändern:** Ports sind nach dem Aufsetzen nicht mehr änderbar (sonst stimmt die Portweiterleitung nicht mehr). Reicht das, oder soll Ändern mit Hinweis gehen?
+- **Backups beim Löschen:** Vor dem Löschen eines Gameservers wird immer gesichert; die Backup-Dateien bleiben unter `/opt/homelab/backups/` am Server liegen, auch wenn der Eintrag weg ist. Sollen sie nach X Tagen automatisch weg?
 - **Level für Updates/Neustart nötig:** derzeit `warn` (wie SPEC 5.1). Mit Push ab M4 wären das gesammelte Pushes alle 30 Min. Lieber `info` (kein Push)?
 
 ## Annahmen
@@ -68,6 +71,9 @@ Sortiert nach Bereich. Nichts davon ist in den Meilensteinen, alles wäre ein ei
 - Mehr Vorlagen: Satisfactory, Factorio, Enshrouded, Project Zomboid, ARK, Rust, V Rising.
 - Auto-Start beim ersten Verbindungsversuch (Proxy, der den Server weckt).
 - Whitelist-Anfragen: Freund trägt seinen Namen ein, Alex bestätigt per Push.
+- Feld „Netz: zuhause/Oracle/VPS“ am Server, damit der Hinweis zur Portweiterleitung nicht aus dem Namen geraten wird.
+- Gameserver in der Befehlspalette; Ports nachträglich ändern; Wiederherstellen eines Backups per Knopf.
+- Docker-Labels im Inventar, damit Gameserver-Container über `homelab.game` statt über Ordner/Name erkannt werden.
 
 ### Websites und Meldungen
 - ntfy als zweiter Push-Kanal (selbst gehostet), E-Mail als dritter.
