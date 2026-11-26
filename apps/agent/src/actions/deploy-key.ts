@@ -199,6 +199,13 @@ export function keyPath(keyDir: string, name: string): string {
   return path.join(keyDir, name);
 }
 
+/** A key that still has a second link: a parallel createKey is between link() and unlink(tmp). */
+class KeyBeingLinked extends ActionError {
+  constructor() {
+    super('failed', 'deploy key is not a regular file');
+  }
+}
+
 /**
  * Opens an existing key without following symlinks and returns its public key.
  * Returns null if it does not exist.
@@ -215,6 +222,7 @@ export async function readExistingKey(file: string): Promise<Buffer | null> {
   }
   try {
     const st = await fh.stat();
+    if (st.isFile() && st.nlink === 2 && st.size <= MAX_KEY_FILE) throw new KeyBeingLinked();
     if (!st.isFile() || st.nlink !== 1 || st.size > MAX_KEY_FILE) {
       throw new ActionError('failed', 'deploy key is not a regular file');
     }
@@ -261,11 +269,26 @@ async function createKey(keyDir: string, file: string, name: string): Promise<Bu
   }
 }
 
+/**
+ * readExistingKey, but waits briefly (at most ~0.5 s) while a parallel call of this agent
+ * still holds its temp link. A second link that stays is refused like before.
+ */
+async function readSettledKey(file: string): Promise<Buffer | null> {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await readExistingKey(file);
+    } catch (err) {
+      if (!(err instanceof KeyBeingLinked) || attempt >= 20) throw err;
+      await new Promise((r) => setTimeout(r, 25));
+    }
+  }
+}
+
 /** Returns the public key of `name`, creating the key pair first if needed. */
 export async function ensureDeployKey(dataDir: string, name: string): Promise<string> {
   const keyDir = await ensureKeyDir(dataDir);
   const file = keyPath(keyDir, name);
-  let pub = await readExistingKey(file);
+  let pub = await readSettledKey(file);
   if (!pub) {
     try {
       pub = await createKey(keyDir, file, name);
@@ -274,7 +297,7 @@ export async function ensureDeployKey(dataDir: string, name: string): Promise<st
       throw new ActionError('failed', 'creating the deploy key failed');
     }
     // Lost a race (or something appeared at the name): use what is there, with all checks.
-    pub ??= await readExistingKey(file);
+    pub ??= await readSettledKey(file);
     if (!pub) throw new ActionError('failed', 'creating the deploy key failed');
   }
   return publicKeyLine(pub, keyComment(name));
@@ -288,7 +311,7 @@ export async function existingKeyPath(dataDir: string, name: string): Promise<st
   const keyDir = await ensureKeyDir(dataDir);
   const file = keyPath(keyDir, name);
   if (!SAFE_PATH.test(file)) throw new ActionError('failed', 'unsupported data directory path');
-  const pub = await readExistingKey(file);
+  const pub = await readSettledKey(file);
   if (!pub) throw new ActionError('not_found', 'deploy key not found');
   return file;
 }

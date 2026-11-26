@@ -198,6 +198,10 @@ Vertrag: `packages/shared/src/api/migrate.ts`, Frames in `agent-protocol.ts`. Co
 - Fehler vor dem erfolgreichen Start am Ziel: Streams werden abgebrochen, die Kopie am Ziel per `game.remove` entfernt (nur wenn `game.import` angenommen wurde, ein fremder Ordner wird nie angefasst), die Quelle wieder gestartet, wenn sie lief. Ist ein Agent offline, bleibt der Schritt offen (`cleanup_target`/`restart_source`) und der Job `games.migrateCleanup` (alle 15 s) holt ihn nach. Ein Neustart des Core markiert laufende Umzüge als `failed` mit `interrupted` und denselben offenen Schritten.
 - Fortschritt: Zeilen im Topic `game:<id>`, Busy-Text des Gameservers („Umzug: Übertragung 40 %“), `bytes_done` höchstens einmal pro Sekunde in der DB. Audit: `game.migrate_started`, `game.migrate_done`, `game.migrate_failed`, `game.migrate_refused`, `game.migrate_cancel`.
 
+## Anbindungen (M14)
+
+`apps/core/src/integrations/`: `http.ts` (der einzige ausgehende Client für Anbindungen, Regeln in `SECURITY.md`), `store.ts` (Einstellungen in `settings` unter `integration.<id>.*`, Secret verschlüsselt), `base.ts` (Status, Polling, Meldung nach 5 Min), dazu `proxmox.ts`, `dnsfilter.ts`, `fritzbox.ts` + `digest.ts`, `uptimekuma.ts`. Routen unter `/api/<id>/…`, hinter dem Modul-Gate. `apps/core/src/notify/` hängt sich als `ChannelFanoutSink` hinter den Notifier (gleiche Ruhezeit, Bündel und Morgen-Digest; Kanäle zählen als Pseudo-Geräte `channel:<id>`). `apps/core/src/wol/`: Konfiguration pro Server in `settings`, Senden per `dgram` aus der Zentrale (Host-Netz) oder über die Agent-Aktion `wol.send`. Keine eigene Migration.
+
 ## Live-Daten zum Browser
 
 `wss://<core>/live`, Session-Cookie nötig. Der Client abonniert Topics (`servers`, `server:<id>`, `containers`, `games`, `checks`, `alerts`, `github`, `ha`). Der Core schickt zuerst einen Snapshot und dann Patches. TanStack Query hält die Daten, `lib/live.ts` schreibt Patches in den Query-Cache.

@@ -77,6 +77,10 @@ const MODULE_PREFIXES: Record<ModuleId, readonly string[]> = {
     '/api/relay',
     '/api/settings/dns',
   ],
+  proxmox: ['/api/proxmox'],
+  dnsfilter: ['/api/dnsfilter'],
+  fritzbox: ['/api/fritzbox'],
+  uptimekuma: ['/api/uptimekuma'],
   storage: ['/api/storage'],
 };
 
@@ -86,6 +90,10 @@ const MODULE_PATTERNS: Record<ModuleId, readonly RegExp[]> = {
   homeassistant: [],
   // M15: PUT /api/servers/:id/ingress
   games: [/^\/api\/servers\/[^/]+\/ingress\/?$/],
+  proxmox: [],
+  dnsfilter: [],
+  fritzbox: [],
+  uptimekuma: [],
   storage: [],
 };
 

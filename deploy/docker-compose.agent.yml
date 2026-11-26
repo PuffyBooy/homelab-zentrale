@@ -19,8 +19,10 @@
 # - network_mode: host          host network counters, listening ports (ss), tailscale IP, and
 #                               checks/pings from this server's own network; M12 wake listeners
 #                               of sleeping games bind their published host ports (>= 1024 only,
-#                               no data is ever forwarded); M15 relay listeners on an ingress
-#                               bind the public game ports (>= 1024 only).
+#                               no data is ever forwarded). Also wol.send: Wake-on-LAN broadcasts
+#                               must leave on the host LAN.
+#                               M15 relay listeners on an ingress bind the public game ports
+#                               (>= 1024 only).
 # - /proc -> /host/proc:ro      host mount table and network counters, read-only.
 # - /sys -> /host/sys:ro        hardware sensors (systeminformation also reads /sys), read-only.
 # - /opt/homelab (same path)    the only directory actions may write to (compose.write, games).

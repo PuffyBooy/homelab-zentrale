@@ -513,6 +513,11 @@ export class SimAgent {
       this.answerRelay(id, params);
       return;
     }
+    if (action === 'wol.send') {
+      // M14: the real agent sends the magic packet; here it is only recorded in rpcs.
+      this.send({ type: 'rpc.result', id, ok: true, data: { sent: true } });
+      return;
+    }
     if (this.o.games && this.answerGame(id, action, params)) return;
     if (action === 'container.limit') {
       this.answerLimit(id, params);

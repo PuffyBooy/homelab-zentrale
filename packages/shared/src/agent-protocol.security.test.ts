@@ -65,6 +65,7 @@ describe('agent protocol allowlist', () => {
         'system.cleanup',
         'system.cleanupPreview',
         'system.reboot',
+        'wol.send',
       ].sort(),
     );
   });
