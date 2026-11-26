@@ -299,6 +299,10 @@ export async function buildApp(config: Config, deps: AppDeps = {}): Promise<Fast
   // Optional modules: routes of a switched-off module answer 404 module_disabled
   // (after the auth guard, so anonymous requests still get 401).
   const modules = new ModuleService(db.db, now);
+  // The install wizard's choice counts only until the admin account exists.
+  if (config.initialModules !== undefined && !auth.hasUser()) {
+    modules.set(config.initialModules);
+  }
   installModuleGate(app, modules);
   auth.bootstrap = () => ({ modules: modules.get(), timeZone: config.timeZone });
 

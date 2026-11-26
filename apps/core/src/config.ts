@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { MODULES, type ModuleId } from '@hz/shared';
 import { DEFAULT_TIME_ZONE, isValidTimeZone } from './timezone.js';
 
 const boolFlag = z
@@ -11,6 +12,31 @@ const optionalEnv = <T extends z.ZodType>(schema: T) =>
   z.preprocess((v) => (v === '' ? undefined : v), schema.optional());
 
 const base64 = /^[A-Za-z0-9+/]+={0,2}$/;
+
+/**
+ * `github=1,homeassistant=0,games=1` (written by deploy/install.sh). Only module ids
+ * from MODULES and the values 0/1 are accepted; an empty string means unset.
+ */
+const initialModules = z
+  .string()
+  .max(500)
+  .transform((v, ctx) => {
+    const out: Partial<Record<ModuleId, boolean>> = {};
+    for (const part of v.split(',').map((p) => p.trim())) {
+      if (part === '') continue;
+      const m = /^([a-z]+)=([01])$/.exec(part);
+      const id = m?.[1] as ModuleId | undefined;
+      if (!m || id === undefined || !MODULES.includes(id)) {
+        ctx.addIssue({
+          code: 'custom',
+          message: `HZ_INITIAL_MODULES: erwartet z. B. github=1,homeassistant=0 (${MODULES.join(', ')})`,
+        });
+        return z.NEVER;
+      }
+      out[id] = m[2] === '1';
+    }
+    return out;
+  });
 
 const secretKey = z
   .string({ error: 'HZ_SECRET_KEY fehlt' })
@@ -67,6 +93,10 @@ export const configSchema = z.object({
   HZ_TIMEZONE: optionalEnv(
     z.string().refine(isValidTimeZone, 'HZ_TIMEZONE: unbekannte Zeitzone (z. B. Europe/Vienna)'),
   ),
+  // Module switches of the install wizard (deploy/install.sh). Applied on every start
+  // until the admin account exists; after the first setup only Einstellungen -> Module
+  // decides.
+  HZ_INITIAL_MODULES: optionalEnv(initialModules),
   NODE_ENV: z.enum(['development', 'production', 'test']).default('production'),
 });
 
@@ -91,6 +121,8 @@ export interface Config {
   vapidSubject: string | undefined;
   /** IANA zone, validated with Intl (default Europe/Vienna). */
   timeZone: string;
+  /** Wizard module choice, applied only before the first setup. */
+  initialModules: Partial<Record<ModuleId, boolean>> | undefined;
 }
 
 export function isLoopback(host: string): boolean {
@@ -141,5 +173,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
         : undefined,
     vapidSubject: c.HZ_VAPID_SUBJECT,
     timeZone: c.HZ_TIMEZONE ?? DEFAULT_TIME_ZONE,
+    initialModules: c.HZ_INITIAL_MODULES,
   };
 }
