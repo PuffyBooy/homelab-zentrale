@@ -13,6 +13,8 @@ import {
   STEP_UP_MINUTES,
   stepUpRequestSchema,
   stepUpResponseSchema,
+  totpConfirmRequestSchema,
+  totpStartResponseSchema,
   type AuthState,
 } from '@hz/shared';
 import { HttpError } from '../http/errors.js';
@@ -29,6 +31,8 @@ export interface AuthRoutesOptions {
 }
 
 const STEP_UP_MS = STEP_UP_MINUTES * 60_000;
+/** A new TOTP secret must be confirmed within this time. */
+export const TOTP_PENDING_MS = 10 * 60_000;
 const iso = (ms: number): string => new Date(ms).toISOString();
 
 function enforceLimit(limiter: FailureLimiter, ip: string): void {
@@ -237,6 +241,56 @@ export const authRoutes: FastifyPluginAsync<AuthRoutesOptions> = async (app, { a
     svc.audit({
       actor: 'admin',
       action: 'auth.password_changed',
+      target: auth.user.username,
+      details: { revokedSessions: revoked },
+    });
+    return okResponseSchema.parse({ ok: true });
+  });
+
+  // ---- TOTP re-setup (new phone): step-up with the old code, confirm with the new.
+
+  app.post('/auth/totp/start', { preHandler: stepUp }, async (request) => {
+    const auth = requireAuth(request);
+    const now = svc.now();
+    for (const [k, v] of svc.pendingTotp) if (v.expiresAt <= now) svc.pendingTotp.delete(k);
+    const secret = newTotpSecret();
+    svc.pendingTotp.set(auth.session.id, { secret, expiresAt: now + TOTP_PENDING_MS });
+    svc.audit({ actor: 'admin', action: 'auth.totp_reset_started', target: auth.user.username });
+    const otpauthUri = totpUri(secret, auth.user.username);
+    return totpStartResponseSchema.parse({
+      otpauthUri,
+      secret,
+      qrSvg: await totpQrSvg(otpauthUri),
+    });
+  });
+
+  app.post('/auth/totp/confirm', { preHandler: stepUp }, async (request) => {
+    const auth = requireAuth(request);
+    enforceLimit(svc.stepUpLimiter, request.ip);
+    const body = totpConfirmRequestSchema.parse(request.body);
+    const pending = svc.pendingTotp.get(auth.session.id);
+    if (!pending || pending.expiresAt <= svc.now()) {
+      svc.pendingTotp.delete(auth.session.id);
+      throw new HttpError(409, 'conflict');
+    }
+    const step = verifyTotp(pending.secret, body.code, svc.now(), null);
+    if (step === null) {
+      svc.stepUpLimiter.fail(request.ip);
+      svc.audit({
+        actor: 'admin',
+        action: 'auth.totp_reset_failed',
+        target: auth.user.username,
+        details: { ip: request.ip },
+      });
+      throw new HttpError(403, 'invalid_credentials');
+    }
+    svc.stepUpLimiter.reset(request.ip);
+    svc.pendingTotp.delete(auth.session.id);
+    svc.setTotpSecret(auth.user.id, pending.secret, step);
+    const revoked = svc.sessions.revokeOthers(auth.user.id, auth.session.id);
+    svc.audit({
+      actor: 'admin',
+      action: 'auth.totp_changed',
       target: auth.user.username,
       details: { revokedSessions: revoked },
     });

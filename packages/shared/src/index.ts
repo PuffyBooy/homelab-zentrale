@@ -11,3 +11,4 @@ export * from './api/github.js';
 export * from './api/games.js';
 export * from './api/share.js';
 export * from './api/ha.js';
+export * from './api/console-wall.js';

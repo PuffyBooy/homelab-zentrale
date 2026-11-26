@@ -4,6 +4,7 @@ import type { SecretBox } from '../crypto.js';
 import { writeAudit, type AuditEntry } from '../db/audit.js';
 import type { Db } from '../db/index.js';
 import { recoveryCodes, users, type User } from '../db/schema.js';
+import type { WallDeviceResolver } from './guard.js';
 import { FailureLimiter, loginLimits } from './rate-limit.js';
 import { generateRecoveryCodes, hashRecoveryCode } from './recovery.js';
 import { SessionStore } from './sessions.js';
@@ -26,6 +27,8 @@ export class AuthService {
   readonly setupLimiter: FailureLimiter;
   readonly stepUpLimiter: FailureLimiter;
   readonly now: Clock;
+  /** Wall cookie lookup for DEVICE_API_ROUTES (set by the wall module). */
+  wallDevices: WallDeviceResolver | null = null;
   private readonly db: Db;
   private readonly box: SecretBox;
 
@@ -140,6 +143,22 @@ export class AuthService {
       return u;
     });
     return { user, recoveryCodes: codes };
+  }
+
+  /** New TOTP secrets waiting for confirmation, per admin session (TOTP re-setup). */
+  readonly pendingTotp = new Map<string, { secret: string; expiresAt: number }>();
+
+  /** Replaces the TOTP secret; `step` is the step of the confirming code (no replay). */
+  setTotpSecret(userId: number, secret: string, step: number): void {
+    this.db
+      .update(users)
+      .set({
+        totpSecretEnc: this.encryptTotpSecret(secret),
+        totpLastStep: step,
+        updatedAt: this.now(),
+      })
+      .where(eq(users.id, userId))
+      .run();
   }
 
   setPassword(userId: number, passwordHash: string): void {

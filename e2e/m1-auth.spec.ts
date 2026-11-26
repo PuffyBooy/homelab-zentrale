@@ -165,11 +165,11 @@ test('shortcuts, command palette and theme switch', async () => {
   // Theme: follows the system until chosen, then remembered.
   const html = page.locator('html');
   await expect(html).toHaveAttribute('data-theme', 'dark');
-  await page.getByRole('button', { name: /Theme: dunkel/ }).click();
+  await page.getByRole('button', { name: /Theme dunkel/ }).click();
   await expect(html).toHaveAttribute('data-theme', 'light');
   await page.reload();
   await expect(html).toHaveAttribute('data-theme', 'light');
-  await page.getByRole('button', { name: /Theme: hell/ }).click();
+  await page.getByRole('button', { name: /Theme hell/ }).click();
   await expect(html).toHaveAttribute('data-theme', 'dark');
   await page.evaluate(() => localStorage.removeItem('hz-theme'));
 });

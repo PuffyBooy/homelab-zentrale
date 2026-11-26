@@ -53,6 +53,11 @@ import { shareGatewayRoutes, shareTailnetRoutes } from './share/friend-routes.js
 import { redactShareUrl } from './share/redact.js';
 import { shareRoutes } from './share/routes.js';
 import { ShareService } from './share/service.js';
+import { exportRoutes, removeStaleExports } from './settings/export.js';
+import { consoleApiRoutes, consoleSocketRoutes } from './terminal/routes.js';
+import { ConsoleService, type ConsoleOptions } from './terminal/service.js';
+import { wallRoutes } from './wall/routes.js';
+import { WallService } from './wall/service.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 
@@ -85,6 +90,7 @@ export interface AppDeps {
   githubBaseUrl?: string;
   /** Home Assistant client timers (tests: short backoff and heartbeat). */
   haOptions?: HaClientOptions;
+  consoleOptions?: ConsoleOptions;
 }
 
 /** Core services, decorated on the app as `hzCore` (routes, tests). */
@@ -105,6 +111,8 @@ export interface CoreServices {
   games: GameService;
   shares: ShareService;
   ha: HaService;
+  consoles: ConsoleService;
+  wall: WallService;
   db: DbHandle;
 }
 
@@ -203,6 +211,18 @@ function vapidSubject(config: Config): string {
   if (config.vapidSubject) return config.vapidSubject;
   if (config.baseUrl?.startsWith('https://')) return config.baseUrl;
   return 'mailto:admin@homelab-zentrale.invalid';
+}
+
+/**
+ * Hashed build output (Vite: `/assets/<name>-<hash>.<ext>`) never changes: cache it
+ * for a year. Everything else (index.html, sw.js, manifest, icons, fonts) is
+ * revalidated on every load, so a new deploy is picked up at once.
+ */
+export function staticCacheControl(filePath: string): string {
+  const p = filePath.replaceAll('\\', '/');
+  return /\/assets\/[^/]+-[A-Za-z0-9_-]{8,}\.[a-z0-9]+(?:\.(?:br|gz))?$/.test(p)
+    ? 'public, max-age=31536000, immutable'
+    : 'no-cache';
 }
 
 export async function buildApp(config: Config, deps: AppDeps = {}): Promise<FastifyInstance> {
@@ -444,6 +464,25 @@ export async function buildApp(config: Config, deps: AppDeps = {}): Promise<Fast
   });
   ha.onChange(() => live.mark('ha', 'ha', 'upsert'));
 
+  // ---- M9: web console, wall mode -----------------------------------------------
+  const consoles = new ConsoleService({
+    db: db.db,
+    now,
+    hub,
+    sessions: auth.sessions,
+    terminalAllowed: (id) => servers.terminalAllowed(id),
+    log: app.log.child({ mod: 'console' }),
+    ...(deps.consoleOptions ? { options: deps.consoleOptions } : {}),
+  });
+  const closedConsoles = consoles.recover();
+  if (closedConsoles > 0) app.log.warn({ n: closedConsoles }, 'closed console sessions left open');
+  const wall = new WallService({
+    db: db.db,
+    now,
+    sources: { servers: () => servers.list(), games: () => games.list(), ha: () => ha.state() },
+  });
+  auth.wallDevices = (token) => wall.resolve(token);
+
   app.decorate('hzCore', {
     scheduler,
     tokens,
@@ -461,11 +500,14 @@ export async function buildApp(config: Config, deps: AppDeps = {}): Promise<Fast
     games,
     shares,
     ha,
+    consoles,
+    wall,
     db,
   });
 
   scheduler.every('servers.status', 5_000, () => servers.refreshAll());
   scheduler.every('live.sessions', 5_000, () => live.checkSessions());
+  scheduler.every('console.limits', 5_000, () => consoles.check());
   scheduler.every('agents.heartbeat', 30_000, () => hub.heartbeat());
   scheduler.every('metrics.rollup5m', 5 * 60_000, () => void metrics.rollup5m(), { align: true });
   scheduler.every('metrics.rollup1h', HOUR, () => void metrics.rollup1h(), { align: true });
@@ -503,6 +545,7 @@ export async function buildApp(config: Config, deps: AppDeps = {}): Promise<Fast
     metrics.rollup1h(30 * DAY);
     if (deps.startScheduler !== false) scheduler.start();
     ha.start();
+    await removeStaleExports(config.dataDir);
   });
   app.addHook('preClose', async () => {
     scheduler.stop();
@@ -513,6 +556,7 @@ export async function buildApp(config: Config, deps: AppDeps = {}): Promise<Fast
     ]);
     ha.stop();
     github.deployer.shutdown();
+    consoles.closeAll();
     hub.shutdown();
     live.closeAll();
     logs.closeAll();
@@ -523,6 +567,24 @@ export async function buildApp(config: Config, deps: AppDeps = {}): Promise<Fast
   });
   await app.register(agentRoutes, { hub });
   await app.register(liveRoutes, { auth, live, baseUrl: config.baseUrl });
+  await app.register(consoleSocketRoutes, { auth, consoles, baseUrl: config.baseUrl });
+  await app.register(consoleApiRoutes, { prefix: '/api', consoles });
+  await app.register(wallRoutes, {
+    prefix: '/api',
+    db: db.db,
+    now,
+    wall,
+    baseUrl: config.baseUrl,
+    port: config.port,
+  });
+  await app.register(exportRoutes, {
+    prefix: '/api',
+    db: db.db,
+    sqlite: db.sqlite,
+    now,
+    dataDir: config.dataDir,
+    log: app.log.child({ mod: 'export' }),
+  });
   await app.register(serverRoutes, {
     prefix: '/api',
     db: db.db,
@@ -561,7 +623,16 @@ export async function buildApp(config: Config, deps: AppDeps = {}): Promise<Fast
   const webDir = resolve(config.webDir ?? defaultWebDir);
   const hasWeb = existsSync(resolve(webDir, 'index.html'));
   if (hasWeb) {
-    await app.register(fastifyStatic, { root: webDir, wildcard: false });
+    await app.register(fastifyStatic, {
+      root: webDir,
+      wildcard: false,
+      // Serves index.js.br / .gz next to the file when the web build wrote them.
+      preCompressed: true,
+      cacheControl: false,
+      setHeaders: (reply, path) => {
+        void reply.header('cache-control', staticCacheControl(path));
+      },
+    });
   }
 
   app.setNotFoundHandler((request, reply) => {

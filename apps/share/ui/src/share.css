@@ -194,10 +194,10 @@ body {
   font-family: var(--font-mono);
   font-size: 11px;
   line-height: 16px;
-  color: var(--ink-muted);
+  color: var(--terminal-ink);
 }
 .hz-term-host {
-  color: var(--ink-faint);
+  color: var(--terminal-ink);
 }
 .hz-term-body {
   margin: 0;
@@ -227,7 +227,8 @@ body {
   color: var(--crit);
 }
 .hz-term-dim {
-  color: var(--ink-faint);
+  color: var(--terminal-ink);
+  opacity: 0.75;
 }
 .sh-console-form {
   display: grid;

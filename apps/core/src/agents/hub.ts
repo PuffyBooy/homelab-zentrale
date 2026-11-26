@@ -59,6 +59,11 @@ export interface HubOptions {
   /** More messages than this within `rateWindowMs` closes the socket. */
   maxMessages?: number;
   rateWindowMs?: number;
+  /**
+   * Separate budget for stream.data of open terminals (pty.open) in `rateWindowMs`:
+   * the agent sends console output every ~16 ms, far above `maxMessages`.
+   */
+  maxPtyMessages?: number;
   /** A connection without any frame (also pong) for this long is terminated. */
   staleAfterMs?: number;
   metricsIntervalS?: number;
@@ -72,6 +77,7 @@ const DEFAULTS: Required<HubOptions> = {
   invalidWindowMs: 60_000,
   maxMessages: 600,
   rateWindowMs: 60_000,
+  maxPtyMessages: 15_000,
   staleAfterMs: 90_000,
   metricsIntervalS: 10,
   inventoryIntervalS: 60,
@@ -178,6 +184,8 @@ interface Pending {
   resolve(v: unknown): void;
   reject(e: RpcError): void;
   timer: NodeJS.Timeout;
+  /** pty.input/resize/close: its result counts against the terminal budget. */
+  pty: boolean;
 }
 
 interface Conn {
@@ -188,7 +196,7 @@ interface Conn {
   connectedAt: number;
   lastFrame: number;
   pending: Map<string, Pending>;
-  streams: Map<string, { stream: RpcStream; timer: NodeJS.Timeout | null }>;
+  streams: Map<string, { stream: RpcStream; timer: NodeJS.Timeout | null; pty: boolean }>;
 }
 
 interface Counter {
@@ -250,6 +258,7 @@ export class AgentHub {
     let conn: Conn | null = null;
     const invalid: Counter = { times: [] };
     const rate: Counter = { times: [] };
+    const ptyRate: Counter = { times: [] };
 
     const helloTimer = setTimeout(() => {
       log.info({ ip }, 'agent hello timeout');
@@ -267,14 +276,24 @@ export class AgentHub {
     ws.on('message', (data, isBinary) => {
       if (this.closed) return;
       const now = this.deps.now();
-      if (bump(rate, now, this.opts.rateWindowMs) > this.opts.maxMessages) {
+      const raw = isBinary ? null : rawText(data);
+      const msg = raw === null ? null : parseAgentMessage(raw);
+      // Output of an open terminal and the results of its input/resize calls
+      // count against their own (higher) budget, so typing in vim cannot trip
+      // the general limit and drop the agent.
+      const ptyData =
+        conn !== null &&
+        ((msg?.type === 'stream.data' && conn.streams.get(msg.streamId)?.pty === true) ||
+          (msg?.type === 'rpc.result' && conn.pending.get(msg.id)?.pty === true));
+      const over = ptyData
+        ? bump(ptyRate, now, this.opts.rateWindowMs) > this.opts.maxPtyMessages
+        : bump(rate, now, this.opts.rateWindowMs) > this.opts.maxMessages;
+      if (over) {
         log.warn({ ip, serverId: conn?.serverId }, 'agent message flood, closing');
         ws.close(AGENT_CLOSE.POLICY, 'too many messages');
         return;
       }
       if (conn) conn.lastFrame = now;
-      const raw = isBinary ? null : rawText(data);
-      const msg = raw === null ? null : parseAgentMessage(raw);
 
       if (!conn) {
         // Before the handshake only a valid hello is accepted.
@@ -514,7 +533,7 @@ export class AgentHub {
         conn.pending.delete(id);
         reject(new RpcError('timeout'));
       }, opts.timeoutMs ?? this.opts.defaultRpcTimeoutMs);
-      conn.pending.set(id, { resolve, reject, timer });
+      conn.pending.set(id, { resolve, reject, timer, pty: action.startsWith('pty.') });
       this.send(conn.ws, { type: 'rpc', id, action, params: prepared.params });
     });
   }
@@ -540,7 +559,7 @@ export class AgentHub {
             this.send(conn.ws, { type: 'stream.cancel', streamId: id });
             this.endStream(conn, id, { code: -1, error: 'timeout' });
           }, opts.timeoutMs);
-    conn.streams.set(id, { stream, timer });
+    conn.streams.set(id, { stream, timer, pty: action === 'pty.open' });
     this.send(conn.ws, { type: 'rpc', id, action, params: p });
     return stream;
   }

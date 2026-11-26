@@ -19,6 +19,8 @@ export function otherTheme(theme: Theme): Theme {
 
 const LIGHT_QUERY = '(prefers-color-scheme: light)';
 const listeners = new Set<() => void>();
+/** The wall view pins `data-theme="wall"` while it is shown (SPEC 12). */
+let forced: 'wall' | null = null;
 
 function readStored(): Theme | null {
   try {
@@ -33,7 +35,7 @@ function currentTheme(): Theme {
 }
 
 function apply(): void {
-  document.documentElement.dataset.theme = currentTheme();
+  document.documentElement.dataset.theme = forced ?? currentTheme();
   for (const l of listeners) l();
 }
 
@@ -52,6 +54,12 @@ export function setTheme(theme: Theme): void {
   } catch {
     // Private mode: the choice lasts for this page only.
   }
+  apply();
+}
+
+/** Pins a theme regardless of the stored choice; `null` goes back to it. */
+export function forceTheme(theme: 'wall' | null): void {
+  forced = theme;
   apply();
 }
 

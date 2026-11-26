@@ -1,7 +1,11 @@
 import type { SessionInfo } from '@hz/shared';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useState, type ReactElement } from 'react';
-import { Badge, Button, Tile } from '@hz/ui';
+import { useEffect, useState, type FormEvent, type ReactElement, type ReactNode } from 'react';
+import { useLocation } from 'react-router';
+import { PASSWORD_MIN } from '@hz/shared';
+import { Alert, Badge, Button, Tile } from '@hz/ui';
+import { Dialog } from '../../components/Dialog.js';
+import { Field } from '../../components/Field.js';
 import { FormError } from '../../components/FormError.js';
 import { RecoveryCodes } from '../../components/RecoveryCodes.js';
 import { isApiError } from '../../lib/api.js';
@@ -15,25 +19,89 @@ import {
 } from '../../lib/auth.js';
 import { errorText } from '../../lib/errors.js';
 import { describeUserAgent, formatAgo, formatDateTime, formatTime } from '../../lib/format.js';
+import { changePassword } from '../../lib/settings.js';
 import { useAuthState } from '../../lib/useAuthState.js';
+import { BackupTile } from './BackupTile.js';
+import { ChecksSettingsTile } from './ChecksSettingsTile.js';
+import { AgentsSettingsTile, ServersSettingsTile } from './ServerSettingsTiles.js';
+import { TotpDialog } from './TotpDialog.js';
+import { WallDevicesTile } from './WallDevicesTile.js';
 import { GithubTile } from './GithubTiles.js';
 import { HaEntitiesTile, HaSettingsTile } from './HaTiles.js';
 import { NotifyTile, PushTile } from './PushTiles.js';
 import { ShareGatewayTile } from './ShareGatewayTile.js';
 
-export function SettingsPage(): ReactElement {
+/** Sections of SPEC 13, in that order. Ids are the anchors (`/settings#server`). */
+export const SETTINGS_SECTIONS = [
+  { id: 'konto', label: 'Konto' },
+  { id: 'server', label: 'Server' },
+  { id: 'agents', label: 'Agents' },
+  { id: 'github', label: 'GitHub' },
+  { id: 'checks', label: 'Checks' },
+  { id: 'push', label: 'Push' },
+  { id: 'ha', label: 'Home Assistant' },
+  { id: 'wandmodus', label: 'Wandmodus' },
+  { id: 'share-gateway', label: 'Share-Gateway' },
+  { id: 'backup', label: 'Backup' },
+] as const;
+
+function Anchor({ id, children }: { id: string; children: ReactNode }): ReactElement {
   return (
-    <div className="app-settings">
-      <AccountTile />
-      <SessionsTile />
-      <RecoveryTile />
-      <PushTile />
-      <NotifyTile />
-      <GithubTile />
-      <ShareGatewayTile />
-      <HaSettingsTile />
-      <HaEntitiesTile />
+    <div id={id} className="app-anchor">
+      {children}
     </div>
+  );
+}
+
+export function SettingsPage(): ReactElement {
+  const { hash } = useLocation();
+  // Tiles with their own anchor (github, ha, share-gateway) scroll themselves once loaded.
+  useEffect(() => {
+    const id = decodeURIComponent(hash.slice(1));
+    if (!id || ['github', 'ha', 'share-gateway'].includes(id)) return;
+    document.getElementById(id)?.scrollIntoView({ block: 'start' });
+  }, [hash]);
+
+  return (
+    <>
+      <nav className="app-settings-nav" aria-label="Bereiche der Einstellungen">
+        {SETTINGS_SECTIONS.map((s) => (
+          <a key={s.id} href={`#${s.id}`} className="app-settings-link">
+            {s.label}
+          </a>
+        ))}
+      </nav>
+      <div className="app-settings">
+        <Anchor id="konto">
+          <AccountTile />
+        </Anchor>
+        <SessionsTile />
+        <RecoveryTile />
+        <Anchor id="server">
+          <ServersSettingsTile />
+        </Anchor>
+        <Anchor id="agents">
+          <AgentsSettingsTile />
+        </Anchor>
+        <GithubTile />
+        <Anchor id="checks">
+          <ChecksSettingsTile />
+        </Anchor>
+        <Anchor id="push">
+          <PushTile />
+        </Anchor>
+        <NotifyTile />
+        <HaSettingsTile />
+        <HaEntitiesTile />
+        <Anchor id="wandmodus">
+          <WallDevicesTile />
+        </Anchor>
+        <ShareGatewayTile />
+        <Anchor id="backup">
+          <BackupTile />
+        </Anchor>
+      </div>
+    </>
   );
 }
 
@@ -41,6 +109,10 @@ function AccountTile(): ReactElement {
   const { data } = useAuthState();
   const queryClient = useQueryClient();
   const [error, setError] = useState<string | null>(null);
+  const [pwOpen, setPwOpen] = useState(false);
+  const [pwDone, setPwDone] = useState(false);
+  const [totpOpen, setTotpOpen] = useState(false);
+  const [totpDone, setTotpDone] = useState(false);
   const out = useMutation({
     mutationFn: logout,
     onSuccess: () => {
@@ -63,12 +135,123 @@ function AccountTile(): ReactElement {
         <dd>{stepUpUntil ? `gültig bis ${formatTime(stepUpUntil)}` : 'keine aktiv'}</dd>
       </dl>
       {error ? <FormError title={error} /> : null}
+      {pwDone ? (
+        <Alert tone="ok" title="Passwort geändert.">
+          Alle anderen Sitzungen sind abgemeldet.
+        </Alert>
+      ) : null}
+      {totpDone ? (
+        <Alert tone="ok" title="TOTP neu eingerichtet.">
+          Ab jetzt gilt nur noch der neue Eintrag in der App. Alle anderen Sitzungen sind
+          abgemeldet.
+        </Alert>
+      ) : null}
       <div className="hz-form-actions">
         <Button icon="door" onClick={() => out.mutate()} disabled={out.isPending}>
           Abmelden
         </Button>
+        <Button icon="lock" onClick={() => setPwOpen(true)}>
+          Passwort ändern
+        </Button>
+        <Button icon="refresh" onClick={() => setTotpOpen(true)}>
+          TOTP neu einrichten
+        </Button>
       </div>
+      {totpOpen ? (
+        <TotpDialog
+          onClose={(changed) => {
+            setTotpOpen(false);
+            if (changed) setTotpDone(true);
+          }}
+        />
+      ) : null}
+      {pwOpen ? (
+        <PasswordDialog
+          onClose={(changed) => {
+            setPwOpen(false);
+            if (changed) setPwDone(true);
+          }}
+        />
+      ) : null}
     </Tile>
+  );
+}
+
+function PasswordDialog({ onClose }: { onClose: (changed: boolean) => void }): ReactElement {
+  const queryClient = useQueryClient();
+  const [current, setCurrent] = useState('');
+  const [next, setNext] = useState('');
+  const [repeat, setRepeat] = useState('');
+  const [fieldError, setFieldError] = useState<string | null>(null);
+  const change = useMutation({
+    mutationFn: () => changePassword(current, next),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: sessionsKey });
+      onClose(true);
+    },
+  });
+
+  function submit(e: FormEvent): void {
+    e.preventDefault();
+    if (next.length < PASSWORD_MIN) {
+      setFieldError(`Mindestens ${PASSWORD_MIN} Zeichen.`);
+      return;
+    }
+    if (next !== repeat) {
+      setFieldError('Die beiden Passwörter sind nicht gleich.');
+      return;
+    }
+    setFieldError(null);
+    change.mutate();
+  }
+
+  const err =
+    change.error && !isApiError(change.error, 'step_up_required')
+      ? isApiError(change.error, 'invalid_credentials')
+        ? 'Aktuelles Passwort stimmt nicht.'
+        : errorText(change.error)
+      : null;
+
+  return (
+    <Dialog open onClose={() => onClose(false)} title="Passwort ändern">
+      <form className="hz-dialog-body" onSubmit={submit} noValidate>
+        <p className="hz-dialog-text">
+          Danach sind alle anderen Sitzungen abgemeldet. Dafür ist ein frischer Code aus der App
+          nötig.
+        </p>
+        <Field
+          label="Aktuelles Passwort"
+          type="password"
+          autoComplete="current-password"
+          value={current}
+          onChange={(e) => setCurrent(e.target.value)}
+          data-autofocus=""
+        />
+        <Field
+          label="Neues Passwort"
+          type="password"
+          autoComplete="new-password"
+          value={next}
+          onChange={(e) => setNext(e.target.value)}
+          hint={`Mindestens ${PASSWORD_MIN} Zeichen.`}
+        />
+        <Field
+          label="Neues Passwort wiederholen"
+          type="password"
+          autoComplete="new-password"
+          value={repeat}
+          onChange={(e) => setRepeat(e.target.value)}
+          error={fieldError}
+        />
+        {err ? <FormError title={err} /> : null}
+        <div className="hz-dialog-foot">
+          <Button onClick={() => onClose(false)}>Abbrechen</Button>
+          <Button variant="primary" type="submit" disabled={change.isPending || !current || !next}>
+            Ändern
+          </Button>
+        </div>
+      </form>
+    </Dialog>
   );
 }
 

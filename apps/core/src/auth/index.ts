@@ -4,7 +4,13 @@ import { installAuthGuard } from './guard.js';
 import { authRoutes } from './routes.js';
 import { AuthService, type AuthDeps } from './service.js';
 
-export { hasStepUp, requireStepUp, PUBLIC_API_PREFIXES, PUBLIC_API_ROUTES } from './guard.js';
+export {
+  hasStepUp,
+  requireStepUp,
+  DEVICE_API_ROUTES,
+  PUBLIC_API_PREFIXES,
+  PUBLIC_API_ROUTES,
+} from './guard.js';
 export { AuthService } from './service.js';
 
 /**
@@ -17,7 +23,11 @@ export async function setupAuth(
   deps: AuthDeps & { config: Config },
 ): Promise<AuthService> {
   const svc = new AuthService(deps);
-  installAuthGuard(app, { sessions: svc.sessions, baseUrl: deps.config.baseUrl });
+  installAuthGuard(app, {
+    sessions: svc.sessions,
+    baseUrl: deps.config.baseUrl,
+    wallDevices: () => svc.wallDevices,
+  });
   await app.register(authRoutes, { prefix: '/api', auth: svc });
 
   if (!svc.hasUser()) {

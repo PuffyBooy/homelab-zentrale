@@ -1,3 +1,6 @@
+import { readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { brotliCompressSync, constants as zlib, gzipSync } from 'node:zlib';
 import react from '@vitejs/plugin-react';
 import { defineConfig, type Plugin } from 'vite';
 import { VitePWA } from 'vite-plugin-pwa';
@@ -29,6 +32,52 @@ function stripGoogleFonts(): Plugin {
     transform(code, id) {
       if (!id.split('?')[0]?.endsWith('.css') || !code.includes('fonts.googleapis.com')) return;
       return { code: code.replace(GOOGLE_FONTS_IMPORT, ''), map: null };
+    },
+  };
+}
+
+const COMPRESSIBLE = /\.(js|mjs|css|html|svg|json|webmanifest|txt)$/;
+
+function walk(dir: string): string[] {
+  return readdirSync(dir).flatMap((name) => {
+    const p = join(dir, name);
+    return statSync(p).isDirectory() ? walk(p) : [p];
+  });
+}
+
+/**
+ * Writes `<file>.gz` and `<file>.br` next to every text asset in dist/ (the core serves
+ * them when the browser accepts the encoding). Runs after the PWA plugin, so sw.js is
+ * included. No dependency, only node:zlib.
+ */
+function precompress(): Plugin {
+  let outDir = 'dist';
+  return {
+    name: 'hz-precompress',
+    apply: 'build',
+    configResolved(c) {
+      outDir = c.build.outDir;
+    },
+    closeBundle: {
+      order: 'post',
+      sequential: true,
+      handler() {
+        for (const file of walk(outDir)) {
+          if (!COMPRESSIBLE.test(file)) continue;
+          const data = readFileSync(file);
+          if (data.length < 1024) continue;
+          writeFileSync(`${file}.gz`, gzipSync(data, { level: 9 }));
+          writeFileSync(
+            `${file}.br`,
+            brotliCompressSync(data, {
+              params: {
+                [zlib.BROTLI_PARAM_QUALITY]: 11,
+                [zlib.BROTLI_PARAM_SIZE_HINT]: data.length,
+              },
+            }),
+          );
+        }
+      },
     },
   };
 }
@@ -76,6 +125,7 @@ export default defineConfig({
       },
       devOptions: { enabled: false },
     }),
+    precompress(),
   ],
   resolve: { conditions: ['@hz/source'] },
   server: {
@@ -85,6 +135,12 @@ export default defineConfig({
     proxy: {
       '/api': 'http://127.0.0.1:8080',
       '/live': { target: 'ws://127.0.0.1:8080', ws: true },
+      // Only the WebSocket goes to the core; the page /console stays the SPA.
+      '/console': {
+        target: 'ws://127.0.0.1:8080',
+        ws: true,
+        bypass: (req) => (req.headers.upgrade ? undefined : '/index.html'),
+      },
     },
     fs: { allow: ['.', '../../design', '../../packages'] },
   },

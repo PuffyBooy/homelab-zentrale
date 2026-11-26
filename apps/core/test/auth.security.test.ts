@@ -76,6 +76,7 @@ describe('every /api route needs a session', () => {
         '/api/health',
         '/api/setup/confirm',
         '/api/setup/start',
+        '/api/wall/session',
       ].sort(),
     );
   });

@@ -107,6 +107,8 @@ function ShellBody(): ReactElement {
 
   useEffect(() => {
     function onKey(e: KeyboardEvent): void {
+      // The web console gets every key (Ctrl+K is "kill line" in the shell).
+      if (e.target instanceof Element && e.target.closest('[data-hz-terminal]')) return;
       const action = shortcutAction({
         key: e.key,
         ctrlKey: e.ctrlKey,

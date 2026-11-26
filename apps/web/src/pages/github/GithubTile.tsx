@@ -5,7 +5,7 @@ import { Tile } from '@hz/ui';
 import { FormError } from '../../components/FormError.js';
 import { deployableTargets, repoBehind, sortRepos } from '../../lib/github.js';
 import { useNow } from '../../lib/useNow.js';
-import { GITHUB_SETTINGS_HREF } from './GithubPage.js';
+import { GITHUB_SETTINGS_HREF } from '../../lib/github.js';
 import { RepoListRow } from './RepoListRow.js';
 import { deployErrorText, useDeploy } from './useDeploy.js';
 

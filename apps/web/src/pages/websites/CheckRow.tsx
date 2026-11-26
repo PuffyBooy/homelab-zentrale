@@ -53,7 +53,7 @@ export function CheckRow({
               disabled={running}
               onClick={onRun}
             />
-            <Button size="sm" variant="ghost" aria-label={`${target} öffnen`} onClick={onOpen}>
+            <Button size="sm" variant="ghost" aria-label={`Details zu ${target}`} onClick={onOpen}>
               Details
             </Button>
           </>

@@ -17,9 +17,9 @@ import { ALL_SERVERS } from '../../lib/servers.js';
 import { useNow } from '../../lib/useNow.js';
 import { RepoListRow } from './RepoListRow.js';
 import { deployErrorText, useDeploy } from './useDeploy.js';
+import { GITHUB_SETTINGS_HREF } from '../../lib/github.js';
 
-/** Settings anchor of the GitHub tile. */
-export const GITHUB_SETTINGS_HREF = '/settings#github';
+export { GITHUB_SETTINGS_HREF };
 
 /** /github (SPEC 7): one RepoRow per tracked repo, new commits first, live over `github`. */
 export function GithubPage(): ReactElement | null {

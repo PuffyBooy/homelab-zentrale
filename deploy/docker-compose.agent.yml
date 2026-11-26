@@ -28,6 +28,14 @@
 #                               PID 1 (needed for nsenter). Hosts without AppArmor ignore this.
 # - read_only + tmpfs /tmp, no-new-privileges: the image itself stays immutable
 #                               (the docker CLI keeps its config in /tmp/.docker).
+#
+# Web console (HZ_AGENT_ALLOW_TERMINAL, default 0 = every pty.* is refused): set
+# HZ_AGENT_ALLOW_TERMINAL=1 in agent.env (install-agent.sh --allow-terminal), not here, so the
+# env file stays the single switch. The console is a login shell on the host started with the
+# same `nsenter --target 1 ...` as the other host commands, so it needs no right beyond the
+# ones above. The shell runs as root but inherits this container's capability bounding set and
+# no-new-privileges (no CAP_KILL, NET_ADMIN, SYS_MODULE, SYS_BOOT ...; setuid binaries do not
+# gain rights). For full root work use SSH; the agent's rights are not widened for the console.
 name: homelab-agent
 
 services:

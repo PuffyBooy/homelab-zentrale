@@ -30,6 +30,9 @@ import type { StatusSentence } from './servers.js';
 
 export const githubKey = ['github'] as const;
 export const githubSettingsKey = ['github', 'settings'] as const;
+/** Settings anchor of the GitHub tile. */
+export const GITHUB_SETTINGS_HREF = '/settings#github';
+
 export const reposKey = ['github', 'repos'] as const;
 export const availableKey = ['github', 'available'] as const;
 export const commitsKey = (repoId: string, branch?: string) =>

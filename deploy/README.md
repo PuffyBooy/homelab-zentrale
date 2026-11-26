@@ -113,6 +113,47 @@ Alles über die Docker-API am Socket, außer `compose.*`, das die Docker-CLI im 
 
 **Docker-CLI im Image:** `docker` und das Compose-Plugin kommen als statische Binaries aus dem offiziellen Multi-Arch-Image `docker:29-cli` (per Digest gepinnt, `linux/amd64` und `linux/arm64`), ohne apt-Repository. `docker` steht in der Programm-Allowlist (`apps/agent/src/exec.ts`) und wird nur von `actions/compose.ts` mit festen Argumenten aufgerufen.
 
+### Web-Konsole einschalten
+
+Die Web-Konsole ist pro Server **aus**. Sie braucht zwei Schalter, die beide an sein müssen:
+
+1. **Auf dem Server:** In `/etc/homelab-agent/agent.env` `HZ_AGENT_ALLOW_TERMINAL=1` setzen (oder `install-agent.sh` mit `--allow-terminal` erneut ausführen) und den Agent neu starten:
+
+   ```bash
+   sudo sed -i 's/^HZ_AGENT_ALLOW_TERMINAL=.*/HZ_AGENT_ALLOW_TERMINAL=1/' /etc/homelab-agent/agent.env
+   cd /etc/homelab-agent && sudo docker compose up -d --no-build --force-recreate agent
+   ```
+
+   Der Agent liest den Wert nur beim Start und meldet ihn im `hello` als Fähigkeit `terminal`. Ohne den Schalter lehnt er jedes `pty.*` mit `terminal_disabled` ab (und meldet die Ablehnung als `denied`), egal was der Core schickt. node-pty wird erst beim ersten Öffnen geladen.
+2. **In der Zentrale:** Server → Einstellungen → „Konsole erlaubt“ einschalten. Das verlangt eine Step-up-Bestätigung (Passwort + TOTP); jedes Öffnen der Konsole ebenfalls.
+
+Zum Ausschalten `HZ_AGENT_ALLOW_TERMINAL=0` setzen und den Agent neu starten, oder den Schalter in der Zentrale ausschalten.
+
+**Was die Konsole ist:** eine Login-Shell **auf dem Host**, nicht im Agent-Container:
+
+```
+nsenter --target 1 --mount --uts --ipc --net --pid --cgroup --wd=/host/proc/1/root/root -- /bin/bash -l
+```
+
+(`/bin/sh -l`, wenn es kein `bash` gibt; ohne `/root` startet sie in `/`). Festes Argument-Array, kein `sh -c`. Umgebung nur `TERM=xterm-256color`, `COLORTERM`, `LANG=C.UTF-8`, `HOME=/root`, `USER`/`LOGNAME=root`, `PATH`; das Agent-Token erreicht die Shell nie. Sie braucht keine Rechte über die vorhandenen hinaus (`pid: host`, `SYS_ADMIN`/`SYS_PTRACE`/`SYS_CHROOT`, `apparmor=unconfined` für nsenter).
+
+| Grenze | Wert |
+| --- | --- |
+| Gleichzeitige Konsolen pro Server | 3 (sonst `busy`) |
+| Ohne Eingabe | 15 Min, dann wird die Sitzung beendet (`stream.end` mit `error: "idle_timeout"`) |
+| Insgesamt | 60 Min (`error: "max_duration"`) |
+| Eingabe pro Nachricht | 16 KiB |
+| Ausgabe | UTF-8-Text als `stream.data`, 16 ms gebündelt, höchstens 64 KiB pro Chunk; ist der WebSocket-Puffer über 4 MiB, pausiert der Agent das PTY |
+
+Der Core setzt dieselben Zeitgrenzen; die des Agents sind die zweite Sicherung. Bei „Schließen“, Zeitablauf, `stream.cancel` und Verbindungsabbruch zum Core bekommt jeder Prozess der Sitzung (auch Hintergrundjobs) `SIGHUP`, nach 2 s `SIGKILL`. Nur Prozesse, die sich mit `setsid`/`nohup … &` und `disown` bewusst abgelöst haben, laufen weiter. Im Log stehen Öffnen und Schließen mit Stream-ID, Grund, Dauer und Byte-Zahlen, **nie Eingaben oder Ausgaben**.
+
+**Risiken:**
+
+- Wer die Konsole öffnen kann, ist root auf dem Host. Der Schutz ist die Admin-Session mit Step-up im Core plus der Schalter auf dem Server. Nur auf Servern einschalten, auf denen sie gebraucht wird, und danach wieder aus.
+- Die Shell erbt die Capability-Grenze und `no-new-privileges` des Containers: kein `CAP_KILL` (Prozesse anderer Benutzer beenden), kein `NET_ADMIN`, `SYS_MODULE`, `SYS_BOOT`, `SYS_TIME`; setuid-Programme (`sudo`, `su` zu anderen Benutzern) bekommen keine zusätzlichen Rechte. `apt`, `systemctl`, `journalctl`, Dateien bearbeiten funktionieren. Für alles andere SSH über Tailscale. Die Rechte des Agents werden für die Konsole nicht erweitert.
+- Das PTY gehört zum Container (`/dev/pts` des Containers). Programme, die ihr Terminal über den Pfad neu öffnen (selten), finden es auf dem Host nicht; `/dev/tty` funktioniert.
+- Alles, was in der Konsole getippt wird, geht als Text über den Agent-WebSocket (Tailscale verschlüsselt ihn). Passwörter tippen ist möglich, aber in der Zentrale gibt es keinen Mitschnitt.
+
 ### Prüfen
 
 ```bash

@@ -8,15 +8,10 @@ export function ThemeButton(): ReactElement {
   const [theme, setTheme] = useTheme();
   const next = otherTheme(theme);
   return (
-    <button
-      type="button"
-      className="hz-nav-item"
-      aria-label={`Theme: ${NAME[theme]}. Umschalten auf ${NAME[next]}`}
-      onClick={() => setTheme(next)}
-    >
+    <button type="button" className="hz-nav-item" onClick={() => setTheme(next)}>
       <span className="hz-nav-key" aria-hidden={true} />
-      <span>Theme</span>
-      <span className="app-rail-hint">{NAME[theme]}</span>
+      <span>Theme</span> <span className="app-rail-hint">{NAME[theme]}</span>
+      <span className="hz-sr">, umschalten auf {NAME[next]}</span>
     </button>
   );
 }

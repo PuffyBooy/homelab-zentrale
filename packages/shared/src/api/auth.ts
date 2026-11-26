@@ -50,6 +50,8 @@ export const setupStartResponseSchema = z.strictObject({
   qrSvg: z.string().startsWith('<svg'),
 });
 export type SetupStartResponse = z.infer<typeof setupStartResponseSchema>;
+/** Same shape as the setup: otpauth URI, base32 secret (shown once), QR as SVG. */
+export const totpStartResponseSchema = setupStartResponseSchema;
 
 // POST /api/setup/confirm
 export const setupConfirmRequestSchema = z.strictObject({
@@ -78,6 +80,13 @@ export const stepUpRequestSchema = z.strictObject({ code: totpCodeSchema });
 export type StepUpRequest = z.infer<typeof stepUpRequestSchema>;
 export const stepUpResponseSchema = z.strictObject({ stepUpUntil: z.iso.datetime() });
 export type StepUpResponse = z.infer<typeof stepUpResponseSchema>;
+
+// TOTP re-setup (SPEC 13, Konto), both step-up:
+// POST /api/auth/totp/start {} -> totpStartResponseSchema (new secret, pending 10 min,
+//   the old one stays valid until confirm)
+// POST /api/auth/totp/confirm { code } (code of the NEW secret) -> { ok }; other
+//   sessions are revoked.
+export const totpConfirmRequestSchema = z.strictObject({ code: totpCodeSchema });
 
 // POST /api/auth/recovery-codes (step-up required): regenerate
 // -> recoveryCodesResponseSchema

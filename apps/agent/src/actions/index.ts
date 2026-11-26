@@ -20,6 +20,7 @@ import { deployKey } from './deploy-key.js';
 import { gameBackup } from './game-backup.js';
 import { gameRemove } from './game-remove.js';
 import { gameRcon, gameStatus } from './games.js';
+import { ptyClose, ptyInput, ptyOpen, ptyResize } from './pty.js';
 import { cleanup, cleanupPreview } from './system-cleanup.js';
 import { systemReboot } from './system-reboot.js';
 import {
@@ -32,14 +33,7 @@ import {
 export { ActionError } from './types.js';
 export type { ActionContext } from './types.js';
 
-const notImplemented = async (): Promise<never> => {
-  throw new ActionError('failed', 'not implemented in this version');
-};
-
-/** PTY needs node-pty; it arrives with the console milestone. */
-const ptyNotImplemented = notImplemented;
-
-/** One handler per allowlisted action. Unimplemented ones answer `failed`. */
+/** One handler per allowlisted action. */
 export const handlers: ActionHandlers = {
   'container.start': containerStart,
   'container.stop': containerStop,
@@ -62,10 +56,10 @@ export const handlers: ActionHandlers = {
   'check.http': checkHttp,
   'check.tcp': checkTcp,
   'check.ping': checkPing,
-  'pty.open': ptyNotImplemented,
-  'pty.input': ptyNotImplemented,
-  'pty.resize': ptyNotImplemented,
-  'pty.close': ptyNotImplemented,
+  'pty.open': ptyOpen,
+  'pty.input': ptyInput,
+  'pty.resize': ptyResize,
+  'pty.close': ptyClose,
 };
 
 export function hasGitSegment(p: unknown): boolean {

@@ -2,7 +2,86 @@ import type { HaItem, HaState } from '@hz/shared';
 import { QueryClient } from '@tanstack/react-query';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { onErrorToast, type LocalToast } from './AlertToasts.js';
-import { haCommands } from './CommandPalette.js';
+import { container, game, repo, server, target } from '../test-fixtures.js';
+import {
+  containerCommands,
+  filterCommands,
+  gameCommands,
+  haCommands,
+  paletteCommands,
+  repoCommands,
+  serverCommands,
+  staticActions,
+  withoutGames,
+} from './CommandPalette.js';
+
+const qc = new QueryClient();
+
+describe('command palette', () => {
+  it('lists pages with their shortcut', () => {
+    expect(paletteCommands.map((c) => c.label)).toContain('Konsole');
+    expect(paletteCommands.find((c) => c.id === 'console')?.hint).toBe('`');
+  });
+
+  it('offers "Konsole <server>" only where the console is usable', () => {
+    const cmds = serverCommands([
+      server({ id: 'srv-aaaaaaaa', name: 'heimserver', allowTerminal: true }),
+      server({ id: 'srv-bbbbbbbb', name: 'pi', allowTerminal: false }),
+      server({ id: 'srv-cccccccc', name: 'oracle-a1', allowTerminal: true, connected: false }),
+    ]);
+    expect(cmds.filter((c) => c.label.startsWith('Konsole')).map((c) => c.to)).toEqual([
+      '/console?server=srv-aaaaaaaa',
+    ]);
+    expect(cmds.find((c) => c.label === 'pi')?.to).toBe('/servers/srv-bbbbbbbb');
+  });
+
+  it('asks before restarting a container, game stop or a deploy', () => {
+    const c = containerCommands(qc, [container({ name: 'homeassistant' })]);
+    expect(c.find((x) => x.label === 'homeassistant neu starten')?.confirm?.action).toBe(
+      'Neu starten',
+    );
+    const running = gameCommands(qc, [game({ name: 'minecraft', status: 'ok' })]);
+    expect(running.map((x) => [x.label, !!x.confirm])).toEqual([
+      ['minecraft', false],
+      ['minecraft neu starten', true],
+      ['minecraft stoppen', true],
+    ]);
+    const stopped = gameCommands(qc, [game({ name: 'valheim', status: 'off' })]);
+    expect(stopped.map((x) => [x.label, !!x.confirm])).toEqual([
+      ['valheim', false],
+      ['valheim starten', false],
+    ]);
+    const r = repoCommands(qc, [
+      repo({
+        fullName: 'PuffyBooy/soundos',
+        targets: [target({ headSha: 'a'.repeat(40), serverName: 'pi', behind: 3 })],
+      }),
+    ]);
+    const deploy = r.find((x) => x.label === 'soundos deployen');
+    expect(deploy?.confirm?.title).toBe('soundos auf pi deployen?');
+    expect(deploy?.confirm?.text).toContain('aaaaaaa');
+  });
+
+  it('lists game containers only as games', () => {
+    const g = game({ name: 'survival', serverId: 'srv-home0001' });
+    const list = withoutGames(
+      [container({ name: 'game-survival' }), container({ name: 'nginx' })],
+      [g],
+    );
+    expect(list.map((c) => c.name)).toEqual(['nginx']);
+  });
+
+  it('matches all words in label and hint', () => {
+    const cmds = [
+      ...staticActions,
+      ...containerCommands(qc, [container({ name: 'minecraft-proxy', serverName: 'oracle-a1' })]),
+    ];
+    expect(filterCommands(cmds, 'minecraft neu').map((c) => c.label)).toEqual([
+      'minecraft-proxy neu starten',
+    ]);
+    expect(filterCommands(cmds, 'wand').map((c) => c.label)).toEqual(['Wandmodus öffnen']);
+  });
+});
 
 const item: HaItem = {
   entityId: 'light.wohnzimmer',

@@ -457,4 +457,38 @@ CREATE TABLE ha_energy_months (
 );
 `,
   },
+  {
+    version: 9,
+    name: 'console_wall',
+    // Web console log (SPEC 11): who/when/how long/how many bytes, never content.
+    // The history goes with the server. ended_at NULL = still open (or the core
+    // stopped while it was open; closed with reason 'error' on the next start).
+    // Wall devices (SPEC 12): only the SHA-256 of `wall:<token>`; deleting the row
+    // revokes the device at once.
+    // Indices for the overview queries (M9 performance).
+    sql: `
+CREATE TABLE console_sessions (
+  id TEXT PRIMARY KEY,
+  server_id TEXT NOT NULL REFERENCES servers(id) ON DELETE CASCADE,
+  started_at INTEGER NOT NULL,
+  ended_at INTEGER,
+  reason TEXT,
+  ip TEXT,
+  bytes_in INTEGER NOT NULL DEFAULT 0,
+  bytes_out INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX console_sessions_server_started ON console_sessions(server_id, started_at);
+CREATE INDEX console_sessions_started ON console_sessions(started_at);
+
+CREATE TABLE wall_devices (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  token_hash TEXT NOT NULL UNIQUE,
+  created_at INTEGER NOT NULL,
+  last_seen_at INTEGER
+);
+
+CREATE INDEX alerts_state_opened ON alerts(state, opened_at);
+`,
+  },
 ];
