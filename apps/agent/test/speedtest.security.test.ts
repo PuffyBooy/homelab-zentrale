@@ -32,7 +32,11 @@ async function startFake(
       return;
     }
     if (url.pathname === '/__down') {
-      const n = Number(url.searchParams.get('bytes') ?? '0');
+      // Capped so the fake server never allocates more than 64 MiB per request.
+      const asked = Number(url.searchParams.get('bytes') ?? '0');
+      const n = Number.isFinite(asked)
+        ? Math.min(Math.max(0, Math.floor(asked)), 64 * 1024 * 1024)
+        : 0;
       res.writeHead(200, { 'content-type': 'application/octet-stream' });
       if (opts.slowDown && n > 0) {
         // trickle: 1 KiB every 20 ms, never finishes on its own

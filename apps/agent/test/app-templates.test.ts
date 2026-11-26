@@ -92,7 +92,7 @@ const keysOf = (s: Service) =>
 
 const placeholders = (text: string) => [...text.matchAll(/\$\{([^}]*)\}/g)].map((m) => m[1] ?? '');
 
-const SECRET_KEY = /PASS|SECRET|TOKEN|_KEY$/;
+const isSecretKey = (k: string) => /PASS|SECRET|TOKEN/.test(k) || k.endsWith('_KEY');
 const FORBIDDEN_SERVICE_KEYS = [
   'privileged',
   'cap_add',
@@ -137,7 +137,7 @@ describe('app templates', () => {
 
     it('secrets are generated password params', () => {
       for (const p of meta.params) {
-        if (SECRET_KEY.test(p.key)) {
+        if (isSecretKey(p.key)) {
           expect(p.type, `${p.key} must be a password`).toBe('password');
         }
         if (p.type === 'password') expect(p.generate).toBe(true);
