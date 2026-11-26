@@ -48,6 +48,8 @@ describe('agent protocol allowlist', () => {
         'game.remove',
         'game.backup',
         'game.backups.purge',
+        'game.export',
+        'game.import',
         'game.rcon',
         'pty.close',
         'pty.input',

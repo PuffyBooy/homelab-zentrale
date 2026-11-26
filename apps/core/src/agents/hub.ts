@@ -18,6 +18,10 @@ import {
   type RpcAction,
   type RpcErrorCode,
   type RpcParamsInput,
+  type TransferAck,
+  type TransferBegin,
+  type TransferChunk,
+  type TransferEnd,
 } from '@hz/shared';
 import type { Clock } from '../clock.js';
 import { randomToken } from '../crypto.js';
@@ -64,6 +68,11 @@ export interface HubOptions {
    * the agent sends console output every ~16 ms, far above `maxMessages`.
    */
   maxPtyMessages?: number;
+  /**
+   * Separate budget for transfer.* frames of open game.export / game.import streams
+   * in `rateWindowMs` (one frame per 48 KiB chunk, bounded by TRANSFER_WINDOW).
+   */
+  maxTransferMessages?: number;
   /** A connection without any frame (also pong) for this long is terminated. */
   staleAfterMs?: number;
   metricsIntervalS?: number;
@@ -78,11 +87,26 @@ const DEFAULTS: Required<HubOptions> = {
   maxMessages: 600,
   rateWindowMs: 60_000,
   maxPtyMessages: 15_000,
+  maxTransferMessages: 240_000,
   staleAfterMs: 90_000,
   metricsIntervalS: 10,
   inventoryIntervalS: 60,
   defaultRpcTimeoutMs: 30_000,
 };
+
+/** A transfer.* frame (M11 game.export / game.import). */
+export type TransferFrame = TransferBegin | TransferChunk | TransferAck | TransferEnd;
+/** Receives the transfer.* frames an agent sends for one stream. */
+export type TransferHandler = (frame: TransferFrame) => void;
+/** What the core may send for a transfer stream. */
+export type OutgoingTransferFrame = TransferChunk | TransferAck | TransferEnd;
+
+const isTransfer = (m: AgentToCore | null): m is TransferFrame =>
+  m !== null &&
+  (m.type === 'transfer.begin' ||
+    m.type === 'transfer.chunk' ||
+    m.type === 'transfer.ack' ||
+    m.type === 'transfer.end');
 
 export interface StreamChunk {
   channel: 'stdout' | 'stderr' | 'progress';
@@ -196,7 +220,16 @@ interface Conn {
   connectedAt: number;
   lastFrame: number;
   pending: Map<string, Pending>;
-  streams: Map<string, { stream: RpcStream; timer: NodeJS.Timeout | null; pty: boolean }>;
+  streams: Map<
+    string,
+    {
+      stream: RpcStream;
+      timer: NodeJS.Timeout | null;
+      pty: boolean;
+      /** Only game.export / game.import: where transfer.* frames of this stream go. */
+      transfer: TransferHandler | null;
+    }
+  >;
 }
 
 interface Counter {
@@ -259,6 +292,7 @@ export class AgentHub {
     const invalid: Counter = { times: [] };
     const rate: Counter = { times: [] };
     const ptyRate: Counter = { times: [] };
+    const transferRate: Counter = { times: [] };
 
     const helloTimer = setTimeout(() => {
       log.info({ ip }, 'agent hello timeout');
@@ -285,9 +319,18 @@ export class AgentHub {
         conn !== null &&
         ((msg?.type === 'stream.data' && conn.streams.get(msg.streamId)?.pty === true) ||
           (msg?.type === 'rpc.result' && conn.pending.get(msg.id)?.pty === true));
+      // Transfer frames of an open game.export / game.import stream have their own
+      // budget too (a migration moves thousands of 48 KiB chunks per minute).
+      // Frames for unknown streams count against the general budget.
+      const transferData =
+        conn !== null &&
+        isTransfer(msg) &&
+        (conn.streams.get(msg.streamId)?.transfer ?? null) !== null;
       const over = ptyData
         ? bump(ptyRate, now, this.opts.rateWindowMs) > this.opts.maxPtyMessages
-        : bump(rate, now, this.opts.rateWindowMs) > this.opts.maxMessages;
+        : transferData
+          ? bump(transferRate, now, this.opts.rateWindowMs) > this.opts.maxTransferMessages
+          : bump(rate, now, this.opts.rateWindowMs) > this.opts.maxMessages;
       if (over) {
         log.warn({ ip, serverId: conn?.serverId }, 'agent message flood, closing');
         ws.close(AGENT_CLOSE.POLICY, 'too many messages');
@@ -346,7 +389,10 @@ export class AgentHub {
       // may still deliver frames until the socket is gone: ignore them.
       if (this.conns.get(conn.serverId) !== conn) return;
 
-      if (!msg || msg.type === 'hello') {
+      // transfer.* only for a transfer stream of THIS connection: a frame for an
+      // unknown stream id, another server's stream or a non-transfer stream is invalid.
+      const strayTransfer = isTransfer(msg) && !transferData;
+      if (!msg || msg.type === 'hello' || strayTransfer) {
         const n = bump(invalid, now, this.opts.invalidWindowMs);
         log.debug({ serverId: conn.serverId, invalid: n }, 'invalid agent message dropped');
         if (n > this.opts.maxInvalid) {
@@ -473,6 +519,13 @@ export class AgentHub {
           ...(msg.error !== undefined ? { error: msg.error } : {}),
         });
         return;
+      case 'transfer.begin':
+      case 'transfer.chunk':
+      case 'transfer.ack':
+      case 'transfer.end':
+        // Checked in the message handler: the stream exists and has a handler.
+        conn.streams.get(msg.streamId)?.transfer?.(msg);
+        return;
     }
   }
 
@@ -539,14 +592,22 @@ export class AgentHub {
     });
   }
 
-  /** Streaming RPC (container.logs, game.backup, deploy.run, pty.open). */
+  /**
+   * Streaming RPC (container.logs, game.backup, deploy.run, pty.open, game.export,
+   * game.import). `onTransfer` (only game.export / game.import) receives the
+   * transfer.* frames the agent sends for this stream.
+   */
   stream<A extends RpcAction>(
     serverId: string,
     action: A,
     params: RpcParamsInput<A>,
-    opts: { timeoutMs?: number } = {},
+    opts: { timeoutMs?: number; onTransfer?: TransferHandler } = {},
   ): RpcStream {
     if (!streamingActions.includes(action)) throw new RpcError('invalid_params', 'use call()');
+    const transferAction = action === 'game.export' || action === 'game.import';
+    if (transferAction !== (opts.onTransfer !== undefined)) {
+      throw new RpcError('invalid_params', 'onTransfer only with game.export / game.import');
+    }
     const { conn, params: p } = this.prepare(serverId, action, params);
     const id = randomToken(12);
     const stream = new RpcStream(id, () => {
@@ -560,9 +621,32 @@ export class AgentHub {
             this.send(conn.ws, { type: 'stream.cancel', streamId: id });
             this.endStream(conn, id, { code: -1, error: 'timeout' });
           }, opts.timeoutMs);
-    conn.streams.set(id, { stream, timer, pty: action === 'pty.open' });
+    conn.streams.set(id, {
+      stream,
+      timer,
+      pty: action === 'pty.open',
+      transfer: opts.onTransfer ?? null,
+    });
     this.send(conn.ws, { type: 'rpc', id, action, params: p });
     return stream;
+  }
+
+  /**
+   * Sends a transfer.chunk / ack / end for an open game.export / game.import
+   * stream of this server. Returns false (nothing sent) if the server is not
+   * connected or the stream is not an open transfer stream of that connection.
+   */
+  sendTransfer(serverId: string, frame: OutgoingTransferFrame): boolean {
+    const conn = this.conns.get(serverId);
+    const s = conn?.streams.get(frame.streamId);
+    if (!conn || !s?.transfer || conn.ws.readyState !== conn.ws.OPEN) return false;
+    this.send(conn.ws, frame);
+    return true;
+  }
+
+  /** Bytes queued on the socket of a server (tests: core memory stays bounded). */
+  bufferedAmount(serverId: string): number {
+    return this.conns.get(serverId)?.ws.bufferedAmount ?? 0;
   }
 
   /** Disconnects a server at once (token revoked, server deleted). */

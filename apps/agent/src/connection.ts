@@ -11,6 +11,9 @@ import {
   type Metrics,
   type RpcEnvelope,
   type RpcResult,
+  type TransferAck,
+  type TransferChunk,
+  type TransferEnd,
 } from '@hz/shared';
 import { PROTOCOL_PAUSE_MS, REJECT_PAUSE_MS, backoffDelay } from './backoff.js';
 import type { Logger } from './log.js';
@@ -35,6 +38,8 @@ export interface ConnectionOptions {
   onRpcResultSent?: (result: RpcResult, sent: boolean) => void;
   /** stream.cancel from the core. */
   onStreamCancel?: (streamId: string) => void;
+  /** transfer.chunk / transfer.ack / transfer.end from the core (game.import, game.export). */
+  onTransfer?: (msg: TransferChunk | TransferAck | TransferEnd) => void;
   /** The connection closed; every stream is lost for the core. */
   onDisconnect?: () => void;
   /** Test hook: creates the WebSocket. */
@@ -280,6 +285,12 @@ export class AgentConnection {
       }
       case 'stream.cancel':
         this.o.onStreamCancel?.(msg.streamId);
+        return;
+      case 'transfer.chunk':
+      case 'transfer.ack':
+      case 'transfer.end':
+        if (this.phase !== 'ready') return;
+        this.o.onTransfer?.(msg);
         return;
     }
   }

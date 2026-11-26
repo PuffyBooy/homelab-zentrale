@@ -624,4 +624,83 @@ CREATE INDEX wichtig_restarts_container_ts ON wichtig_restarts(container_id, ts)
 ALTER TABLE containers ADD COLUMN last_mem_bytes REAL;
 `,
   },
+  {
+    version: 12,
+    name: 'onboarding_ports',
+    // M11 one-step onboarding and port audit.
+    // onboarding_codes: code_hash is HMAC-SHA-256 of the canonical code (key derived from
+    // HZ_SECRET_KEY), never the code. exchanged_at: the code was swapped for an enrollment
+    // token (enroll_token_id); cancelled_at: cancelled by the admin.
+    // server_allowed_ports: the allowed public ports of a server. server_port_audit: one row
+    // per server once its list exists (seeded from the first inventory or set by hand).
+    sql: `
+CREATE TABLE onboarding_codes (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  location TEXT NOT NULL DEFAULT '',
+  code_hash TEXT NOT NULL UNIQUE,
+  created_at INTEGER NOT NULL,
+  expires_at INTEGER NOT NULL,
+  exchanged_at INTEGER,
+  cancelled_at INTEGER,
+  enroll_token_id TEXT
+);
+CREATE INDEX onboarding_codes_expires ON onboarding_codes(expires_at);
+
+CREATE TABLE server_allowed_ports (
+  server_id TEXT NOT NULL REFERENCES servers(id) ON DELETE CASCADE,
+  proto TEXT NOT NULL,
+  port INTEGER NOT NULL,
+  note TEXT,
+  created_at INTEGER NOT NULL,
+  PRIMARY KEY (server_id, proto, port)
+);
+
+CREATE TABLE server_port_audit (
+  server_id TEXT PRIMARY KEY REFERENCES servers(id) ON DELETE CASCADE,
+  seeded_at INTEGER NOT NULL
+);
+`,
+  },
+  {
+    version: 13,
+    name: 'game_migrations',
+    // M11 moving a game server to another server (apps/core/src/games/migrate.ts).
+    // One row per attempt; the latest per game is shown. Server ids carry no foreign key
+    // (the record outlives a deleted server), names are copied for display.
+    // was_running: the source game ran before (restart it on rollback).
+    // target_touched: game.import was accepted, so the target folder is ours to remove.
+    // cleanup_target / restart_source: rollback steps still to do (agent was offline or
+    // the core restarted); retried while the agent is connected.
+    sql: `
+CREATE TABLE game_migrations (
+  id TEXT PRIMARY KEY,
+  game_id TEXT NOT NULL REFERENCES game_servers(id) ON DELETE CASCADE,
+  game_name TEXT NOT NULL,
+  source_server_id TEXT NOT NULL,
+  source_server_name TEXT NOT NULL,
+  target_server_id TEXT NOT NULL,
+  target_server_name TEXT NOT NULL,
+  phase TEXT NOT NULL,
+  failed_phase TEXT,
+  bytes_done INTEGER NOT NULL DEFAULT 0,
+  bytes_total INTEGER,
+  sha256 TEXT,
+  error TEXT,
+  error_text TEXT,
+  rollback TEXT,
+  ports_json TEXT NOT NULL DEFAULT '[]',
+  rcon_port INTEGER,
+  forwarding_hint TEXT,
+  was_running INTEGER NOT NULL DEFAULT 0,
+  target_touched INTEGER NOT NULL DEFAULT 0,
+  cleanup_target INTEGER NOT NULL DEFAULT 0,
+  restart_source INTEGER NOT NULL DEFAULT 0,
+  started_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  finished_at INTEGER
+);
+CREATE INDEX game_migrations_game ON game_migrations(game_id, started_at);
+`,
+  },
 ];

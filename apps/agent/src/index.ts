@@ -5,6 +5,7 @@ import { ContainerCollector, openDocker } from './collect/docker.js';
 import { DockerEventWatcher } from './collect/docker-events.js';
 import { hiddenDuringUpdate } from './actions/container-update.js';
 import { cleanupPartialBackups } from './actions/game-backup.js';
+import { cleanupStaleTransfers } from './actions/game-transfer.js';
 import { collectInventory } from './collect/inventory.js';
 import { SystemCollector } from './collect/system.js';
 import { ConfigError, loadConfig } from './config.js';
@@ -53,6 +54,7 @@ async function main(): Promise<void> {
   const timers = new Set<NodeJS.Timeout>();
   const streams = new StreamManager({
     send: (msg) => conn.send(msg),
+    sendTransfer: (msg) => conn.send(msg),
     bufferedAmount: () => conn.bufferedAmount(),
   });
   // Only constructed with HZ_AGENT_ALLOW_TERMINAL=1; node-pty loads on the first pty.open.
@@ -105,6 +107,9 @@ async function main(): Promise<void> {
     handleRpc: (env) => dispatcher.handle(env),
     onRpcResultSent: (result, sent) => dispatcher.resultSent(result, sent),
     onStreamCancel: (id) => streams.cancel(id),
+    onTransfer: (msg) => {
+      if (!streams.deliver(msg)) log.debug('transfer frame for unknown stream dropped');
+    },
     onDisconnect: () => streams.cancelAll(),
   });
 
@@ -134,6 +139,11 @@ async function main(): Promise<void> {
   // Temp archives of backups that died with a previous agent process (no backup runs yet).
   const stale = await cleanupPartialBackups(config.homelabRoot);
   if (stale.length > 0) log.info('removed stale backup temp files', { count: stale.length });
+  // Export temp archives and import staging folders of transfers that died with it.
+  const staleTransfers = await cleanupStaleTransfers(config.homelabRoot);
+  if (staleTransfers.length > 0) {
+    log.info('removed stale transfer temp files', { count: staleTransfers.length });
+  }
 
   await conn.start();
   events?.start();

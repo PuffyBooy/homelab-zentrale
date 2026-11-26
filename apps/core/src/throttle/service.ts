@@ -80,7 +80,7 @@ const MIB = 1024 * 1024;
  * field for it yet (docs/QUESTIONS.md 2026-11-26); unknown templates are stopped
  * without saving (compose down lets the game save on SIGTERM anyway).
  */
-const SAVE_COMMANDS: Record<string, string> = {
+export const SAVE_COMMANDS: Record<string, string> = {
   'minecraft-java': 'save-all',
   palworld: 'Save',
 };

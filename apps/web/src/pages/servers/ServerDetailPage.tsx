@@ -22,6 +22,7 @@ import { useNow } from '../../lib/useNow.js';
 import { ContainerGroups } from '../containers/ContainersPage.js';
 import { AutomatikTile } from '../throttle/AutomatikTile.js';
 import { CleanupDialog } from './CleanupDialog.js';
+import { OpenPortsTile } from './OpenPortsTile.js';
 import { RebootDialog } from './RebootDialog.js';
 
 const SPARK_BARS = 48;
@@ -266,6 +267,8 @@ function Detail({ d, history }: { d: ServerDetail; history?: HistoryResponse | u
             <p className="app-empty">Keine offenen Ports gemeldet.</p>
           )}
         </Tile>
+
+        <OpenPortsTile serverId={s.id} serverName={s.name} />
 
         <ServerContainers server={s} />
 

@@ -56,6 +56,8 @@ export interface ContainerSync {
 
 /** serverId and whether it was deleted. */
 export type ServerListener = (serverId: string, deleted: boolean) => void;
+/** Called after an inventory was stored. */
+export type InventoryListener = (serverId: string, inv: Omit<Inventory, 'type'>) => void;
 
 const parse = <T>(json: string | null): T | null =>
   json === null ? null : (JSON.parse(json) as T);
@@ -95,6 +97,7 @@ export class ServerService implements AgentSink {
   private readonly lastSeen = new Map<string, number>();
   private readonly lastSummary = new Map<string, string>();
   private readonly listeners = new Set<ServerListener>();
+  private readonly inventoryListeners = new Set<InventoryListener>();
   /** Demo servers (HZ_DEMO=1) count as connected without a socket. */
   private readonly virtual = new Set<string>();
   private connections: ConnectionInfo = { isConnected: () => false, disconnectedAt: () => null };
@@ -128,6 +131,11 @@ export class ServerService implements AgentSink {
   onChange(fn: ServerListener): () => void {
     this.listeners.add(fn);
     return () => this.listeners.delete(fn);
+  }
+
+  onInventoryStored(fn: InventoryListener): () => void {
+    this.inventoryListeners.add(fn);
+    return () => this.inventoryListeners.delete(fn);
   }
 
   private emit(id: string, deleted: boolean): void {
@@ -273,6 +281,7 @@ export class ServerService implements AgentSink {
         .run();
     });
     this.containerSync?.syncInventory(serverId, inv.containers);
+    for (const fn of this.inventoryListeners) fn(serverId, inv);
     this.lastSeen.set(serverId, now);
     this.refresh(serverId, true);
   }

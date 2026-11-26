@@ -1,4 +1,12 @@
-import { MAX_CHUNK_CHARS, type StreamData, type StreamEnd } from '@hz/shared';
+import {
+  MAX_CHUNK_CHARS,
+  type StreamData,
+  type StreamEnd,
+  type TransferAck,
+  type TransferBegin,
+  type TransferChunk,
+  type TransferEnd,
+} from '@hz/shared';
 import { ActionError } from './actions/types.js';
 
 /**
@@ -14,6 +22,12 @@ import { ActionError } from './actions/types.js';
 
 export type StreamChannel = StreamData['channel'];
 
+/** Binary transfer frames the agent sends (game.export: begin/chunk/end, game.import: ack). */
+export type TransferOut = TransferBegin | TransferChunk | TransferAck | TransferEnd;
+/** Binary transfer frames the core sends to a stream (game.import: chunk/end, game.export: ack). */
+export type TransferIn = TransferChunk | TransferAck | TransferEnd;
+type OutMsg = StreamData | StreamEnd | TransferOut;
+
 export interface StreamSink {
   readonly id: string;
   /** True after cancel, discard or end. Producers should stop. */
@@ -26,10 +40,16 @@ export interface StreamSink {
   onCancel(fn: () => void): void;
   /** True while the WebSocket send buffer is full; producers should pause. */
   congested(): boolean;
+  /** Sends a transfer frame (queued like stream.data until the rpc.result went out). */
+  transfer(msg: TransferOut): void;
+  /** Receives the transfer frames the core sends for this stream (one handler). */
+  onTransfer(fn: (msg: TransferIn) => void): void;
 }
 
 export interface StreamOutput {
   send(msg: StreamData | StreamEnd): boolean;
+  /** Sends a transfer frame; without it transfer frames are dropped. */
+  sendTransfer?(msg: TransferOut): boolean;
   /** Bytes queued in the WebSocket. */
   bufferedAmount(): number;
 }
@@ -58,16 +78,17 @@ export function splitChunks(text: string, max = MAX_CHUNK_CHARS): string[] {
 class Sink implements StreamSink {
   closed = false;
   active = false;
-  queue: (StreamData | StreamEnd)[] = [];
+  queue: OutMsg[] = [];
   cancelFns: (() => void)[] = [];
+  transferFn: ((msg: TransferIn) => void) | null = null;
 
   constructor(
     readonly id: string,
     private readonly mgr: StreamManager,
   ) {}
 
-  private emit(msg: StreamData | StreamEnd): void {
-    if (this.active) this.mgr.out.send(msg);
+  private emit(msg: OutMsg): void {
+    if (this.active) this.mgr.write(msg);
     else this.queue.push(msg);
   }
 
@@ -96,9 +117,20 @@ class Sink implements StreamSink {
     return this.mgr.out.bufferedAmount() > CONGESTION_BYTES;
   }
 
+  transfer(msg: TransferOut): void {
+    if (this.closed || msg.streamId !== this.id) return;
+    this.emit(msg);
+  }
+
+  onTransfer(fn: (msg: TransferIn) => void): void {
+    if (this.closed) return;
+    this.transferFn = fn;
+  }
+
   runCancel(): void {
     this.closed = true;
     this.queue = [];
+    this.transferFn = null;
     const fns = this.cancelFns;
     this.cancelFns = [];
     for (const fn of fns) {
@@ -143,8 +175,25 @@ export class StreamManager {
     sink.active = true;
     const queued = sink.queue;
     sink.queue = [];
-    for (const msg of queued) this.out.send(msg);
+    for (const msg of queued) this.write(msg);
     if (sink.closed) this.forget(id);
+  }
+
+  /** @internal */
+  write(msg: OutMsg): void {
+    if (msg.type === 'stream.data' || msg.type === 'stream.end') this.out.send(msg);
+    else this.out.sendTransfer?.(msg);
+  }
+
+  /**
+   * A transfer frame from the core: hands it to the stream's handler. Returns false
+   * when no open (and live) stream with that id takes transfer frames.
+   */
+  deliver(msg: TransferIn): boolean {
+    const sink = this.sinks.get(msg.streamId);
+    if (!sink || !sink.active || sink.closed || !sink.transferFn) return false;
+    sink.transferFn(msg);
+    return true;
   }
 
   /** The action failed or its result could not be sent: stop silently. */

@@ -56,6 +56,8 @@ export interface GameSetup {
   secret: string;
   agent: WsClient;
   serverId: string;
+  /** Permanent token of the fake agent (reconnect tests). */
+  agentToken: string;
   rpcs: Received[];
   behaviour: AgentBehaviour;
   headers: Record<string, string>;
@@ -221,6 +223,7 @@ export async function withGames(
     ...admin,
     agent: e.agent,
     serverId: e.serverId,
+    agentToken: e.agentToken,
     rpcs,
     behaviour,
     headers: authHeaders(admin.cookie),

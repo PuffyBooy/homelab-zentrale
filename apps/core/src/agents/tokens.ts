@@ -53,8 +53,12 @@ export class AgentTokens {
    * exists and its agent is not revoked (a revoked server is taken over, see
    * authenticate).
    */
-  createEnrollment(name: string, location: string): { token: string; expiresAt: number } {
+  createEnrollment(
+    name: string,
+    location: string,
+  ): { id: string; token: string; expiresAt: number } {
     const now = this.now();
+    const id = randomToken(16);
     const token = randomToken(32);
     const expiresAt = now + ENROLL_TTL_MS;
     this.db.transaction((tx) => {
@@ -72,7 +76,7 @@ export class AgentTokens {
         .run();
       tx.insert(enrollTokens)
         .values({
-          id: randomToken(16),
+          id,
           name,
           location,
           tokenHash: enrollTokenHash(token),
@@ -81,7 +85,41 @@ export class AgentTokens {
         })
         .run();
     });
-    return { token, expiresAt };
+    return { id, token, expiresAt };
+  }
+
+  /** State of an enrollment token (onboarding status); never the token. */
+  enrollment(
+    id: string,
+  ): { usedAt: number | null; expiresAt: number; serverId: string | null } | undefined {
+    return this.db
+      .select({
+        usedAt: enrollTokens.usedAt,
+        expiresAt: enrollTokens.expiresAt,
+        serverId: enrollTokens.serverId,
+      })
+      .from(enrollTokens)
+      .where(eq(enrollTokens.id, id))
+      .get();
+  }
+
+  /** Invalidates an unused enrollment token (onboarding cancelled). */
+  cancelEnrollment(id: string): void {
+    this.db
+      .update(enrollTokens)
+      .set({ usedAt: this.now() })
+      .where(and(eq(enrollTokens.id, id), isNull(enrollTokens.usedAt)))
+      .run();
+  }
+
+  /** True if `name` belongs to a server whose agent is not revoked (createEnrollment would throw). */
+  nameTaken(name: string): boolean {
+    const existing = this.db
+      .select({ id: servers.id })
+      .from(servers)
+      .where(eq(servers.name, name))
+      .get();
+    return existing !== undefined && !AgentTokens.isRevoked(this.db, existing.id);
   }
 
   /**

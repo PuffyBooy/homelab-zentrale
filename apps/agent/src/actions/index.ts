@@ -20,6 +20,8 @@ import { deployRun } from './deploy.js';
 import { deployKey } from './deploy-key.js';
 import { gameBackup } from './game-backup.js';
 import { gameBackupsPurge } from './game-backups-purge.js';
+import { gameExport } from './game-export.js';
+import { gameImport } from './game-import.js';
 import { gameRemove } from './game-remove.js';
 import { gameRcon, gameStatus } from './games.js';
 import { ptyClose, ptyInput, ptyOpen, ptyResize } from './pty.js';
@@ -64,6 +66,8 @@ export const handlers: ActionHandlers = {
   'pty.input': ptyInput,
   'pty.resize': ptyResize,
   'pty.close': ptyClose,
+  'game.export': (p, ctx, id) => gameExport(p, ctx, id),
+  'game.import': (p, ctx, id) => gameImport(p, ctx, id),
 };
 
 export function hasGitSegment(p: unknown): boolean {

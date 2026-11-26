@@ -296,6 +296,157 @@ export const streamEndSchema = z.strictObject({
 });
 export type StreamEnd = z.infer<typeof streamEndSchema>;
 
+// ---------------------------------------------------------------------------
+// M11: binary transfer of a game archive (game.export / game.import)
+//
+// Both actions are streaming actions: the rpc id is the stream id (= transfer
+// id). Archive bytes travel as base64 in `transfer.chunk` frames, separate from
+// the text frames of stream.data. The receiver acknowledges with
+// `transfer.ack`; the sender keeps at most TRANSFER_WINDOW chunks unacked.
+//
+// game.export (source agent -> core):
+//   rpc.result ok (accepted) -> stream.data progress lines (archive is built)
+//   -> transfer.begin {bytes, sha256, chunks} -> transfer.chunk seq 0..chunks-1
+//   (core answers transfer.ack) -> transfer.end -> stream.end 0.
+// game.import (core -> target agent):
+//   rpc.result ok (accepted, staging created) -> core sends transfer.chunk
+//   seq 0..chunks-1 (agent answers transfer.ack) -> core sends transfer.end
+//   -> agent verifies size + sha256, checks every archive member
+//   (checkArchiveMember), extracts, sends progress lines, last one
+//   `result {json}` (gameImportDoneDataSchema) -> stream.end 0.
+// Errors: stream.end with code != 0 and `error` = a transferErrorCode.
+// stream.cancel (either side aborts) makes the agent delete its temp files.
+// No chunk or ack for TRANSFER_IDLE_TIMEOUT_MS: the transfer is aborted.
+
+/** Raw bytes per chunk. base64 of 48 KiB is exactly MAX_CHUNK_CHARS (64 Ki chars). */
+export const TRANSFER_CHUNK_BYTES = 48 * 1024;
+/** Max unacknowledged chunks in flight (1,5 MiB). */
+export const TRANSFER_WINDOW = 32;
+/** Abort a transfer after this long without a chunk or an ack. */
+export const TRANSFER_IDLE_TIMEOUT_MS = 60_000;
+/** Largest game archive a migration moves (50 GiB). */
+export const MIGRATION_MAX_BYTES = 50 * 1024 * 1024 * 1024;
+/** Upper bound for the number of chunks of one transfer. */
+export const MAX_TRANSFER_CHUNKS = Math.ceil(MIGRATION_MAX_BYTES / TRANSFER_CHUNK_BYTES);
+/** Max entries (files + dirs) in an imported archive. */
+export const ARCHIVE_MAX_ENTRIES = 1_000_000;
+/** Max length of one archive member path. */
+export const ARCHIVE_MAX_PATH = 1024;
+/** The only top-level member of a game archive (world data, like game.backup). */
+export const GAME_ARCHIVE_ROOT = 'data';
+/**
+ * Import staging folder, on the same file system as the game folders so the
+ * final rename is atomic: /opt/homelab/games/.import-<streamId>/ (a dot name
+ * never matches gameFolderNameSchema).
+ */
+export const IMPORT_STAGING_PREFIX = '.import-';
+
+export const sha256Schema = z.string().regex(/^[0-9a-f]{64}$/);
+const transferBytes = z.number().int().min(1).max(MIGRATION_MAX_BYTES);
+const transferSeq = z
+  .number()
+  .int()
+  .min(0)
+  .max(MAX_TRANSFER_CHUNKS - 1);
+const transferChunkCount = z.number().int().min(1).max(MAX_TRANSFER_CHUNKS);
+
+/** Standard base64 (with padding) of 1..TRANSFER_CHUNK_BYTES bytes. */
+export const transferDataSchema = z
+  .string()
+  .min(4)
+  .max(MAX_CHUNK_CHARS)
+  .regex(/^[A-Za-z0-9+/]+={0,2}$/)
+  .refine((s) => s.length % 4 === 0, { message: 'invalid base64 length' });
+
+/** Agent -> core only (game.export): archive is built, size and checksum are known. */
+export const transferBeginSchema = z.strictObject({
+  type: z.literal('transfer.begin'),
+  streamId: streamIdSchema,
+  bytes: transferBytes,
+  sha256: sha256Schema,
+  chunks: transferChunkCount,
+});
+export type TransferBegin = z.infer<typeof transferBeginSchema>;
+
+/**
+ * Both directions. Chunks are sent in order; every chunk except the last has
+ * exactly TRANSFER_CHUNK_BYTES raw bytes (checked by the receiver). A gap,
+ * duplicate or out-of-order seq aborts the transfer with error `sequence`.
+ */
+export const transferChunkSchema = z.strictObject({
+  type: z.literal('transfer.chunk'),
+  streamId: streamIdSchema,
+  seq: transferSeq,
+  data: transferDataSchema,
+});
+export type TransferChunk = z.infer<typeof transferChunkSchema>;
+
+/** Both directions. `seq` is the highest seq received in order. */
+export const transferAckSchema = z.strictObject({
+  type: z.literal('transfer.ack'),
+  streamId: streamIdSchema,
+  seq: transferSeq,
+});
+export type TransferAck = z.infer<typeof transferAckSchema>;
+
+/** Both directions: after the last chunk. The receiver compares all three values. */
+export const transferEndSchema = z.strictObject({
+  type: z.literal('transfer.end'),
+  streamId: streamIdSchema,
+  chunks: transferChunkCount,
+  bytes: transferBytes,
+  sha256: sha256Schema,
+});
+export type TransferEnd = z.infer<typeof transferEndSchema>;
+
+/** Value of stream.end.error for failed game.export / game.import. */
+export const transferErrorCodeSchema = z.enum([
+  /** Archive larger than maxBytes / announced bytes. */
+  'too_large',
+  /** Received bytes or sha256 differ from transfer.end. */
+  'checksum_mismatch',
+  /** An archive member failed checkArchiveMember, or tar failed to list/extract. */
+  'bad_archive',
+  /** Gap, duplicate or out-of-order chunk, or a chunk with the wrong size. */
+  'sequence',
+  /** Nothing received for TRANSFER_IDLE_TIMEOUT_MS. */
+  'timeout',
+  /** stream.cancel received. */
+  'cancelled',
+  /** Target game folder already has a data/ folder. */
+  'exists',
+  /** Disk full or another I/O error. */
+  'io',
+]);
+export type TransferErrorCode = z.infer<typeof transferErrorCodeSchema>;
+
+export type ArchiveMemberKind = 'file' | 'dir' | 'symlink' | 'hardlink' | 'other';
+export type ArchiveMemberCheck = { ok: true } | { ok: false; reason: string };
+
+/**
+ * Checks one member of an archive before game.import extracts anything.
+ * Allowed: regular files and directories named `data`, `data/` or `data/...`.
+ * Rejected: absolute paths, `..` / `.` / empty segments, `./` prefixes, NUL and
+ * control characters, paths longer than ARCHIVE_MAX_PATH, and every symlink,
+ * hard link, device, FIFO or socket. The agent lists the whole archive first
+ * and extracts only if every member passes.
+ */
+export function checkArchiveMember(path: string, kind: ArchiveMemberKind): ArchiveMemberCheck {
+  if (kind !== 'file' && kind !== 'dir') return { ok: false, reason: `${kind} not allowed` };
+  if (path.length === 0 || path.length > ARCHIVE_MAX_PATH) return { ok: false, reason: 'length' };
+  // eslint-disable-next-line no-control-regex
+  if (/[\u0000-\u001f\u007f]/.test(path)) return { ok: false, reason: 'control character' };
+  if (path.startsWith('/')) return { ok: false, reason: 'absolute path' };
+  const trimmed = kind === 'dir' && path.endsWith('/') ? path.slice(0, -1) : path;
+  const segs = trimmed.split('/');
+  if (segs.some((s) => s === '' || s === '.' || s === '..')) {
+    return { ok: false, reason: 'path must be normalized' };
+  }
+  if (segs[0] !== GAME_ARCHIVE_ROOT) return { ok: false, reason: 'outside data/' };
+  if (kind === 'file' && segs.length === 1) return { ok: false, reason: 'data must be a folder' };
+  return { ok: true };
+}
+
 export const pingSchema = z.strictObject({ type: z.literal('ping'), ts: isoTs });
 export const pongSchema = z.strictObject({ type: z.literal('pong'), ts: isoTs });
 
@@ -309,6 +460,10 @@ export const agentToCoreSchema = z.discriminatedUnion('type', [
   streamEndSchema,
   pingSchema,
   pongSchema,
+  transferBeginSchema,
+  transferChunkSchema,
+  transferAckSchema,
+  transferEndSchema,
 ]);
 export type AgentToCore = z.infer<typeof agentToCoreSchema>;
 
@@ -482,6 +637,36 @@ export const rpcParamsByAction = {
     gameId: gameFolderNameSchema,
     olderThanDays: z.number().int().min(1).max(3650),
   }),
+  /**
+   * M11, stream (see "binary transfer" above). Builds a tar.zst of
+   * /opt/homelab/games/<gameId>/data (same content and save-off/flush as
+   * game.backup; compose.yml and .env are NOT included, the core rewrites them
+   * on the target) into /opt/homelab/backups/<gameId>/.export-<streamId>.tar.zst
+   * (O_EXCL, no symlinks), then sends it with transfer.begin/chunk/end. The temp
+   * file is deleted at stream end or cancel. The game folder is left unchanged.
+   * The agent builds the path itself from gameId; no path comes from the wire.
+   */
+  'game.export': z.strictObject({
+    gameId: gameFolderNameSchema,
+    maxBytes: z.number().int().min(1).max(MIGRATION_MAX_BYTES).default(MIGRATION_MAX_BYTES),
+  }),
+  /**
+   * M11, stream. Receives an archive into
+   * /opt/homelab/games/.import-<streamId>/, verifies bytes and sha256, checks
+   * every member with checkArchiveMember, extracts without owners/permissions
+   * of the archive and renames data/ to /opt/homelab/games/<gameId>/data.
+   * Refused before the rpc.result with `busy` when that data/ already exists
+   * or an import for gameId is running, with `bad_path` when the game folder
+   * exists but is not a real directory. The game folder itself may exist
+   * (compose.write). Never starts the game. Result: last progress line
+   * `result {json}` (gameImportDoneDataSchema).
+   */
+  'game.import': z.strictObject({
+    gameId: gameFolderNameSchema,
+    bytes: z.number().int().min(1).max(MIGRATION_MAX_BYTES),
+    sha256: sha256Schema,
+    chunks: z.number().int().min(1).max(MAX_TRANSFER_CHUNKS),
+  }),
   /** Stream. */
   'deploy.run': z.strictObject({
     dir: homelabPathSchema,
@@ -521,6 +706,8 @@ export const streamingActions: readonly RpcAction[] = [
   'game.backup',
   'deploy.run',
   'pty.open',
+  'game.export',
+  'game.import',
 ];
 /** Actions that need HZ_AGENT_ALLOW_TERMINAL=1 on the agent and step-up in the core. */
 export const terminalActions: readonly RpcAction[] = [
@@ -584,6 +771,9 @@ export const coreToAgentSchema = z.discriminatedUnion('type', [
   streamCancelSchema,
   pingSchema,
   pongSchema,
+  transferChunkSchema,
+  transferAckSchema,
+  transferEndSchema,
 ]);
 export type CoreToAgent = z.infer<typeof coreToAgentSchema>;
 
@@ -626,6 +816,14 @@ export const gameBackupsPurgeDataSchema = z.strictObject({
   removed: z.number().int().nonnegative(),
 });
 export type GameBackupsPurgeData = z.infer<typeof gameBackupsPurgeDataSchema>;
+/** game.import: JSON after the `result ` prefix of the last progress line. */
+export const gameImportDoneDataSchema = z.strictObject({
+  bytes: z.number().int().min(1).max(MIGRATION_MAX_BYTES),
+  sha256: sha256Schema,
+  /** Number of files and folders extracted. */
+  entries: z.number().int().nonnegative().max(ARCHIVE_MAX_ENTRIES),
+});
+export type GameImportDoneData = z.infer<typeof gameImportDoneDataSchema>;
 export const ptyOpenDataSchema = z.strictObject({ streamId: streamIdSchema });
 export const gameStatusDataSchema = z.strictObject({
   online: z.boolean(),

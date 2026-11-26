@@ -8,6 +8,7 @@ import type {
   CheckSummary,
   ContainerSummary,
   GameSummary,
+  Migration,
   ServerDetail,
   ServerSummary,
 } from '@hz/shared';
@@ -284,6 +285,31 @@ export function template(over: Partial<TemplateInfo> = {}): TemplateInfo {
       { key: 'SEED', label: 'Seed', type: 'text', default: '', optional: true },
       { key: 'ENABLE_WHITELIST', label: 'Whitelist', type: 'boolean', default: true },
     ],
+    ...over,
+  };
+}
+
+/** Migration like GET /api/games/:id/migration (M11), in phase transfer. */
+export function migration(over: Partial<Migration> = {}): Migration {
+  return {
+    id: 'mig_00000001',
+    gameId: 'game-000001',
+    sourceServerId: 'srv-000001',
+    sourceServerName: 'heimserver',
+    targetServerId: 'srv-000002',
+    targetServerName: 'oracle-a1',
+    phase: 'transfer',
+    failedPhase: null,
+    progress: { bytesDone: Math.round(1.2 * 1024 ** 3), bytesTotal: Math.round(3.4 * 1024 ** 3) },
+    sha256: null,
+    error: null,
+    errorText: null,
+    rollback: null,
+    ports: [{ name: 'game', port: 25570, protocol: 'tcp', count: 1, local: false }],
+    forwardingHint: null,
+    startedAt: '2026-11-26T22:00:00.000Z',
+    updatedAt: '2026-11-26T22:03:00.000Z',
+    finishedAt: null,
     ...over,
   };
 }
