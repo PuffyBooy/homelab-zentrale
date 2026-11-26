@@ -84,6 +84,7 @@ const MODULE_PREFIXES: Record<ModuleId, readonly string[]> = {
   fail2ban: ['/api/fail2ban'],
   discordbot: ['/api/discord-bot'],
   voice: ['/api/voice'],
+  cloud: ['/api/cloud'],
 };
 
 function under(path: string, prefix: string): boolean {

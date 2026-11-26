@@ -956,3 +956,60 @@ export const whitelistRequests = sqliteTable(
 export type GameScheduleRow = typeof gameSchedules.$inferSelect;
 export type GameNotifyRow = typeof gameNotify.$inferSelect;
 export type WhitelistRequestRow = typeof whitelistRequests.$inferSelect;
+
+// ---- M22: cloud servers ---------------------------------------------------------
+
+/** A VM ordered at a cloud provider (cloud/service.ts). */
+export const cloudMachines = sqliteTable(
+  'cloud_machines',
+  {
+    id: text('id').primaryKey(),
+    /** CloudProvider (azure). */
+    provider: text('provider').notNull(),
+    /** VM name in Azure, Tailscale host name and server name. */
+    name: text('name').notNull().unique(),
+    size: text('size').notNull(),
+    region: text('region').notNull(),
+    diskType: text('disk_type').notNull(),
+    diskGb: integer('disk_gb').notNull(),
+    publicIpEnabled: integer('public_ip_enabled', { mode: 'boolean' }).notNull(),
+    publicIp: text('public_ip'),
+    /** Server row of the enrolled agent. */
+    serverId: text('server_id').references(() => servers.id, { onDelete: 'set null' }),
+    /** onboarding_codes.id of the current install code. */
+    onboardingId: text('onboarding_id'),
+    /** CloudMachineState. */
+    state: text('state').notNull(),
+    stateText: text('state_text'),
+    /** One of CLOUD_ERRORS. */
+    error: text('error'),
+    idleMinutes: integer('idle_minutes').notNull(),
+    idleSince: integer('idle_since'),
+    /** CloudPendingGame, encrypted (AAD cloud_machines.pending_game:<id>). */
+    pendingGameJson: text('pending_game_json'),
+    /** Compute price per hour confirmed at the order (EUR). */
+    computeEurPerHour: real('compute_eur_per_hour').notNull(),
+    /** 'live' | 'estimate' */
+    priceSource: text('price_source').notNull().default('estimate'),
+    stateChangedAt: integer('state_changed_at').notNull(),
+    createdAt: integer('created_at').notNull(),
+    /** Last change, also the last usage accounting (restart-safe running time). */
+    updatedAt: integer('updated_at').notNull(),
+  },
+  (t) => [index('cloud_machines_server').on(t.serverId)],
+);
+
+/** Running seconds of a machine per calendar month (YYYY-MM in HZ_TIMEZONE). */
+export const cloudUsage = sqliteTable(
+  'cloud_usage',
+  {
+    machineId: text('machine_id')
+      .notNull()
+      .references(() => cloudMachines.id, { onDelete: 'cascade' }),
+    month: text('month').notNull(),
+    runningSeconds: integer('running_seconds').notNull().default(0),
+  },
+  (t) => [primaryKey({ columns: [t.machineId, t.month] })],
+);
+
+export type CloudMachineRow = typeof cloudMachines.$inferSelect;

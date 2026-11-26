@@ -801,4 +801,47 @@ CREATE INDEX whitelist_requests_game ON whitelist_requests(game_id, created_at);
 CREATE INDEX whitelist_requests_share ON whitelist_requests(share_id, created_at);
 `,
   },
+  {
+    version: 16,
+    name: 'cloud_machines',
+    // M22 Cloud-Server (apps/core/src/cloud). One row per ordered VM. pending_game_json:
+    // the gameserver to create once the agent enrolled, AES-256-GCM via crypto.ts (AAD
+    // cloud_machines.pending_game:<id>, template fields may be secret). compute_eur_per_hour:
+    // the compute price confirmed at the order. cloud_usage: running seconds per machine and
+    // month (YYYY-MM in HZ_TIMEZONE). Azure account settings live in `settings` (cloud.azure.*).
+    sql: `
+CREATE TABLE cloud_machines (
+  id TEXT PRIMARY KEY,
+  provider TEXT NOT NULL,
+  name TEXT NOT NULL UNIQUE,
+  size TEXT NOT NULL,
+  region TEXT NOT NULL,
+  disk_type TEXT NOT NULL,
+  disk_gb INTEGER NOT NULL,
+  public_ip_enabled INTEGER NOT NULL,
+  public_ip TEXT,
+  server_id TEXT REFERENCES servers(id) ON DELETE SET NULL,
+  onboarding_id TEXT,
+  state TEXT NOT NULL,
+  state_text TEXT,
+  error TEXT,
+  idle_minutes INTEGER NOT NULL,
+  idle_since INTEGER,
+  pending_game_json TEXT,
+  compute_eur_per_hour REAL NOT NULL,
+  price_source TEXT NOT NULL DEFAULT 'estimate',
+  state_changed_at INTEGER NOT NULL,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+CREATE INDEX cloud_machines_server ON cloud_machines(server_id);
+
+CREATE TABLE cloud_usage (
+  machine_id TEXT NOT NULL REFERENCES cloud_machines(id) ON DELETE CASCADE,
+  month TEXT NOT NULL,
+  running_seconds INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (machine_id, month)
+);
+`,
+  },
 ];
