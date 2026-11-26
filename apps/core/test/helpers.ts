@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Writable } from 'node:stream';
 import type { FastifyInstance, LightMyRequestResponse } from 'fastify';
-import { buildApp } from '../src/app.js';
+import { buildApp, type AppDeps } from '../src/app.js';
 import { totpCode } from '../src/auth/totp.js';
 import { loadConfig } from '../src/config.js';
 import { openDatabase, type DbHandle } from '../src/db/index.js';
@@ -39,6 +39,8 @@ export async function makeApp(
     env?: Record<string, string>;
     captureLogs?: boolean;
     db?: DbHandle;
+    agentOptions?: AppDeps['agentOptions'];
+    liveOptions?: AppDeps['liveOptions'];
   } = {},
 ): Promise<TestApp> {
   const clock: TestClock = {
@@ -59,6 +61,10 @@ export async function makeApp(
   const app = await buildApp(config, {
     db,
     now: () => clock.t,
+    // Tests move the fake clock and call hzCore.scheduler.tick() themselves.
+    startScheduler: false,
+    ...(opts.agentOptions ? { agentOptions: opts.agentOptions } : {}),
+    ...(opts.liveOptions ? { liveOptions: opts.liveOptions } : {}),
     ...(opts.captureLogs
       ? {
           logStream: new Writable({

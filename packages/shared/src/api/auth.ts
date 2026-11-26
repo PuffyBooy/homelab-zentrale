@@ -122,6 +122,14 @@ export const errorCodeSchema = z.enum([
   'not_found',
   'conflict',
   'internal',
+  /** The agent of this server is not connected (409). */
+  'agent_offline',
+  /** The agent answered the RPC with an error (502). */
+  'agent_error',
+  /** The agent did not answer in time (504). */
+  'agent_timeout',
+  /** confirmName does not match the server name (400). */
+  'confirm_mismatch',
 ]);
 export type ErrorCode = z.infer<typeof errorCodeSchema>;
 export const errorResponseSchema = z.strictObject({

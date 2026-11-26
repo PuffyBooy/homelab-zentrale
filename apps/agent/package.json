@@ -4,10 +4,24 @@
   "private": true,
   "description": "Server agent: metrics, allowlisted actions, outbound WebSocket to core",
   "type": "module",
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "dev": "tsx watch --conditions=@hz/source src/index.ts",
     "start": "node dist/index.js",
     "typecheck": "tsc -p tsconfig.json",
     "build": "tsc -p tsconfig.build.json"
+  },
+  "dependencies": {
+    "@hz/shared": "workspace:*",
+    "dockerode": "^5.0.1",
+    "systeminformation": "^5.33.26",
+    "ws": "^8.23.0",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@types/dockerode": "^4.0.2",
+    "@types/ws": "^8.18.2"
   }
 }

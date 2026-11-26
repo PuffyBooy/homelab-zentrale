@@ -15,6 +15,11 @@ Alles hier braucht deine Zugänge oder ist nicht rückgängig zu machen. Bis dah
 - **Branch-Namen:** AGENTS.md wünscht pro Meilenstein einen Branch `m<N>-<name>`. Diese Sitzung darf technisch nur auf einen festen Branch pushen. Annahme: Jeder Meilenstein ist trotzdem ein eigener PR mit Titel `M<N>: …`, der Branch wird nach jedem Merge neu von `main` gestartet. Soll ich künftig `m<N>-…`-Branches verwenden?
 - **CodeQL / Dependency-Review:** Das Repo ist privat. GitHubs CodeQL-Code-Scanning und die Dependency-Review-Action brauchen dafür „GitHub Code Security“ (kostenpflichtig). Annahme: Stattdessen laufen Semgrep (SAST), Gitleaks (Secrets in der ganzen Git-Historie), Trivy (Abhängigkeiten, Dockerfiles, Image) und `pnpm audit` in `.github/workflows/security.yml`. Wenn du Code Security aktivierst oder das Repo öffentlich machst, ergänze ich CodeQL in 5 Minuten.
 
+- **Server hinzufügen ohne Step-up?** Das Erzeugen eines Enrollment-Tokens (15 Min, einmalig) verlangt derzeit keine erneute TOTP-Eingabe, Widerrufen und Löschen schon. Soll auch das Hinzufügen Step-up brauchen?
+- **Agent-Image:** Es gibt noch keine Registry. Annahme: Das Agent-Image wird auf jedem Server lokal gebaut (`deploy/install-agent.sh`). Alternative: GitHub Container Registry (`ghcr.io/puffybooy/homelab-agent`), dann müsste das Repo-Paket für die Server lesbar sein. Soll ich das einrichten?
+- **Neu einschreiben unter gleichem Namen:** Ein widerrufener Server muss gelöscht werden, bevor er sich unter demselben Namen neu anmelden kann (dabei geht der Verlauf verloren). Soll ein Re-Enrollment den alten Eintrag samt Verlauf übernehmen?
+- **Level für Updates/Neustart nötig:** derzeit `warn` (wie SPEC 5.1). Mit Push ab M4 wären das gesammelte Pushes alle 30 Min. Lieber `info` (kein Push)?
+
 ## Annahmen
 
 - Sicherheitstests liegen in Dateien mit `security` im Namen und laufen zusätzlich als eigener Job `security tests` in GitHub Actions.

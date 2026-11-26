@@ -1,0 +1,87 @@
+# Homelab-Zentrale agent, one per server. Installed by deploy/install-agent.sh.
+#   docker compose -f deploy/docker-compose.agent.yml up -d
+# Config (HZ_CORE_URL, HZ_AGENT_TOKEN, HZ_AGENT_NAME, HZ_AGENT_ALLOW_TERMINAL) comes from
+# /etc/homelab-agent/agent.env (mode 0600, outside /opt/homelab so no action can rewrite it).
+#
+# The agent opens no port. It dials out to wss://<core>.ts.net/agent (docs/NETWORK.md).
+#
+# Why each right is needed (everything else is dropped):
+# - /var/run/docker.sock        list/start/stop containers (and compose in later milestones).
+#                               NOTE: access to the Docker socket is equivalent to root on the host.
+# - pid: host                   /proc shows host processes; /host/proc/1 is the host init, which
+#                               nsenter and the host file view (/host/proc/1/root) need.
+# - network_mode: host          host network counters, listening ports (ss), tailscale IP, and
+#                               checks/pings from this server's own network.
+# - /proc -> /host/proc:ro      host mount table and network counters, read-only.
+# - /sys -> /host/sys:ro        hardware sensors (systeminformation also reads /sys), read-only.
+# - /opt/homelab (same path)    the only directory actions may write to (compose/games later).
+#                               Same path inside and outside, so compose bind mounts match the host.
+# - user 0:0 + capabilities     root inside the container, limited to these capabilities:
+#     SYS_ADMIN, SYS_PTRACE, SYS_CHROOT  nsenter into host PID 1 (setns, /proc/1/ns, /proc/1/root)
+#                                        for apt, journalctl, fail2ban-client, systemctl reboot
+#     DAC_READ_SEARCH                    read host logs not owned by root (auth.log is syslog:adm)
+#     DAC_OVERRIDE, CHOWN, FOWNER, FSETID, SETUID, SETGID
+#                                        apt-get/dpkg (cleanup: purge old kernels) via nsenter, /data
+#     NET_RAW                            check.ping
+# - apparmor=unconfined         the docker-default AppArmor profile forbids ptrace-reading host
+#                               PID 1 (needed for nsenter). Hosts without AppArmor ignore this.
+# - read_only + tmpfs /tmp, no-new-privileges: the image itself stays immutable.
+name: homelab-agent
+
+services:
+  agent:
+    build:
+      context: ..
+      dockerfile: apps/agent/Dockerfile
+    image: ${HZ_AGENT_IMAGE:-homelab-zentrale/agent:local}
+    container_name: homelab-agent
+    restart: unless-stopped
+    env_file:
+      - path: ${HZ_AGENT_ENV_FILE:-/etc/homelab-agent/agent.env}
+        required: false
+    environment:
+      HZ_AGENT_DATA: /data
+      HZ_AGENT_HOST_EXEC: nsenter
+      HZ_AGENT_HOST_PROC: /host/proc
+      HZ_AGENT_HOST_ROOT: /host/proc/1/root
+    user: '0:0'
+    pid: host
+    network_mode: host
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    cap_add:
+      - SYS_ADMIN
+      - SYS_PTRACE
+      - SYS_CHROOT
+      - DAC_READ_SEARCH
+      - DAC_OVERRIDE
+      - CHOWN
+      - FOWNER
+      - FSETID
+      - SETUID
+      - SETGID
+      - NET_RAW
+    security_opt:
+      - no-new-privileges:true
+      - apparmor=unconfined
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - type: bind
+        source: /opt/homelab
+        target: /opt/homelab
+        bind:
+          create_host_path: true
+      - agent-data:/data
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: '3'
+
+volumes:
+  agent-data:

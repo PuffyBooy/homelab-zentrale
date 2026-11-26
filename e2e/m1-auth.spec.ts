@@ -1,7 +1,7 @@
 import { mkdirSync } from 'node:fs';
 import { expect, test, type BrowserContext, type Page } from '@playwright/test';
-import { Secret, TOTP } from 'otpauth';
 import { E2E_SETUP_TOKEN } from '../playwright.config.js';
+import { ORIGIN, PASSWORD, Totp, USER } from './helpers/auth.js';
 
 /**
  * M1 acceptance: first setup -> TOTP -> recovery codes -> overview with navigation,
@@ -10,29 +10,18 @@ import { E2E_SETUP_TOKEN } from '../playwright.config.js';
  */
 
 const SHOTS = 'docs/screenshots/m1';
-const USER = 'alex';
-const PASSWORD = 'korrekt-pferd-batterie-heftklammer';
-const ORIGIN = 'http://127.0.0.1:8099';
 
 test.describe.configure({ mode: 'serial', timeout: 90_000 });
 
 let context: BrowserContext;
 let page: Page;
-let totp: TOTP;
-let lastStep = -1;
+let totp: Totp;
 const foreign: string[] = [];
 const cspErrors: string[] = [];
 
 /** A TOTP code for a step the core has not seen yet (codes are single-use). */
-async function freshCode(): Promise<string> {
-  let step = Math.floor(Date.now() / 1000 / totp.period);
-  if (step <= lastStep) {
-    const wait = (lastStep + 1) * totp.period * 1000 - Date.now() + 250;
-    await new Promise((r) => setTimeout(r, Math.max(wait, 0)));
-    step = Math.floor(Date.now() / 1000 / totp.period);
-  }
-  lastStep = step;
-  return totp.generate();
+function freshCode(): Promise<string> {
+  return totp.fresh();
 }
 
 async function shot(name: string): Promise<void> {
@@ -100,7 +89,7 @@ test('first setup: account, TOTP with QR, recovery codes, overview', async () =>
     .toBeGreaterThan(0);
   const secret = await page.getByTestId('totp-secret').getAttribute('data-secret');
   expect(secret).toMatch(/^[A-Z2-7]+$/);
-  totp = new TOTP({ secret: Secret.fromBase32(secret ?? ''), digits: 6, period: 30 });
+  totp = new Totp(secret ?? '');
 
   await page.getByLabel('Code aus der App').fill(await freshCode());
   await page.getByRole('button', { name: 'Bestätigen' }).click();
@@ -213,7 +202,7 @@ test('login with a wrong TOTP code shows an error', async () => {
   await expect(page).toHaveURL(`${ORIGIN}/login`);
   await allThemes('login');
 
-  const valid = totp.generate();
+  const valid = totp.peek();
   const wrong = String((Number(valid) + 1) % 1_000_000).padStart(6, '0');
   await page.getByLabel('Benutzername').fill(USER);
   await page.getByLabel('Passwort').fill(PASSWORD);
