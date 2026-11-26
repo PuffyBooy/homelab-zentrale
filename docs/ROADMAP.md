@@ -141,6 +141,18 @@ Arbeite die Meilensteine **in dieser Reihenfolge** ab. Jeder Meilenstein bekommt
 
 ---
 
+## M18: Zusatzmodule Log-Suche, Schwachstellen-Scan, Fail2ban, Discord-Bot, Sprachsteuerung
+**Ziel:** Fünf optionale Module (alle Standard aus, unter Einstellungen → Module). Discord-Bot und Sprachsteuerung steuern von außerhalb der Zentrale und brauchen zum Einschalten Step-up. Keine neue Migration (Einstellungen im `settings`-Speicher), damit parallele Meilensteine nicht kollidieren.
+
+- **WP Schema** (`packages/shared`): Agent-Aktionen in `agent-ops.ts` (`logs.search`, `image.scan`, `fail2ban.status`, `fail2ban.unban`), API in `api/ops.ts`, Module in `api/modules.ts`, Share-Protokoll `via: discord`.
+- **WP Agent ∥** (`apps/agent`): Log-Suche als reine Textsuche (nie Regex) über `docker logs --since/--tail`; Scan mit dem per Digest gepinnten Trivy-Image als Nachbar-Container mit `--image-src remote` (kein Docker-Socket, read-only, `cap-drop ALL`, Speicher- und PID-Limit), lokal gebaute Images gelten als „nicht prüfbar“; Fail2ban über `fail2ban-client` auf dem Host, Entsperren nur für vorhandene Jails und gültige IPs.
+- **WP Core ∥** (`apps/core/src/ops`, `discord`, `voice`): Log-Suche über alle Server (Rate-Limit, Suchtext nie im Log), nächtlicher Scan zur eingestellten Uhrzeit mit `warn`-Meldung pro Container, Fail2ban-Übersicht mit 30 s Cache und Entsperren mit Protokoll. Discord-Bot über das Discord-Gateway (nur ausgehend, kein öffentlicher Endpunkt), Slash-Befehle `/status`, `/start`, `/stop`, `/restart` nur für Freunde, deren Discord-ID der Admin an einen aktiven Benutzerlink gebunden hat, mit genau dessen Rechten und RAM-Reserve. Sprachsteuerung über die bestehende Home-Assistant-Verbindung: ein `input_boolean` pro Gameserver startet/stoppt, ein `input_text` zeigt den Status (für Echo Show und Alexa), Abklingzeit 1 Min.
+- **WP Web ∥** (`apps/web`): Seite „Log-Suche“, Seite „Sicherheit“ (Schwachstellen, Fail2ban), Einstellungen „Discord-Bot“ und „Sprachsteuerung“, Schalter unter Module.
+
+**Abnahme:** Eine Suche findet eine Zeile in Containern zweier Sim-Server; ein Scan-Ergebnis mit kritischer Lücke erzeugt eine Meldung, die nach dem Fix verschwindet; eine gesperrte IP wird entsperrt; ein gebundener Freund startet per Slash-Befehl seinen Gameserver, ein fremder nicht; ein HA-Schalter startet den Gameserver und spiegelt den Status zurück. Sicherheitstests: Module aus = 404, keine Route ohne Session, kein Regex aus Nutzereingabe, kein Docker-Socket und kein Host-Pfad für Trivy, Bot-Token nie in Antwort oder Log, Discord nur von der eingestellten Guild, abgelaufene/widerrufene Links wirken nicht, Gateway-URL nur `*.discord.gg`, Sprachsteuerung nur `input_boolean`/`input_text`.
+
+---
+
 ## Definition of Done (für jeden PR)
 - Code, Tests und Doku sind aktuell (`docs/` mitpflegen, wenn sich etwas ändert)
 - Keine `any`, keine auskommentierten Blöcke, keine TODOs ohne Issue

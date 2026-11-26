@@ -208,6 +208,14 @@ Verlauf: Uptime in % für 24 h / 7 d / 30 d, Antwortzeit als `Sparkline`.
 - **Wochenbericht** sonntags 19:00: Uptime pro Server/Website, Ausfälle, Deploys, Backups, Speicherverbrauch.
 - Texte nach den Regeln in `design/README.md` → „Stimme und Text“.
 
+## 9a. Betrieb: Log-Suche, Schwachstellen-Scan, Fail2ban
+
+Drei optionale Module (Einstellungen → Module, ab Werk aus). Ein ausgeschaltetes Modul antwortet mit 404 `module_disabled`.
+
+- **Log-Suche:** Ein Suchfeld durchsucht die Container-Logs aller verbundenen Server (oder einer Auswahl) gleichzeitig. Reiner Text (nie RegExp), Zeitraum 5 Min bis 7 Tage, optional Containername als Filter, höchstens 500 Treffer, neueste zuerst. Pro Server sieht man, ob er durchsucht wurde (offline, Agent zu alt, kein passender Container). Höchstens 10 Suchen pro Minute; der Suchtext landet nie im Log, im Audit nur seine Länge.
+- **Schwachstellen-Scan:** Jede Nacht (Uhrzeit einstellbar, Standard 03:30) scannt Trivy auf dem Agent die Images aller laufenden Container. Die Zentrale nennt nur den Container, nie ein Image. Ergebnis pro Container: Anzahl kritischer und hoher Lücken mit CVE und behobener Version. Ab der eingestellten Schwelle (nur kritische oder auch hohe) gibt es eine WARN-Meldung („2 kritische Lücken in nginx“), die sich von selbst erledigt, wenn die Lücken weg sind oder der Container verschwindet. Manuell höchstens ein Lauf alle 10 Min.
+- **Fail2ban:** Jails und gesperrte IPs jedes Servers (live vom Agent, 30 s zwischengespeichert). Eine einzelne IP lässt sich in einem Jail entsperren; das landet im Audit-Log.
+
 ## 10. Wohnung (Home Assistant)
 
 - Verbindung über URL und Long-Lived Access Token (verschlüsselt gespeichert), WebSocket-API für Live-Zustände.

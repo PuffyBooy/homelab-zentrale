@@ -25,6 +25,10 @@ Alles hier braucht deine Zugänge oder ist nicht rückgängig zu machen. Bis dah
 
 **Noch von Hand abzunehmen** (braucht echte Zugänge): Push am Handy (M4); ein echter Deploy eines Test-Repos mit `compose.yml` auf den Heimserver-Agent (M5, automatisiert nur mit Fake-GitHub, Fake-Agent und echtem git gegen ein lokales Repo getestet). Der echte Türöffner (BTicino/Shelly) mit deiner HA (M8, im CI nur mit der HA-Demo getestet). Benutzerlink von außen über das Gateway auf oracle-a1 (M7, im CI nur lokal getestet). SMART auf dem echten UGREEN-NAS (M13, im CI nur mit simuliertem `smartctl` und einem nachgebauten `/sys` getestet).
 
+24. **Log-Suche, Schwachstellen-Scan, Fail2ban (ab M18):** Unter Einstellungen → Module einschalten. Danach auf jedem Server den Agent neu ausrollen (`deploy/install-agent.sh` erneut ausführen), ältere Agents melden „Agent zu alt“. Der Scan lädt beim ersten Lauf das Trivy-Image und dessen Datenbank (rund 1 GB im Volume `hz-trivy-cache` pro Server); Uhrzeit unter Sicherheit → Schwachstellen. Fail2ban muss auf dem Host installiert sein.
+25. **Discord-Bot (ab M18):** Im Discord Developer Portal eine Application anlegen, unter „Bot“ den Token kopieren, Application-ID und die ID deines Discord-Servers (Entwicklermodus → Rechtsklick auf den Server → „Server-ID kopieren“) in der Zentrale unter Einstellungen → Discord-Bot eintragen (fragt nach dem TOTP-Code), dann den angezeigten Einladungslink öffnen. Pro Freund im Benutzerlink-Abschnitt die Discord-User-ID eintragen; nur diese Freunde dürfen Befehle nutzen.
+26. **Echo Show und Alexa (ab M18, Sprachsteuerung):** In Home Assistant pro Gameserver zwei Helfer anlegen: Schalter (`input_boolean.minecraft`) und optional Text (`input_text.minecraft_status`). Den Schalter an Alexa freigeben: mit Nabu Casa (Home Assistant Cloud) oder kostenlos mit `emulated_hue` im LAN. Dann in der Zentrale unter Einstellungen → Sprachsteuerung zuordnen. Auf der Echo Show das HA-Dashboard im Silk-Browser öffnen („Alexa, öffne Silk“) und die Helfer als Karten anzeigen. Die Zentrale selbst bleibt nur über Tailscale erreichbar.
+
 ## Entschieden (26.11.2026)
 
 - Ein PR pro Meilenstein auf dem festen Arbeitsbranch bleibt so.
@@ -52,6 +56,9 @@ Alles hier braucht deine Zugänge oder ist nicht rückgängig zu machen. Bis dah
 
 ## Annahmen
 
+- **Echo Show ohne Wandmodus der Zentrale:** Eine Echo Show kann nicht ins Tailnet, also kann sie die Zentrale (nur `*.ts.net`) nicht öffnen. Statt sie öffentlich zu machen, läuft die Echo-Show-Anzeige über das Home-Assistant-Dashboard im Silk-Browser, das die Zentrale über die HA-Helfer mit Status versorgt. Ein eigener Alexa-Skill bräuchte einen öffentlichen HTTPS-Endpunkt oder eine AWS-Lambda im Tailnet; das ist bewusst nicht gebaut (siehe Zukunftsideen).
+- **Discord-Bot ohne PIN:** Ein Benutzerlink mit PIN wirkt im Bot ohne PIN, weil du die Discord-ID selbst bindest. Wer das nicht will, bindet keine Discord-ID an diesen Link.
+- **Schwachstellen-Scan nur für Registry-Images:** Trivy prüft das Image direkt in der Registry (per Digest), damit der Scanner keinen Docker-Socket braucht. Selbst gebaute Images ohne Registry-Digest stehen als „nicht prüfbar“ da. Gemeldet wird ab „kritisch“ (einstellbar auf „hoch“).
 - **NAS ohne UGOS-Schnittstelle (M13):** UGOS Pro hat keine dokumentierte API. Der Agent liest deshalb den Linux-Unterbau selbst (`/proc/mdstat`, `/sys`, `smartctl`). Speicherpools mit SHR-ähnlichen Mischformen erscheinen als mehrere md-Arrays. Ein UGOS-Update kann Pfade ändern; dann fehlen Teile der Anzeige, nichts geht kaputt.
 - **SMART-Rechte:** SMART braucht `CAP_SYS_RAWIO` und Lesezugriff auf die Platten. Der Agent hat ohnehin Docker-Socket und `SYS_ADMIN` (gleichwertig zu root), das Override verschiebt die Grenze also kaum; es gibt bewusst kein Schreibrecht (`w`) auf Blockgeräte. Ohne Override zeigt die Zentrale Platten, RAID und Volumes, aber keine SMART-Werte, und sagt das.
 
@@ -69,6 +76,8 @@ Alles hier braucht deine Zugänge oder ist nicht rückgängig zu machen. Bis dah
 Sortiert nach Bereich. Nichts davon ist in den Meilensteinen, alles wäre ein eigener kleiner Ausbau.
 
 ### Server und Betrieb
+- Alexa-Skill für Freunde über das Share-Gateway (Status abfragen, Gameserver starten per Stimme mit Benutzerlink-Rechten), falls Sprachsteuerung ohne Home Assistant gewünscht ist.
+- Log-Suche als gespeicherte Suche mit Meldung („Melde mich, wenn `OutOfMemory` vorkommt“).
 - NAS als Backup-Ziel: Gameserver-Backups und der Datenbank-Export automatisch aufs NAS kopieren (M13b).
 - RAID-Prüfung (Scrub) per Zeitplan anstoßen und das Ergebnis melden; btrfs-Scrub und -Fehlerzähler auslesen.
 - Speicherplatz-Prognose: „/volume1 ist in etwa 40 Tagen voll“ aus dem Verlauf.
