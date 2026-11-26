@@ -562,10 +562,19 @@ export class DiscordBotService {
       const s = Math.max(1, Math.ceil((until - now) / 1000));
       return this.reply(rest, i, `Gerade erst ausgeführt. Versuch es in ${s} s nochmal.`);
     }
+    // Claim the cooldown before any await, so two simultaneous commands for the
+    // same game pass only once. A failed attempt releases it again (retry).
+    for (const [k, v] of this.cooldown) if (v <= now) this.cooldown.delete(k);
+    const claim = now + DISCORD_GAME_COOLDOWN_MS;
+    this.cooldown.set(gameId, claim);
+    const release = (): void => {
+      if (this.cooldown.get(gameId) === claim) this.cooldown.delete(gameId);
+    };
     // Starts can take longer than Discord's 3 s: defer, then edit the reply.
     try {
       await rest.callback(i.id, i.token, { type: 5, data: { flags: EPHEMERAL } });
     } catch (err) {
+      release();
       this.deps.log.info(
         { status: err instanceof DiscordRestError ? err.status : 0 },
         'discord defer failed',
@@ -575,10 +584,11 @@ export class DiscordBotService {
     let text: string;
     try {
       const st = await this.deps.shares.action(ctx, command);
+      // The cooldown counts from the finished action (a start can take a while).
       this.cooldown.set(gameId, this.deps.now() + DISCORD_GAME_COOLDOWN_MS);
-      for (const [k, v] of this.cooldown) if (v <= this.deps.now()) this.cooldown.delete(k);
       text = `${plain(st.game.name, 64)}: ${DONE_TEXT[command]}. Status: ${st.game.statusText}.`;
     } catch (err) {
+      release();
       text = this.errorText(err);
     }
     try {

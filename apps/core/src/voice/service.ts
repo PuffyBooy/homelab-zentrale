@@ -161,11 +161,12 @@ export class VoiceService {
     });
   }
 
-  /** Step-up: a new switch entity, or allowing stop. Removing either does not need it. */
+  /** Step-up: a new switch or status entity, or allowing stop. Removing any does not need it. */
   needsStepUp(gameId: string, req: VoiceGameRequest): boolean {
     const prev = this.config()[gameId];
     const switchChanged = req.switchEntity !== null && req.switchEntity !== prev?.switchEntity;
-    return switchChanged || (req.allowStop && !(prev?.allowStop ?? false));
+    const statusChanged = req.statusEntity !== null && req.statusEntity !== prev?.statusEntity;
+    return switchChanged || statusChanged || (req.allowStop && !(prev?.allowStop ?? false));
   }
 
   /** 404 unknown game, 409 switch already used by another game. */

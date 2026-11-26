@@ -10,8 +10,16 @@ import {
   setupBot as setupBotWith,
   type BotSetup,
 } from './discord-bot-helpers.js';
-import { APP_ID, BOT_TOKEN, GUILD_ID, interaction, OTHER_BOT_TOKEN } from './discord-helpers.js';
+import {
+  APP_ID,
+  BOT_TOKEN,
+  FRIEND_ID,
+  GUILD_ID,
+  interaction,
+  OTHER_BOT_TOKEN,
+} from './discord-helpers.js';
 import { DISCORD_API } from '../src/discord/rest.js';
+import { DISCORD_BINDING_LIMIT } from '../src/discord/routes.js';
 import { authHeaders, SAME_ORIGIN } from './helpers.js';
 import { createShare } from './share-helpers.js';
 
@@ -27,6 +35,9 @@ const setupBot = (opts: Parameters<typeof setupBotWith>[1] = {}) =>
   setupBotWith(clients, opts, (b) => {
     current = b;
   });
+
+const dropStepUp = (b: BotSetup) =>
+  b.s.t.db.sqlite.prepare('UPDATE sessions SET step_up_until = NULL').run();
 
 const settings = { token: BOT_TOKEN, applicationId: APP_ID, guildId: GUILD_ID };
 
@@ -97,27 +108,57 @@ describe('discord bot: auth and step-up', () => {
     }
   });
 
-  it('binding: no step-up needed, 404 unknown link, 400 for links without power/restart', async () => {
+  it('binding a user needs step-up, unbinding does not; 404 unknown link, 400 for links without power/restart', async () => {
     const b = await setupBot();
-    const viewOnly = await createShare(b.s, b.game.id, { perms: ['console_read'] });
-    // Drop the step-up createShare may have granted: binding must work without it.
-    b.s.t.db.sqlite.prepare('UPDATE sessions SET step_up_until = NULL').run();
-    const unknown = await put(b, '/api/discord-bot/bindings/abcdefgh1234', {
-      discordUserId: '444444444444444444',
+    const power = await createShare(b.s, b.game.id, { perms: ['power'] });
+    const consoleOnly = await createShare(b.s, b.game.id, { perms: ['console_read'] });
+    dropStepUp(b);
+    // Without step-up: binding is refused and changes nothing.
+    const denied = await put(b, `/api/discord-bot/bindings/${power.id}`, {
+      discordUserId: FRIEND_ID,
     });
-    expect(unknown.statusCode).toBe(404);
-    const bad = await put(b, `/api/discord-bot/bindings/${viewOnly.id}`, {
-      discordUserId: '444444444444444444',
-    });
-    expect(bad.statusCode).toBe(400);
-    const invalid = await put(b, `/api/discord-bot/bindings/${viewOnly.id}`, {
+    expect(denied.statusCode).toBe(403);
+    expect(denied.json()).toMatchObject({ error: 'step_up_required' });
+    const bound = () =>
+      b.bot.service.state().bindings.find((x) => x.shareId === power.id)?.discordUserId;
+    expect(bound()).toBeNull();
+    // Invalid input is still 400 (validated before the step-up check).
+    const invalid = await put(b, `/api/discord-bot/bindings/${consoleOnly.id}`, {
       discordUserId: '<@everyone>',
     });
     expect(invalid.statusCode).toBe(400);
+    // With step-up: binds; 404 unknown link, 400 for a link without power/restart.
     await stepUp(b.s.t, b.s.secret, b.s.cookie);
+    const unknown = await put(b, '/api/discord-bot/bindings/abcdefgh1234', {
+      discordUserId: FRIEND_ID,
+    });
+    expect(unknown.statusCode).toBe(404);
+    const bad = await put(b, `/api/discord-bot/bindings/${consoleOnly.id}`, {
+      discordUserId: FRIEND_ID,
+    });
+    expect(bad.statusCode).toBe(400);
+    expect(
+      (await put(b, `/api/discord-bot/bindings/${power.id}`, { discordUserId: FRIEND_ID }))
+        .statusCode,
+    ).toBe(200);
+    expect(bound()).toBe(FRIEND_ID);
+    // Unbinding works without step-up.
+    dropStepUp(b);
+    const unbind = await put(b, `/api/discord-bot/bindings/${power.id}`, { discordUserId: null });
+    expect(unbind.statusCode).toBe(200);
+    expect(bound()).toBeNull();
+  });
+
+  it('binding changes are rate limited per session (429)', async () => {
+    const b = await setupBot();
     const power = await createShare(b.s, b.game.id, { perms: ['power'] });
-    b.s.t.db.sqlite.prepare('UPDATE sessions SET step_up_until = NULL').run();
-    await bindLink(b, power.id);
+    for (let i = 0; i < DISCORD_BINDING_LIMIT; i += 1) {
+      const res = await put(b, `/api/discord-bot/bindings/${power.id}`, { discordUserId: null });
+      expect(res.statusCode).toBe(200);
+    }
+    const res = await put(b, `/api/discord-bot/bindings/${power.id}`, { discordUserId: null });
+    expect(res.statusCode).toBe(429);
+    expect(res.json()).toMatchObject({ error: 'rate_limited' });
   });
 });
 

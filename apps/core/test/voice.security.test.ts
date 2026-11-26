@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { HttpError } from '../src/http/errors.js';
+import { VOICE_UPDATE_LIMIT } from '../src/voice/routes.js';
 import { stepUp, until, type WsClient } from './agent-helpers.js';
 import { createGame } from './games-helpers.js';
 import { SAME_ORIGIN } from './helpers.js';
@@ -52,18 +53,35 @@ describe('voice: auth and step-up', () => {
     const res = await putGame(v, v.game.id, body);
     expect(res.statusCode).toBe(403);
     expect(res.json()).toMatchObject({ error: 'step_up_required' });
-    expect((await putGame(v, v.game.id, { ...body, switchEntity: null })).statusCode).toBe(200);
+    // A new status entity alone needs it too; clearing everything does not.
+    expect((await putGame(v, v.game.id, { ...body, switchEntity: null })).statusCode).toBe(403);
+    expect(
+      (await putGame(v, v.game.id, { switchEntity: null, statusEntity: null, allowStop: false }))
+        .statusCode,
+    ).toBe(200);
   });
 
-  it('turning allowStop on needs step-up, a status entity alone does not', async () => {
+  it('turning allowStop on or a new status entity needs step-up, removing does not', async () => {
     const v = await setup();
     await stepUp(v.s.t, v.s.secret, v.s.cookie);
     expect((await putGame(v, v.game.id, body)).statusCode).toBe(200);
     dropStepUp(v);
     expect((await putGame(v, v.game.id, { ...body, allowStop: true })).statusCode).toBe(403);
+    // Unchanged entities: no step-up.
+    expect((await putGame(v, v.game.id, body)).statusCode).toBe(200);
+    // Another status entity: step-up.
+    const other = await putGame(v, v.game.id, { ...body, statusEntity: 'input_text.other' });
+    expect(other.statusCode).toBe(403);
+    expect(other.json()).toMatchObject({ error: 'step_up_required' });
+    // Removing the status entity: no step-up.
+    expect((await putGame(v, v.game.id, { ...body, statusEntity: null })).statusCode).toBe(200);
+    // Setting it again after removal is a new entity: step-up.
+    expect((await putGame(v, v.game.id, body)).statusCode).toBe(403);
+    await stepUp(v.s.t, v.s.secret, v.s.cookie);
     expect(
       (await putGame(v, v.game.id, { ...body, statusEntity: 'input_text.other' })).statusCode,
     ).toBe(200);
+    dropStepUp(v);
     // Another switch entity: step-up again.
     expect(
       (await putGame(v, v.game.id, { ...body, switchEntity: 'input_boolean.other' })).statusCode,
@@ -86,6 +104,19 @@ describe('voice: auth and step-up', () => {
     expect(
       (await putGame(v, other, { ...body, switchEntity: 'input_boolean.creative' })).statusCode,
     ).toBe(409);
+  });
+
+  it('game changes are rate limited per session (429)', async () => {
+    const v = await setup();
+    await stepUp(v.s.t, v.s.secret, v.s.cookie);
+    for (let i = 0; i < VOICE_UPDATE_LIMIT; i += 1) {
+      expect((await putGame(v, v.game.id, body)).statusCode).toBe(200);
+    }
+    const res = await putGame(v, v.game.id, body);
+    expect(res.statusCode).toBe(429);
+    expect(res.json()).toMatchObject({ error: 'rate_limited' });
+    v.s.t.clock.advance(60_001);
+    expect((await putGame(v, v.game.id, body)).statusCode).toBe(200);
   });
 });
 

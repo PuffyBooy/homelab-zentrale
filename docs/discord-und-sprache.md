@@ -47,7 +47,7 @@ Die Zentrale stellt den Schalter immer auf den echten Zustand des Spiels zurück
 1. In Home Assistant unter Einstellungen → Geräte & Dienste → Helfer anlegen:
    - „Schalter“ (input_boolean), z. B. `input_boolean.minecraft`
    - optional „Text“ (input_text), z. B. `input_text.minecraft_status`, maximale Länge 100
-2. In der Zentrale unter Sprachsteuerung beim Spiel den Schalter und den Statustext eintragen (Step-up bei neuem Schalter und beim Erlauben von Stoppen).
+2. In der Zentrale unter Sprachsteuerung beim Spiel den Schalter und den Statustext eintragen (Step-up bei neuem Schalter, neuem Statustext und beim Erlauben von Stoppen).
 3. Den Schalter für Alexa freigeben, eine der beiden Varianten:
    - **Nabu Casa** (Home Assistant Cloud): Einstellungen → Sprachassistenten → Alexa → Entität freigeben. Danach in der Alexa-App „Geräte suchen“.
    - **emulated_hue** (lokal, ohne Cloud): in der `configuration.yaml` `emulated_hue:` mit dem Helfer unter `entities` eintragen. Alexa findet den Schalter als Lampe.
@@ -55,3 +55,5 @@ Die Zentrale stellt den Schalter immer auf den echten Zustand des Spiels zurück
 5. **Echo Show:** Im Silk-Browser des Echo Show das Home-Assistant-Dashboard öffnen. Am besten ein eigenes Dashboard mit einer Kachel für den Schalter und einer für den Statustext anlegen.
 
 Modul aus oder Home Assistant nicht verbunden: Die Zentrale tut nichts und ändert auch nichts an den Helfern.
+
+**Wichtig:** Wer den Schalter in Home Assistant umlegen kann, startet das Spiel, ohne Benutzerlink: jeder HA-Benutzer, jede Automation und mit Alexa jeder, der mit der Echo spricht. Mit „Stoppen erlauben“ gilt das auch fürs Stoppen. Nur Spiele zuordnen, bei denen das in Ordnung ist.

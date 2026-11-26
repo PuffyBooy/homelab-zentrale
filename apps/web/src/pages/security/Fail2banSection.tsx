@@ -84,7 +84,7 @@ export function Fail2banTile({
       span={2}
       status={st.status}
       statusLabel={st.label}
-      count={server.state === 'ok' ? String(banned) : undefined}
+      count={server.state === 'ok' ? formatNumber(banned, 0) : undefined}
       flush
     >
       <div data-testid="fail2ban-server">

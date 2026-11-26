@@ -158,7 +158,12 @@ export function LogSearchResults({
 
   return (
     <>
-      <Tile title="Server" icon="server" count={`${searched}/${result.servers.length}`} flush>
+      <Tile
+        title="Server"
+        icon="server"
+        count={`${formatNumber(searched, 0)}/${formatNumber(result.servers.length, 0)}`}
+        flush
+      >
         {result.servers.length === 0 ? (
           <p className="app-empty app-pad">Kein Server verbunden.</p>
         ) : (
@@ -186,7 +191,7 @@ export function LogSearchResults({
       <Tile
         title="Treffer"
         icon="terminal"
-        count={String(result.hits.length)}
+        count={formatNumber(result.hits.length, 0)}
         actions={<span className="app-hit-meta">{formatNumber(result.tookMs / 1000, 1)} s</span>}
         flush
       >

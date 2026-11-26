@@ -7,7 +7,9 @@ import { WebSocket } from 'ws';
  * trigger: cleanup preview and cleanup (M2), container.* and compose.* with a fresh
  * inventory, container.logs as a stream (M3), container.limit (M10), and for M11 the
  * listening ports of the inventory plus game.export / game.import (binary transfer with
- * transfer.begin/chunk/ack/end and a sha256 check). Nothing here runs a real command.
+ * transfer.begin/chunk/ack/end and a sha256 check). With `ops` (M18) it answers
+ * logs.search, image.scan, fail2ban.status and fail2ban.unban from canned data.
+ * Nothing here runs a real command.
  */
 
 /** Same shape as listeningPortSchema in packages/shared. */
@@ -92,6 +94,30 @@ export interface SimAgentOptions {
   exportBytes?: number;
   /** M13: inventory.storage (RAID, volumes, disks); left out when undefined. */
   storage?: Record<string, unknown>;
+  /** M18: answer logs.search, image.scan and fail2ban.* (see SimOps). */
+  ops?: SimOps;
+}
+
+/** M18 canned data for the operations modules. */
+export interface SimOps {
+  /** Log lines per container name (newest last); stderr when the text starts with "ERROR". */
+  logs: Record<string, string[]>;
+  /** image.scan result counts and CVEs per container name; missing: not scannable (local). */
+  scans: Record<
+    string,
+    {
+      vulns: {
+        id: string;
+        pkg: string;
+        installed: string;
+        fixed: string | null;
+        severity: 'CRITICAL' | 'HIGH';
+        title: string;
+      }[];
+    }
+  >;
+  /** fail2ban jails with banned IPs; null: fail2ban not installed. */
+  jails: { name: string; bannedIps: string[] }[] | null;
 }
 
 /** An archive game.import is receiving. */
@@ -477,6 +503,7 @@ export class SimAgent {
       this.answerLimit(id, params);
       return;
     }
+    if (this.o.ops && this.answerOps(id, action, params, this.o.ops)) return;
     if (action.startsWith('container.') || action.startsWith('compose.')) {
       if (!this.act(action, params)) {
         this.send({
@@ -682,6 +709,96 @@ export class SimAgent {
   private cancelTransfer(streamId: string): void {
     this.imports.delete(streamId);
     this.exports.delete(streamId);
+  }
+
+  /** M18 ops actions (only with `ops`); false when the action is not one of them. */
+  private answerOps(
+    id: string,
+    action: string,
+    params: Record<string, unknown>,
+    ops: SimOps,
+  ): boolean {
+    const ok = (data: unknown): void => this.send({ type: 'rpc.result', id, ok: true, data });
+    const fail = (code: string, message: string): void =>
+      this.send({ type: 'rpc.result', id, ok: false, error: { code, message } });
+    if (action === 'logs.search') {
+      const query = String(params.query);
+      const cs = params.caseSensitive === true;
+      const refs = Array.isArray(params.containers) ? params.containers.map(String) : null;
+      const list = this.containers.filter(
+        (c) => c.state === 'running' && (!refs || refs.includes(c.dockerId)),
+      );
+      const needle = cs ? query : query.toLowerCase();
+      const matches: Record<string, unknown>[] = [];
+      const now = Date.now();
+      for (const c of list) {
+        const lines = ops.logs[c.name] ?? [];
+        lines.forEach((text, i) => {
+          if (!(cs ? text : text.toLowerCase()).includes(needle)) return;
+          matches.push({
+            containerId: c.dockerId,
+            containerName: c.name,
+            ts: new Date(now - (lines.length - i) * 60_000).toISOString(),
+            stream: text.startsWith('ERROR') ? 'stderr' : 'stdout',
+            text,
+          });
+        });
+      }
+      const max = typeof params.maxMatches === 'number' ? params.maxMatches : 200;
+      ok({
+        matches: matches.slice(0, max),
+        scannedContainers: list.length,
+        truncated: matches.length > max,
+      });
+      return true;
+    }
+    if (action === 'image.scan') {
+      const c = this.containers.find((x) => x.dockerId === params.id || x.name === params.id);
+      if (!c) {
+        fail('not_found', 'no such container');
+        return true;
+      }
+      const scan = ops.scans[c.name];
+      const vulns = scan?.vulns ?? [];
+      ok({
+        image: c.image,
+        digest: scan ? `sha256:${createHash('sha256').update(c.image).digest('hex')}` : null,
+        scannable: !!scan,
+        reason: scan ? null : 'local_image',
+        counts: {
+          critical: vulns.filter((v) => v.severity === 'CRITICAL').length,
+          high: vulns.filter((v) => v.severity === 'HIGH').length,
+        },
+        vulns,
+        scannedAt: new Date().toISOString(),
+      });
+      return true;
+    }
+    if (action === 'fail2ban.status') {
+      ok({
+        installed: ops.jails !== null,
+        jails: (ops.jails ?? []).map((j) => ({
+          name: j.name,
+          currentlyFailed: 3,
+          totalFailed: 380 + j.bannedIps.length,
+          currentlyBanned: j.bannedIps.length,
+          totalBanned: 40 + j.bannedIps.length,
+          bannedIps: j.bannedIps,
+        })),
+      });
+      return true;
+    }
+    if (action === 'fail2ban.unban') {
+      const jail = ops.jails?.find((j) => j.name === params.jail);
+      if (!jail) {
+        fail('not_found', 'no such jail');
+        return true;
+      }
+      jail.bannedIps = jail.bannedIps.filter((ip) => ip !== params.ip);
+      ok(null);
+      return true;
+    }
+    return false;
   }
 
   /** Game server actions (only with `games`); false when the action is not one of them. */

@@ -6,6 +6,7 @@ import {
   highlightSegments,
   logSearchBody,
   logSearchErrorText,
+  saveDiscordBinding,
   saveDiscordBot,
   saveVoiceGame,
   searchLogs,
@@ -208,6 +209,32 @@ describe('discord bot', () => {
     expect(shownError(err)).toBeNull();
     expect(shownError(new ApiError(500, 'internal'))).toBeTruthy();
   });
+
+  it('binds a Discord user id through step-up and repeats the same PUT', async () => {
+    const onStepUp = vi.fn(() => Promise.resolve(true));
+    reset = configureApi({ onStepUp });
+    const fn = mockFetch(json(403, { ok: false, error: 'step_up_required' }), json(200, botState));
+    await expect(saveDiscordBinding('shr-0001', '123456789012345678')).resolves.toEqual(botState);
+    expect(onStepUp).toHaveBeenCalledTimes(1);
+    expect(fn).toHaveBeenCalledTimes(2);
+    for (const [url, init] of fn.mock.calls) {
+      expect(url).toBe('/api/discord-bot/bindings/shr-0001');
+      expect(init?.method).toBe('PUT');
+      expect(JSON.parse(String(init?.body))).toEqual({ discordUserId: '123456789012345678' });
+    }
+  });
+
+  it('unbinds without step-up; a closed step-up dialog shows no error line', async () => {
+    const onStepUp = vi.fn(() => Promise.resolve(false));
+    reset = configureApi({ onStepUp });
+    const fn = mockFetch(json(200, botState), json(403, { ok: false, error: 'step_up_required' }));
+    await expect(saveDiscordBinding('shr-0001', null)).resolves.toEqual(botState);
+    expect(JSON.parse(String(fn.mock.calls[0]?.[1]?.body))).toEqual({ discordUserId: null });
+    expect(onStepUp).not.toHaveBeenCalled();
+    const err = await saveDiscordBinding('shr-0001', '123456789012345678').catch((e: unknown) => e);
+    expect(onStepUp).toHaveBeenCalledTimes(1);
+    expect(shownError(err)).toBeNull();
+  });
 });
 
 describe('voice', () => {
@@ -225,5 +252,20 @@ describe('voice', () => {
     ).resolves.toEqual(state);
     expect(onStepUp).toHaveBeenCalledTimes(1);
     expect(fn.mock.calls[1]?.[0]).toBe('/api/voice/games/game-0001');
+  });
+
+  it('handles step-up on a new status entity', async () => {
+    const onStepUp = vi.fn(() => Promise.resolve(true));
+    reset = configureApi({ onStepUp });
+    const state = { haReady: true, games: [] };
+    const body = {
+      switchEntity: 'input_boolean.minecraft',
+      statusEntity: 'input_text.minecraft_status',
+      allowStop: false,
+    };
+    const fn = mockFetch(json(403, { ok: false, error: 'step_up_required' }), json(200, state));
+    await expect(saveVoiceGame('game-0001', body)).resolves.toEqual(state);
+    expect(onStepUp).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(String(fn.mock.calls[1]?.[1]?.body))).toEqual(body);
   });
 });

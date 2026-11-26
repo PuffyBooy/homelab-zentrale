@@ -76,9 +76,15 @@ export async function fail2banStatus(
   if (jails === null) return { installed: false, jails: [] };
   const out: Fail2banJail[] = [];
   for (const jail of jails) {
-    const r = await ctx.host.exec('fail2ban-client', ['status', jail], {
-      timeoutMs: FAIL2BAN_TIMEOUT_MS,
-    });
+    let r: RunResult;
+    try {
+      r = await ctx.host.exec('fail2ban-client', ['status', jail], {
+        timeoutMs: FAIL2BAN_TIMEOUT_MS,
+      });
+    } catch {
+      // One failing jail (timeout, spawn error) must not fail the whole status.
+      continue;
+    }
     if (r.code !== 0) continue;
     out.push(parseFail2banJailStatus(jail, r.stdout));
   }
@@ -97,7 +103,8 @@ export async function fail2banUnban(
   }
   const jails = await jailList(ctx.host.exec);
   if (jails === null) throw new ActionError('failed', 'fail2ban is not available', false);
-  if (!jails.includes(jail)) throw new ActionError('invalid_params', 'unknown jail');
+  // A jail that does not exist (any more) is a harmless refusal: no `denied` audit event.
+  if (!jails.includes(jail)) throw new ActionError('not_found', 'jail not found', false);
   const r = await ctx.host.exec('fail2ban-client', ['set', jail, 'unbanip', ip], {
     timeoutMs: FAIL2BAN_TIMEOUT_MS,
   });

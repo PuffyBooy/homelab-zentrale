@@ -16,6 +16,13 @@ export const FAIL2BAN_CACHE_MS = 30_000;
 export class Fail2banService {
   private readonly cache = new Map<string, { at: number; value: Fail2banServer }>();
   private readonly inflight = new Map<string, Promise<Fail2banServer>>();
+  /**
+   * Bumped per server on every unban (and forget). A status request only stores
+   * its result and clears its in-flight entry while the generation it started in
+   * is still current, so a request that predates an unban never writes stale
+   * jails into the cache nor drops the newer request.
+   */
+  private readonly generation = new Map<string, number>();
 
   constructor(private readonly deps: { db: Db; now: Clock; hub: AgentHub }) {}
 
@@ -35,7 +42,8 @@ export class Fail2banService {
         { timeoutMs: FAIL2BAN_TIMEOUT_MS },
       );
     } catch (err) {
-      if (err instanceof RpcError && err.code === 'not_found') {
+      // Older agents answer invalid_params for an unknown jail, newer not_found.
+      if (err instanceof RpcError && (err.code === 'not_found' || err.code === 'invalid_params')) {
         throw new HttpError(404, 'not_found', undefined, 'Jail nicht gefunden');
       }
       if (err instanceof RpcError && err.code === 'not_allowed') {
@@ -44,14 +52,23 @@ export class Fail2banService {
       throw rpcHttpError(err);
     } finally {
       // The next status is fresh (an older in-flight request may predate the unban).
-      this.cache.delete(serverId);
-      this.inflight.delete(serverId);
+      this.invalidate(serverId);
     }
     return this.status(server);
   }
 
   forget(serverId: string): void {
+    this.invalidate(serverId);
+  }
+
+  private gen(serverId: string): number {
+    return this.generation.get(serverId) ?? 0;
+  }
+
+  private invalidate(serverId: string): void {
+    this.generation.set(serverId, this.gen(serverId) + 1);
     this.cache.delete(serverId);
+    this.inflight.delete(serverId);
   }
 
   clear(): void {
@@ -68,12 +85,15 @@ export class Fail2banService {
     if (hit && now - hit.at < FAIL2BAN_CACHE_MS) return hit.value;
     const running = this.inflight.get(s.id);
     if (running) return running;
-    const p = this.fetch(s).finally(() => this.inflight.delete(s.id));
+    const g = this.gen(s.id);
+    const p = this.fetch(s, g).finally(() => {
+      if (this.gen(s.id) === g) this.inflight.delete(s.id);
+    });
     this.inflight.set(s.id, p);
     return p;
   }
 
-  private async fetch(s: ServerRef): Promise<Fail2banServer> {
+  private async fetch(s: ServerRef, g: number): Promise<Fail2banServer> {
     let value: Fail2banServer;
     try {
       const raw = await this.deps.hub.call(
@@ -94,7 +114,8 @@ export class Fail2banService {
       if (state === 'offline') return this.entry(s, 'offline', []);
       value = this.entry(s, state, []);
     }
-    this.cache.set(s.id, { at: this.deps.now(), value });
+    // Stale (an unban happened meanwhile): answer the caller, but do not cache.
+    if (this.gen(s.id) === g) this.cache.set(s.id, { at: this.deps.now(), value });
     return value;
   }
 

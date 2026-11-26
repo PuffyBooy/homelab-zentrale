@@ -7,6 +7,7 @@ import { CopyBlock } from '../../components/CopyBlock.js';
 import { Dialog } from '../../components/Dialog.js';
 import { Field } from '../../components/Field.js';
 import { FormError } from '../../components/FormError.js';
+import { formatNumber } from '../../lib/format.js';
 import {
   DISCORD_COMMAND_HELP,
   DISCORD_STATUS,
@@ -245,7 +246,7 @@ function DiscordCommand({ cmd, text }: { cmd: string; text: string }): ReactElem
 
 function DiscordBindings({ bindings }: { bindings: DiscordBinding[] }): ReactElement {
   return (
-    <Tile title="Freunde" icon="users" count={String(bindings.length)} flush>
+    <Tile title="Freunde" icon="users" count={formatNumber(bindings.length, 0)} flush>
       <p className="app-text app-pad">
         Pro Benutzerlink mit Recht Starten/Stoppen oder Neustart. Der Bot erlaubt einem Freund genau
         die Rechte seines Links, solange der Link aktiv ist.

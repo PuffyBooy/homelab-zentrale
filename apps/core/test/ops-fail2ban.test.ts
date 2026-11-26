@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { fail2banResponseSchema, fail2banServerSchema, type Fail2banJail } from '@hz/shared';
 import { until, type Received, type WsClient } from './agent-helpers.js';
 import { authHeaders, SAME_ORIGIN, type TestApp } from './helpers.js';
+import { FAIL2BAN_UNBAN_LIMIT } from '../src/ops/routes.js';
 import { fail, ok, opsSetup } from './ops-helpers.js';
 
 const clients: WsClient[] = [];
@@ -136,6 +137,111 @@ describe('fail2ban', () => {
       ip: '2001:db8::1',
     });
   });
+
+  it('a status request from before an unban neither caches stale jails nor drops the newer request', async () => {
+    let banned = ['203.0.113.7', '2001:db8::1'];
+    let hold = true;
+    const held: Received[] = [];
+    const s = await opsSetup(clients, {
+      servers: [
+        {
+          name: 'heimserver',
+          reply: (rpc) => {
+            if (isStatus(rpc)) {
+              if (hold) {
+                held.push(rpc);
+                return 'silent';
+              }
+              return ok(rpc, { installed: true, jails: [jail(banned)] });
+            }
+            if (isUnban(rpc)) {
+              const p = rpc.params as { ip: string };
+              banned = banned.filter((ip) => ip !== p.ip);
+              return ok(rpc, null);
+            }
+            return null;
+          },
+        },
+      ],
+    });
+    t = s.t;
+    const a = s.agents[0];
+    if (!a) throw new Error('no agent');
+    const headers = authHeaders(s.cookie);
+    const get = () => s.t.app.inject({ method: 'GET', url: '/api/fail2ban', headers });
+    const bannedOf = (body: string) =>
+      fail2banResponseSchema.parse(JSON.parse(body)).servers[0]?.jails[0]?.bannedIps;
+    const staleData = { installed: true, jails: [jail([...banned])] };
+    // 1. A status request starts and hangs.
+    const early = get();
+    await until(() => held.length === 1);
+    // 2. Unban meanwhile; its own fresh status answers right away.
+    hold = false;
+    const res = await s.t.app.inject({
+      method: 'POST',
+      url: '/api/fail2ban/unban',
+      headers,
+      payload: { serverId: a.serverId, jail: 'sshd', ip: '2001:db8::1' },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(fail2banServerSchema.parse(res.json()).jails[0]?.bannedIps).toEqual(['203.0.113.7']);
+    // 3. Cache expired, a new status request starts and hangs (newer generation).
+    t.clock.advance(31_000);
+    hold = true;
+    const newer = get();
+    await until(() => held.length === 2);
+    // 4. The old request finally answers with the stale list.
+    const [oldRpc, newRpc] = held;
+    if (!oldRpc || !newRpc) throw new Error('no rpc');
+    a.agent.send(ok(oldRpc, staleData));
+    expect((await early).statusCode).toBe(200);
+    // 5. The newer request is still in flight: a GET joins it, no extra RPC.
+    const joined = get();
+    await new Promise((r) => setTimeout(r, 50));
+    expect(a.rpcs.filter(isStatus)).toHaveLength(3);
+    a.agent.send(ok(newRpc, { installed: true, jails: [jail(banned)] }));
+    expect(bannedOf((await newer).body)).toEqual(['203.0.113.7']);
+    expect(bannedOf((await joined).body)).toEqual(['203.0.113.7']);
+    // 6. The cache holds the fresh list, not the stale one.
+    hold = false;
+    expect(bannedOf((await get()).body)).toEqual(['203.0.113.7']);
+    expect(a.rpcs.filter(isStatus)).toHaveLength(3);
+  });
+
+  it('unban is rate limited per session (429)', async () => {
+    const s = await opsSetup(clients);
+    t = s.t;
+    const sid = s.agents[0]?.serverId ?? '';
+    const unban = () =>
+      s.t.app.inject({
+        method: 'POST',
+        url: '/api/fail2ban/unban',
+        headers: authHeaders(s.cookie),
+        payload: { serverId: sid, jail: 'sshd', ip: '198.51.100.1' },
+      });
+    for (let i = 0; i < FAIL2BAN_UNBAN_LIMIT; i += 1) expect((await unban()).statusCode).toBe(200);
+    const res = await unban();
+    expect(res.statusCode).toBe(429);
+    expect(res.json()).toMatchObject({ error: 'rate_limited' });
+  });
+
+  it.each(['not_found', 'invalid_params'])(
+    'unban: agent error %s for the jail -> 404 Jail nicht gefunden',
+    async (code) => {
+      const s = await opsSetup(clients, {
+        servers: [{ name: 'heimserver', reply: (rpc) => (isUnban(rpc) ? fail(rpc, code) : null) }],
+      });
+      t = s.t;
+      const res = await s.t.app.inject({
+        method: 'POST',
+        url: '/api/fail2ban/unban',
+        headers: authHeaders(s.cookie),
+        payload: { serverId: s.agents[0]?.serverId ?? '', jail: 'gibtsnicht', ip: '198.51.100.1' },
+      });
+      expect(res.statusCode).toBe(404);
+      expect(res.json()).toMatchObject({ error: 'not_found', message: 'Jail nicht gefunden' });
+    },
+  );
 
   it('unban errors: unknown server 404, unknown jail 404, offline 409', async () => {
     const s = await opsSetup(clients, {

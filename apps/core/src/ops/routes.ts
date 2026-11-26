@@ -29,6 +29,8 @@ export interface OpsRoutesOptions {
 
 /** Log searches per admin session and minute. */
 export const LOG_SEARCH_LIMIT = 10;
+/** fail2ban unbans per admin session and minute. */
+export const FAIL2BAN_UNBAN_LIMIT = 30;
 const MINUTE = 60_000;
 /** POST /api/vulnscan/run takes no fields (an empty JSON object is fine). */
 const vulnScanRunBody = z.strictObject({});
@@ -41,6 +43,7 @@ const vulnScanRunBody = z.strictObject({});
  */
 export const opsRoutes: FastifyPluginAsync<OpsRoutesOptions> = async (app, o) => {
   const searchLimit = new WindowLimiter(LOG_SEARCH_LIMIT, MINUTE, o.now);
+  const unbanLimit = new WindowLimiter(FAIL2BAN_UNBAN_LIMIT, MINUTE, o.now);
 
   // ---- logsearch ----------------------------------------------------------------
   app.post('/logsearch', async (request) => {
@@ -97,6 +100,8 @@ export const opsRoutes: FastifyPluginAsync<OpsRoutesOptions> = async (app, o) =>
   );
 
   app.post('/fail2ban/unban', async (request) => {
+    const wait = unbanLimit.hit(request.auth?.session.id ?? 'anonymous');
+    if (wait !== null) throw new HttpError(429, 'rate_limited', wait);
     const body = fail2banUnbanRequestSchema.parse(request.body);
     // Defence in depth: a jail never starts like an option or a hidden name.
     if (/^[-.]/.test(body.jail)) throw new HttpError(400, 'invalid_input');

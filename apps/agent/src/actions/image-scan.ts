@@ -47,8 +47,15 @@ export function trivyArgs(trivyImage: string, ref: string): string[] {
     'no-new-privileges',
     '--memory',
     '1g',
+    // Equal to --memory: no swap on top of the memory limit.
+    '--memory-swap',
+    '1g',
+    '--cpus',
+    '1',
     '--pids-limit',
     '256',
+    // Kept at 512m on purpose: Trivy writes layer data to the cache volume, /tmp only
+    // holds small temporary files. Raise only if scans of very large images fail.
     '--tmpfs',
     '/tmp:rw,size=512m',
     '-v',

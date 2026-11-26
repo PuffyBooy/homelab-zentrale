@@ -90,6 +90,16 @@ describe('fail2ban.status', () => {
     ]);
   });
 
+  it('a jail whose status call throws is skipped, the others are still reported', async () => {
+    const { ctx } = setup((args) => {
+      if (args[0] === 'status' && args[1] === 'sshd') throw new Error('timeout');
+      return defaultAnswers(args);
+    });
+    const data = await fail2banStatus({}, ctx);
+    expect(data.installed).toBe(true);
+    expect(data.jails.map((j) => j.name)).toEqual(['recidive']);
+  });
+
   it('fail2ban missing or not running -> installed:false', async () => {
     for (const r of [
       { code: null, stdout: '', stderr: '', error: 'not_found' as const },
@@ -112,10 +122,12 @@ describe('fail2ban.unban', () => {
     });
   });
 
-  it('refuses a jail that is not in the jail list', async () => {
+  it('a jail that is not in the jail list -> not_found without audit, nothing set', async () => {
     const { ctx, calls } = setup(defaultAnswers);
     await expect(fail2banUnban({ jail: 'nginx', ip: '203.0.113.5' }, ctx)).rejects.toMatchObject({
-      code: 'invalid_params',
+      code: 'not_found',
+      message: 'jail not found',
+      audit: false,
     });
     expect(calls.some((c) => c.args[0] === 'set')).toBe(false);
   });
@@ -182,5 +194,20 @@ describe('fail2ban.unban', () => {
 
     const good = await d.handle(rpc({ jail: 'sshd', ip: '2001:db8::1' }));
     expect(good).toEqual({ type: 'rpc.result', id: 'r1', ok: true, data: null });
+  });
+
+  it('the dispatcher reports an unknown jail as not_found without a denied event', async () => {
+    const { ctx, calls } = setup(defaultAnswers);
+    const events: AgentEvent[] = [];
+    const d = new Dispatcher(ctx, (e) => events.push(e));
+    const r = await d.handle({
+      type: 'rpc',
+      id: 'r2',
+      action: 'fail2ban.unban',
+      params: { jail: 'nginx', ip: '203.0.113.5' },
+    });
+    expect(r).toMatchObject({ ok: false, error: { code: 'not_found', message: 'jail not found' } });
+    expect(events).toEqual([]);
+    expect(calls.some((c) => c.args[0] === 'set')).toBe(false);
   });
 });

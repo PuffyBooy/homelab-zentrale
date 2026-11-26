@@ -93,7 +93,17 @@ export async function getState(b: BotSetup): Promise<DiscordBotState> {
   return discordBotStateSchema.parse(res.json());
 }
 
+/** True if the admin session currently has a valid step-up. */
+export function hasStepUpNow(b: BotSetup): boolean {
+  const row = b.s.t.db.sqlite.prepare('SELECT MAX(step_up_until) AS until FROM sessions').get() as {
+    until: number | null;
+  };
+  return row.until !== null && row.until > b.s.t.clock.t;
+}
+
+/** Binds (needs step-up, taken here if missing) or unbinds (user null) a link. */
 export async function bindLink(b: BotSetup, shareId: string, user: string | null = FRIEND_ID) {
+  if (user !== null && !hasStepUpNow(b)) await stepUp(b.s.t, b.s.secret, b.s.cookie);
   const res = await put(b, `/api/discord-bot/bindings/${shareId}`, { discordUserId: user });
   expect(res.statusCode).toBe(200);
   return discordBotStateSchema.parse(res.json());

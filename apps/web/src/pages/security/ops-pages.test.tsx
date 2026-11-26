@@ -229,6 +229,25 @@ describe('Schwachstellen', () => {
     expect(out).toContain('>Jetzt prüfen<');
   });
 
+  it('marks the tile WARN when there are only HIGH findings', () => {
+    const out = html(
+      <VulnscanTile
+        state={vulnState({
+          results: [vuln({ counts: { critical: 0, high: 3 } }, 'redis'), vuln({}, 'postgres')],
+        })}
+        running={false}
+        onRun={noop}
+        runBusy={false}
+        runError={null}
+      />,
+    );
+    const head = /<header[\s\S]*?<\/header>/.exec(out)?.[0];
+    expect(head).toBeDefined();
+    expect(head).toContain('hz-status-warn');
+    expect(head).not.toContain('hz-status-ok');
+    expect(head).toContain('1 mit hohen Lücken');
+  });
+
   it('shows the progress while a scan runs', () => {
     const out = html(
       <VulnscanTile

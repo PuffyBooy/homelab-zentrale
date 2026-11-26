@@ -314,6 +314,50 @@ describe('discord bot: commands', () => {
     );
   });
 
+  it('two simultaneous commands for one game pass the cooldown only once', async () => {
+    const b = await setupBot();
+    const link = await createShare(b.s, b.game.id, { perms: ['power'] });
+    await bindLink(b, link.id);
+    const downs = rpcsOf(b.s, 'compose.down').length;
+    const first = interaction('stop', { spiel: 'survival' });
+    const second = interaction('stop', { spiel: 'survival' });
+    const before = b.rest.calls.length;
+    b.gw.dispatch('INTERACTION_CREATE', first);
+    b.gw.dispatch('INTERACTION_CREATE', second);
+    const replyOf = (d: Record<string, unknown>): string | null => {
+      const id = String(d.id);
+      const token = String(d.token);
+      const mine = b.rest.calls.slice(before);
+      const edit = mine.find((c) => c.method === 'PATCH' && c.url.includes(`/${token}/`));
+      if (edit) return (edit.body as { content: string }).content;
+      const cb = mine.find((c) => c.url.includes(`/${id}/`));
+      const content = (cb?.body as { data?: { content?: string } } | undefined)?.data?.content;
+      return content ?? null;
+    };
+    await until(() => replyOf(first) !== null && replyOf(second) !== null);
+    await b.bot.idle();
+    const texts = [replyOf(first), replyOf(second)];
+    expect(texts.filter((x) => x !== null && /Gestoppt/.test(x))).toHaveLength(1);
+    expect(texts.filter((x) => x !== null && /^Gerade erst ausgeführt/.test(x))).toHaveLength(1);
+    expect(rpcsOf(b.s, 'compose.down').length).toBe(downs + 1);
+  });
+
+  it('a failed command releases the cooldown, so it can be retried', async () => {
+    const b = await setupBot();
+    const link = await createShare(b.s, b.game.id, { perms: ['power'] });
+    await bindLink(b, link.id);
+    await stopGame(b);
+    // Metrics stale: the RAM reserve check refuses the start.
+    b.s.t.clock.advance(2 * 60_000);
+    await b.s.keepAlive();
+    const failed = await command(b, interaction('start', { spiel: 'survival' }));
+    expect(failed).not.toMatch(/Start ausgeführt|^Gerade erst/);
+    await freshMetrics(b.s);
+    expect(await command(b, interaction('start', { spiel: 'survival' }))).toMatch(
+      /Start ausgeführt/,
+    );
+  });
+
   it('games module off: friendly refusal, nothing runs', async () => {
     const b = await setupBot();
     const link = await createShare(b.s, b.game.id, { perms: ['power'] });

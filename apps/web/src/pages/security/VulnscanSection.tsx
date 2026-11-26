@@ -81,14 +81,17 @@ export function VulnscanTile({
   runError: string | null;
 }): ReactElement {
   const crit = state.results.some((r) => r.scan.counts.critical > 0);
+  const high = state.results.some((r) => r.scan.counts.high > 0);
   const p = state.progress;
   return (
     <Tile
       title="Schwachstellen"
       icon="lock"
       span={4}
-      count={state.results.length ? String(state.results.length) : undefined}
-      status={running ? 'busy' : crit ? 'crit' : state.results.length ? 'ok' : undefined}
+      count={state.results.length ? formatNumber(state.results.length, 0) : undefined}
+      status={
+        running ? 'busy' : crit ? 'crit' : high ? 'warn' : state.results.length ? 'ok' : undefined
+      }
       statusLabel={running ? 'prüft' : vulnscanSentence(state)}
       actions={
         <Button size="sm" variant="primary" onClick={onRun} disabled={runBusy || running}>
