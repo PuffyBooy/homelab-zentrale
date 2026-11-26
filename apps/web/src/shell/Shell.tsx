@@ -8,6 +8,7 @@ import {
   useActiveAlerts,
   useChecks,
   useGames,
+  useHaState,
   useRepos,
   useContainers,
   useServerFilter,
@@ -25,6 +26,7 @@ import {
   needsChecks,
   needsContainers,
   needsGames,
+  needsHa,
   needsRepos,
   pageMeta,
   serverDetailId,
@@ -66,6 +68,7 @@ function ShellBody(): ReactElement {
   const checks = useChecks(needsChecks(pathname));
   const repos = useRepos(needsRepos(pathname));
   const games = useGames(needsGames(pathname));
+  const ha = useHaState(needsHa(pathname));
   const [filter, setFilter] = useServerFilter();
   const detailId = serverDetailId(pathname);
 
@@ -76,6 +79,7 @@ function ShellBody(): ReactElement {
     checks: checks.data,
     repos: repos.data,
     games: games.data,
+    ha: ha.data,
     filter: detailId ?? filter,
     live,
     updatedAt: servers.dataUpdatedAt ? new Date(servers.dataUpdatedAt) : null,

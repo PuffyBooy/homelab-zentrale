@@ -439,4 +439,22 @@ CREATE INDEX share_audit_game_ts ON share_audit(game_id, ts);
 CREATE INDEX share_audit_ts ON share_audit(ts);
 `,
   },
+  {
+    version: 8,
+    name: 'homeassistant',
+    // Monthly energy baseline for "kWh im Monat" (SPEC 10). One row per Vienna month
+    // (YYYY-MM): start_kwh is the meter value the month counts from, last_kwh the
+    // newest reading. A meter reset (value drops) moves start_kwh so the month keeps
+    // its consumption. entity_id: a different energy sensor starts a new baseline.
+    // HA URL, token (AES-256-GCM) and the entity selection live in `settings`.
+    sql: `
+CREATE TABLE ha_energy_months (
+  month TEXT PRIMARY KEY,
+  entity_id TEXT NOT NULL,
+  start_kwh REAL NOT NULL,
+  last_kwh REAL NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+`,
+  },
 ];

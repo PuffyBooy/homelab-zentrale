@@ -68,13 +68,14 @@ async function themes(p: Page, name: string, fullPage = true): Promise<void> {
 }
 
 async function gameStatus(): Promise<string> {
+  const t0 = Date.now();
   const res = await apiCall<{ games: { id: string; status: string; statusText: string }[] }>(
     'GET',
     '/api/games',
   );
   const g = res.data.games.find((x) => x.id === gameId);
   if (g && g.status !== 'ok' && g.status !== 'off')
-    console.warn(`game ${g.status}: ${g.statusText}`);
+    console.warn(`game ${g?.status ?? 'missing'}: ${g?.statusText ?? ''} (${Date.now() - t0} ms)`);
   return g?.status ?? 'missing';
 }
 
@@ -88,6 +89,9 @@ async function newFriend(browser: Browser): Promise<void> {
 }
 
 test.beforeAll(async ({ browser }) => {
+  // Hooks get the default 30 s, not the describe timeout; signIn alone can wait
+  // ~30 s for an unused TOTP step, then setup polls up to 90 s.
+  test.setTimeout(180_000);
   admin = await browser.newContext({
     baseURL: ORIGIN,
     colorScheme: 'dark',

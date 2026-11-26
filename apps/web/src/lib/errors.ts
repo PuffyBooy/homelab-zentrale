@@ -42,6 +42,8 @@ export function errorText(err: unknown): string {
       return 'CI ist nicht grün. Deploy abgelehnt.';
     case 'github_error':
       return 'GitHub nicht erreichbar oder Anfrage abgelehnt. Details unter Einstellungen → GitHub.';
+    case 'ha_error':
+      return 'Home Assistant nicht erreichbar oder hat abgelehnt. Details unter Einstellungen → Home Assistant.';
     case 'bad_response':
       return 'Antwort der Zentrale unerwartet. Versionen von Core und Web prüfen.';
     default:

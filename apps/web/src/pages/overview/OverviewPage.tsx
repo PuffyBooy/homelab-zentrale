@@ -15,11 +15,14 @@ import {
 } from '../../lib/data.js';
 import { formatWhen } from '../../lib/format.js';
 import { repoOnServer } from '../../lib/github.js';
+import { isHaConfigured } from '../../lib/ha.js';
+import { useHaView } from '../../lib/haActions.js';
 import { useLiveTopic } from '../../lib/live.js';
 import { ALL_SERVERS } from '../../lib/servers.js';
 import { ContainersTile } from '../containers/ContainersTile.js';
 import { GamesTile } from '../games/GamesTile.js';
 import { GithubTile } from '../github/GithubTile.js';
+import { HomeTile } from '../home/HomeTile.js';
 import { NoServers, ServerListTile } from '../servers/ServerListTile.js';
 import { ChecksTile } from '../websites/ChecksTile.js';
 
@@ -28,7 +31,7 @@ const MAX_ALERTS = 3;
 /**
  * Overview after design/reference/previews/Dashboard.html: Statussatz (shell header),
  * open crit alerts, ServerList over the full width, then the pairs (SPEC 4):
- * Gameserver/Websites and GitHub/Container.
+ * Gameserver/Websites and GitHub/Container, then "Wohnung" when Home Assistant is set up.
  */
 export function OverviewPage(): ReactElement | null {
   const servers = useServers();
@@ -42,6 +45,8 @@ export function OverviewPage(): ReactElement | null {
   const games = useGames();
   const repos = useRepos();
   const github = useGithubSettings();
+  useLiveTopic('ha');
+  const ha = useHaView();
   const [filter] = useServerFilter();
   const navigate = useNavigate();
 
@@ -115,6 +120,11 @@ export function OverviewPage(): ReactElement | null {
               serverId={one}
             />
           ) : null}
+        </div>
+      ) : null}
+      {!one && ha.view && isHaConfigured(ha.view) ? (
+        <div className="hz-grid app-grid">
+          <HomeTile state={ha.view} />
         </div>
       ) : null}
     </>

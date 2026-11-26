@@ -546,3 +546,18 @@ export const shareAudit = sqliteTable(
 
 export type ShareLinkRow = typeof shareLinks.$inferSelect;
 export type ShareAuditRow = typeof shareAudit.$inferSelect;
+
+// ---- M8: Home Assistant ----------------------------------------------------------
+
+export const haEnergyMonths = sqliteTable('ha_energy_months', {
+  /** YYYY-MM in Europe/Vienna. */
+  month: text('month').primaryKey(),
+  /** Energy sensor the values belong to. */
+  entityId: text('entity_id').notNull(),
+  /** Meter value (kWh) the month counts from; moves on a meter reset. */
+  startKwh: real('start_kwh').notNull(),
+  lastKwh: real('last_kwh').notNull(),
+  updatedAt: integer('updated_at').notNull(),
+});
+
+export type HaEnergyMonthRow = typeof haEnergyMonths.$inferSelect;

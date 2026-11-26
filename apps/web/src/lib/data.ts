@@ -4,6 +4,7 @@ import type {
   ContainerSummary,
   GameSummary,
   GithubSettings,
+  HaState,
   RepoSummary,
   ServerSummary,
 } from '@hz/shared';
@@ -15,6 +16,7 @@ import { checksKey, fetchChecks } from './checks.js';
 import { containersKey, fetchContainers } from './containers.js';
 import { fetchGames, fetchTemplates, gamesKey, templatesKey, type TemplateInfo } from './games.js';
 import { fetchGithubSettings, fetchRepos, githubSettingsKey, reposKey } from './github.js';
+import { fetchHaState, haStateKey } from './ha.js';
 import { useLiveState } from './live.js';
 import { ALL_SERVERS, fetchServers, serversKey } from './servers.js';
 
@@ -98,6 +100,18 @@ export function useGithubSettings(enabled = true): UseQueryResult<GithubSettings
     enabled,
     staleTime: 30_000,
     refetchInterval: 60_000,
+  });
+}
+
+/** Home Assistant state. Callers subscribe to the live topic `ha`. */
+export function useHaState(enabled = true): UseQueryResult<HaState> {
+  const live = useLiveState();
+  return useQuery({
+    queryKey: haStateKey,
+    queryFn: ({ signal }) => fetchHaState(signal),
+    enabled,
+    staleTime: live === 'open' ? Infinity : 10_000,
+    refetchInterval: live === 'open' ? false : 15_000,
   });
 }
 

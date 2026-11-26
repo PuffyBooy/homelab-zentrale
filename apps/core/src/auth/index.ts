@@ -4,7 +4,7 @@ import { installAuthGuard } from './guard.js';
 import { authRoutes } from './routes.js';
 import { AuthService, type AuthDeps } from './service.js';
 
-export { requireStepUp, PUBLIC_API_PREFIXES, PUBLIC_API_ROUTES } from './guard.js';
+export { hasStepUp, requireStepUp, PUBLIC_API_PREFIXES, PUBLIC_API_ROUTES } from './guard.js';
 export { AuthService } from './service.js';
 
 /**
