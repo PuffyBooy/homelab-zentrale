@@ -98,6 +98,8 @@ design/                   Designsystem (nicht von Hand ändern, siehe design/REA
 | `wichtig_restarts` | id, container_id, server_id, ts, ok (Startversuche gestoppter `wichtig`-Container, 10 Min) |
 | `server_storage` | server_id, storage_json (letztes `inventory.storage`: RAID, Volumes, Platten mit SMART), updated_at (M13, Migration 14) |
 | `game_backups` | id, game_id, path, size, created_at |
+| `server_ingress` | server_id, enabled, public_ip, port_from, port_to, updated_at (Eingang für das Game-Relay, M15, Migration 16) |
+| `game_relays` | game_id, ingress_server_id, dns_name, dns_ip (zuletzt beim Anbieter gesetzt), listen_ports_json (feste Ports am Eingang, bleiben beim Umzug), state, error, updated_at (M15) |
 | `game_schedules` | id, game_id, kind (`restart`/`backup`), days_json (ISO-Wochentage), time (HH:MM in `HZ_TIMEZONE`), enabled, last_run_at (M12, Migration 15) |
 | `game_notify` | game_id, discord_url_enc (AES-GCM), events_json, last_sent_at, last_error (M12) |
 | `game_player_sessions` | id, game_id, player, started_at, ended_at (aus den Status-Abfragen, 90 Tage, M12) |
@@ -150,6 +152,7 @@ Die erste Nachricht muss innerhalb von 10 s ein gültiges `hello` sein. Danach a
 | `game.remove` | `{gameDir}` → `compose down` und Ordner löschen (nur unter `/opt/homelab/games/`) |
 | `game.export` | `{gameId, maxBytes, paths?}` → Stream: Archiv von `data/` des Spielordners (mit `paths` nur diese Weltordner, für den Welt-Download der Freunde, M12), dann `transfer.begin/chunk/end` (M11) |
 | `game.import` | `{gameId, bytes, sha256, chunks}` → Stream: empfängt `transfer.chunk`/`transfer.end`, prüft Größe, sha256 und jeden Archiv-Eintrag, entpackt nach `/opt/homelab/games/<gameId>/data` (M11) |
+| `relay.set` | `{routes: [{id, protocol, listenPort, count, target: {host, port}}]}`: ersetzt alle Relay-Routen des Eingangs, Ziele nur im Tailnet, nur mit `HZ_AGENT_ALLOW_RELAY=1` (M15) |
 | `game.wake.arm` / `game.wake.disarm` | `{gameId, mode, ports, motd}` / `{gameId}`: Wake-Listener eines gestoppten Gameservers nur auf seinen veröffentlichten Ports (M12, Schlafmodus) |
 | `game.mods.list` / `install` / `remove` | `{gameId, kind}` / `+ url, fileName, sha512, sizeBytes` / `+ fileName`: Jars in `data/plugins` bzw. `data/mods`, Download nur von `cdn.modrinth.com` mit sha512 (M12) |
 | `game.restore` | `{gameId, fileName}` → Stream: Backup nach `data/` zurückspielen (Spiel gestoppt, jeder Eintrag geprüft, alte Daten bleiben bei Fehler) (M12) |

@@ -126,7 +126,7 @@ export function SuggestView({
   target,
   s,
 }: {
-  game: Pick<GameSummary, 'name' | 'ports'>;
+  game: Pick<GameSummary, 'name' | 'ports'> & Partial<Pick<GameSummary, 'relay'>>;
   target: Pick<ServerSummary, 'name'>;
   s: MigrationSuggestResponse;
 }): ReactElement {
@@ -152,7 +152,12 @@ export function SuggestView({
         </dd>
       </dl>
       {s.ramWarning ? <Alert tone="warn" title={s.ramWarning} /> : null}
-      {s.forwardingHint ? (
+      {game.relay ? (
+        <Alert tone="info" title={`Adresse bleibt gleich (über ${game.relay.ingressName}).`}>
+          Die Zentrale stellt die Weiterleitung am Eingang auf {target.name} um. Keine
+          Portweiterleitung nötig.
+        </Alert>
+      ) : s.forwardingHint ? (
         <Alert tone="warn" title={s.forwardingHint}>
           Freunde ohne Tailscale erreichen {game.name} erst wieder, wenn die Weiterleitung am Router
           (bzw. die Security List in der Cloud) für {target.name} eingerichtet ist.

@@ -405,6 +405,8 @@ export interface WakeManagerOptions {
   host?: string;
   /** Per-connection timeout (tests shorten it). */
   connectionTimeoutMs?: number;
+  /** Ports held by game relay routes (RelayManager.holds); wake never takes them. */
+  relayHolds?: (port: number, protocol: WakePort['protocol']) => boolean;
 }
 
 export class WakeManager {
@@ -430,6 +432,16 @@ export class WakeManager {
     return this.games.get(gameId)?.listeners.map((l) => l.port) ?? [];
   }
 
+  /** True when any armed game listens on this port (the relay must not take it). */
+  holds(port: number, protocol: WakePort['protocol']): boolean {
+    for (const game of this.games.values()) {
+      if (game.listeners.some((l) => l.port.port === port && l.port.protocol === protocol)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   arm(
     gameId: string,
     mode: WakeMode,
@@ -443,6 +455,13 @@ export class WakeManager {
         const key = `${p.port}/${p.protocol}`;
         if (seen.has(key)) throw new ActionError('invalid_params', 'port listed twice');
         seen.add(key);
+        if (this.o.relayHolds?.(p.port, p.protocol)) {
+          throw new ActionError(
+            'busy',
+            `Port ${p.port}/${p.protocol} wird vom Game-Relay genutzt`,
+            false,
+          );
+        }
       }
       const game: ArmedGame = { listeners: [], woken: false };
       this.games.set(gameId, game);
@@ -612,7 +631,13 @@ export class WakeManager {
         }
         if (pongs >= WAKE_MAX_PONGS_PER_SECOND) return;
         pongs += 1;
-        sock.send(v.data, rinfo.port, rinfo.address, () => undefined);
+        // A bad peer (port 0) makes send throw synchronously: drop it instead.
+        if (rinfo.port < 1 || rinfo.port > 65535 || net.isIP(rinfo.address) === 0) return;
+        try {
+          sock.send(v.data, rinfo.port, rinfo.address, () => undefined);
+        } catch {
+          // socket closed or bad peer
+        }
       }
     });
     return new Promise((resolve, reject) => {

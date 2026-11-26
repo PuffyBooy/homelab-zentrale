@@ -31,6 +31,7 @@ import { gameRestore } from './game-restore.js';
 import { gameWakeArm, gameWakeDisarm } from './game-wake.js';
 import { gameRemove } from './game-remove.js';
 import { gameRcon, gameStatus } from './games.js';
+import { relaySet } from './relay.js';
 import { ptyClose, ptyInput, ptyOpen, ptyResize } from './pty.js';
 import { cleanup, cleanupPreview } from './system-cleanup.js';
 import { systemReboot } from './system-reboot.js';
@@ -83,6 +84,7 @@ export const handlers: ActionHandlers = {
   'game.mods.install': gameModsInstall,
   'game.mods.remove': gameModsRemove,
   'game.restore': (p, ctx, id) => gameRestore(p, ctx, id),
+  'relay.set': relaySet,
   'logs.search': (p, ctx) => logsSearch(p, ctx),
   'image.scan': (p, ctx) => imageScan(p, ctx),
   'fail2ban.status': (p, ctx) => fail2banStatus(p, ctx),

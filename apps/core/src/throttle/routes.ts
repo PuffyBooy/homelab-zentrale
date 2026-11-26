@@ -12,6 +12,7 @@ import {
   serverIdParamsSchema,
   serverThrottleResponseSchema,
   serverThrottleUpdateRequestSchema,
+  topConsumersQuerySchema,
   topConsumersResponseSchema,
 } from '@hz/shared';
 import type { Clock } from '../clock.js';
@@ -119,7 +120,8 @@ export const throttleRoutes: FastifyPluginAsync<ThrottleRoutesOptions> = async (
     return serverThrottleResponseSchema.parse(await t.updateServerThrottle(id, body));
   });
 
-  app.get('/overview/top-consumers', async () =>
-    topConsumersResponseSchema.parse(t.topConsumers()),
-  );
+  app.get('/overview/top-consumers', async (request) => {
+    const { serverId } = topConsumersQuerySchema.parse(request.query);
+    return topConsumersResponseSchema.parse(t.topConsumers(serverId));
+  });
 };

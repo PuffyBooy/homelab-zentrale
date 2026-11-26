@@ -34,6 +34,12 @@ Die Zentrale hat Root-ähnliche Macht über alle Server. Diese Regeln sind **nic
 - Welt-Download für Freunde nur mit Recht `world_download`, nur die Weltordner aus `worldPaths` der Vorlage (nie Konfigurationen mit Passwörtern oder Logs), 1 pro Link und Stunde.
 - Backup wiederherstellen nur mit Step-up und Namensbestätigung; jeder Archiv-Eintrag wird geprüft.
 
+## Game-Relay (M15)
+- Relay nur mit `HZ_AGENT_ALLOW_RELAY=1` am Eingang und Step-up für Eingänge, Relays und DNS-Einstellungen.
+- Ziele nur Tailscale-Adressen, Ports ab 1024 im Bereich des Eingangs, keine Überschneidungen; Grenzen für Verbindungen/Sessions (256 je Route) und Leerlauf (TCP 10 Min, UDP 2 Min). Keine Inhalte und keine Client-IPs im Log.
+- DNS-Token (Cloudflare/DuckDNS) verschlüsselt, nie in Antwort, Log, Audit oder Fehlertext; Anfragen nur an `api.cloudflare.com` bzw. `www.duckdns.org`, ohne Redirects.
+- Das Spiel sieht als Absender den Eingang; IP-Sperren im Spiel greifen nicht pro Spieler.
+
 ## Benutzerlinks
 - Token mit ≥ 128 Bit Zufall, gespeichert nur als Hash.
 - Ein Link erlaubt genau einen Gameserver und genau die gesetzten Rechte. Das wird serverseitig bei **jeder** Aktion geprüft.

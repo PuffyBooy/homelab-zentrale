@@ -41,8 +41,13 @@ export const serverThrottleKey = (serverId: string) => ['servers', serverId, 'th
 // ---------------------------------------------------------------------------
 // Fetchers
 
-export function fetchTopConsumers(signal?: AbortSignal): Promise<TopConsumersResponse> {
-  return api('/api/overview/top-consumers', { schema: topConsumersResponseSchema, signal });
+/** Top consumers; with serverId only that server's (the core ranks per server). */
+export function fetchTopConsumers(
+  serverId?: string,
+  signal?: AbortSignal,
+): Promise<TopConsumersResponse> {
+  const q = serverId ? `?serverId=${encodeURIComponent(serverId)}` : '';
+  return api(`/api/overview/top-consumers${q}`, { schema: topConsumersResponseSchema, signal });
 }
 
 export function fetchServerThrottle(

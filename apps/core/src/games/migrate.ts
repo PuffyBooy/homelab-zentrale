@@ -319,6 +319,7 @@ export class MigrationService {
     if (this.serverName(targetServerId) === null) throw new HttpError(404, 'not_found');
     if (targetServerId === row.serverId) throw new HttpError(400, 'invalid_input');
     const plan = this.deps.games.planPorts(row, targetServerId, undefined);
+    this.deps.games.checkRelayTarget(gameId, targetServerId, null);
     const ram = this.deps.games.suggest(row.templateId, targetServerId);
     let ramWarning = ram.ramWarning;
     try {
@@ -374,6 +375,7 @@ export class MigrationService {
     }
     if (games.folderTakenOn(row, targetId)) throw new HttpError(409, 'conflict');
     const plan = games.planPorts(row, targetId, req.ports);
+    games.checkRelayTarget(gameId, targetId, plan.ports);
     games.checkRamOn(row, targetId);
     // Takes the busy lock (409 busy while an action, backup or setup runs).
     games.lockForMigration(gameId, PHASE_TEXT.backup);
