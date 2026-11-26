@@ -111,6 +111,8 @@ test('enroll through the dialog, agent appears live', async () => {
   await page.getByRole('button', { name: 'Server hinzufügen' }).first().click();
   const dialog = page.getByRole('dialog', { name: 'Server hinzufügen' });
   await expect(dialog).toBeVisible();
+  // Since M11 the code flow is the default; the token path is "Manuell (Token)".
+  await dialog.getByRole('button', { name: 'Manuell (Token)' }).click();
 
   // Name is checked against agentNameSchema before anything is sent.
   await dialog.getByLabel('Name').fill('Heim Server');

@@ -54,6 +54,7 @@ import { HttpError } from '../http/errors.js';
 import type { Scheduler } from '../scheduler.js';
 import {
   collectUsed,
+  firstFree,
   isFree,
   markUsed,
   ramBytes,
@@ -1098,13 +1099,9 @@ export class GameService {
     const cIds = this.containerIds(row);
     try {
       if (action === 'start') {
-        for (const c of cIds) this.deps.setIntent(c, null);
-        await hub.call(row.serverId, 'compose.up', { dir }, { timeoutMs: UP_TIMEOUT_MS });
-        this.setRunState(id, 'running');
+        await this.runStart(row);
       } else if (action === 'stop') {
-        for (const c of cIds) this.deps.setIntent(c, 'stop');
-        await hub.call(row.serverId, 'compose.down', { dir }, { timeoutMs: DOWN_TIMEOUT_MS });
-        this.setRunState(id, 'stopped');
+        await this.runStop(row);
       } else {
         for (const c of cIds) this.deps.setIntent(c, 'restart', INTENT_TTL_MS);
         const c = this.containerOf(row);
@@ -1135,6 +1132,36 @@ export class GameService {
     return this.summary(id) as GameSummary;
   }
 
+  /** compose up in the game folder on its server (the start path of action()). */
+  private async runStart(row: GameServerRow): Promise<void> {
+    for (const c of this.containerIds(row)) this.deps.setIntent(c, null);
+    await this.deps.hub.call(
+      row.serverId,
+      'compose.up',
+      { dir: gameDirOf(row.name) },
+      { timeoutMs: UP_TIMEOUT_MS },
+    );
+    this.setRunState(row.id, 'running');
+  }
+
+  /** compose down in the game folder on its server (the stop path of action()). */
+  private async runStop(row: GameServerRow): Promise<void> {
+    const cIds = this.containerIds(row);
+    for (const c of cIds) this.deps.setIntent(c, 'stop');
+    try {
+      await this.deps.hub.call(
+        row.serverId,
+        'compose.down',
+        { dir: gameDirOf(row.name) },
+        { timeoutMs: DOWN_TIMEOUT_MS },
+      );
+    } catch (err) {
+      for (const c of cIds) this.deps.setIntent(c, null);
+      throw err;
+    }
+    this.setRunState(row.id, 'stopped');
+  }
+
   /** RAM limit of the game: MEMORY field, else the template recommendation. */
   ramLimitOf(row: GameServerRow): number | null {
     const mem = storedOf(row).values.MEMORY;
@@ -1150,10 +1177,15 @@ export class GameService {
    * reserve for wichtig containers. Unknown RAM (no metrics yet) does not block.
    */
   private checkRam(row: GameServerRow): void {
+    this.checkRamOn(row, row.serverId);
+  }
+
+  /** The RAM reserve check of a start, on `serverId` (M11: the migration target). */
+  checkRamOn(row: GameServerRow, serverId: string): void {
     const needed = this.ramLimitOf(row);
     if (needed === null || !this.control) return;
-    const own = this.containerIds(row);
-    const d = this.control.ramCheck(row.serverId, needed, own);
+    const own = serverId === row.serverId ? this.containerIds(row) : [];
+    const d = this.control.ramCheck(serverId, needed, own);
     if (d === null) return;
     const left = Math.max(0, d.freeBytes - d.reserveBytes);
     throw new HttpError(
@@ -1526,6 +1558,200 @@ export class GameService {
     return result(this.summary(id) as GameSummary);
   }
 
+  // ---- M11: migration hooks (games/migrate.ts) ---------------------------------------------
+
+  /** Takes the busy lock for a migration: 409 busy (setup, action, backup) / agent_offline. */
+  lockForMigration(id: string, text: string): GameServerRow {
+    const row = this.requireRow(id);
+    this.lock(row, text);
+    return row;
+  }
+
+  /** Updates the busy text of a locked game (progress in the summary). */
+  setBusyText(id: string, text: string): void {
+    if (!this.busy.has(id)) return;
+    this.busy.set(id, text);
+    this.emit(id);
+  }
+
+  unlockMigration(id: string): void {
+    this.unlock(id);
+  }
+
+  /** A line on topic game:<id>. */
+  pushEvent(id: string, kind: GameEvent['kind'], text: string): void {
+    this.event(id, kind, text);
+  }
+
+  /** The game's container runs on its server. */
+  isRunning(id: string): boolean {
+    const row = this.row(id);
+    return row !== undefined && this.containerOf(row)?.state === 'running';
+  }
+
+  /** Stop while the migration holds the lock (same path as action('stop')). */
+  async stopLocked(id: string): Promise<void> {
+    await this.runStop(this.requireRow(id));
+  }
+
+  /** Start while the migration holds the lock (same path as action('start')). */
+  async startLocked(id: string): Promise<void> {
+    await this.runStart(this.requireRow(id));
+  }
+
+  /** Secrets of a game, for scrubbing agent output. */
+  secretsOfGame(id: string): string[] {
+    const row = this.row(id);
+    return row ? this.secretsOf(row) : [];
+  }
+
+  /**
+   * A game with this folder name exists on `serverId`, or a container uses the
+   * folder /opt/homelab/games/<name>/ there (it would be overwritten).
+   */
+  folderTakenOn(row: GameServerRow, serverId: string): boolean {
+    const dir = gameDirOf(row.name);
+    const game = this.deps.db
+      .select({ id: gameServers.id })
+      .from(gameServers)
+      .where(and(eq(gameServers.serverId, serverId), eq(gameServers.name, row.name)))
+      .get();
+    const foreign = this.deps.db
+      .select({ id: containers.id })
+      .from(containers)
+      .where(
+        and(
+          eq(containers.serverId, serverId),
+          or(eq(containers.composeDir, dir), eq(containers.name, `game-${row.name}`)),
+        ),
+      )
+      .get();
+    return game !== undefined || foreign !== undefined;
+  }
+
+  /**
+   * Host ports of the game on another server: the requested ones (same checks as
+   * on create: 400 invalid_input, 409 conflict), else the current port if it is
+   * free there, else the next free one from it. The RCON port (127.0.0.1) stays if
+   * free, else the next free one.
+   */
+  planPorts(
+    row: GameServerRow,
+    serverId: string,
+    requested: Record<string, number> | undefined,
+  ): {
+    ports: HostPort[];
+    rconPort: number | null;
+    changed: GamePortsUpdateResponse['changed'];
+    forwardingHint: string | null;
+  } {
+    const l = this.templates.get(row.templateId);
+    if (!l) throw new HttpError(409, 'conflict');
+    const t = l.template;
+    const names = new Set(t.ports.map((p) => p.name));
+    for (const k of Object.keys(requested ?? {})) {
+      if (!names.has(k)) throw new HttpError(400, 'invalid_input');
+    }
+    const current = new Map(storedOf(row).ports.map((p) => [p.name, p]));
+    const used = this.usedPorts(serverId, row.id);
+    const own: UsedPorts = { tcp: new Set(), udp: new Set() };
+    const ports: HostPort[] = [];
+    const changed: GamePortsUpdateResponse['changed'] = [];
+    for (const p of t.ports) {
+      const want = requested?.[p.name];
+      const all = mergeUsed(used, own);
+      let port: number | null;
+      if (want !== undefined) {
+        const hp = { port: want, protocol: p.protocol, count: p.count };
+        if (want + p.count - 1 > 65535) throw new HttpError(400, 'invalid_input');
+        if (!isFree(own, hp)) throw new HttpError(400, 'invalid_input');
+        if (!isFree(used, hp)) throw new HttpError(409, 'conflict');
+        port = want;
+      } else {
+        port = firstFree(all, current.get(p.name)?.port ?? p.default, p.protocol, p.count);
+      }
+      if (port === null) throw new HttpError(409, 'conflict');
+      markUsed(own, { port, protocol: p.protocol, count: p.count });
+      ports.push({ name: p.name, port, protocol: p.protocol, count: p.count, local: p.local });
+      const prev = current.get(p.name);
+      if (prev && prev.port !== port) {
+        changed.push({
+          name: p.name,
+          protocol: p.protocol,
+          count: p.count,
+          from: prev.port,
+          to: port,
+          local: p.local,
+        });
+      }
+    }
+    let rconPort: number | null = null;
+    if (t.rcon.supported) {
+      const all = mergeUsed(used, own);
+      const keep = row.rconPort;
+      rconPort =
+        keep !== null && isFree(all, { port: keep, protocol: 'tcp', count: 1 })
+          ? keep
+          : suggestRconPort(t, all);
+      if (rconPort === null) throw new HttpError(409, 'conflict');
+    }
+    return { ports, rconPort, changed, forwardingHint: targetForwardingHint(ports) };
+  }
+
+  /** compose.yml and .env of the game with other host ports (secrets from the DB). */
+  renderWithPorts(
+    row: GameServerRow,
+    ports: HostPort[],
+    rconPort: number | null,
+  ): { compose: string; env: string } {
+    const l = this.templates.get(row.templateId);
+    if (!l) throw new HttpError(409, 'conflict');
+    const stored = storedOf(row);
+    return this.render(l, {
+      name: row.name,
+      ports,
+      rconPort,
+      values: { values: stored.values, secrets: this.secretValues(row) },
+      rconPassword: this.rconPassword(row),
+    });
+  }
+
+  /** game.status of the game as it would run on `serverId` with `ports`. */
+  async statusOn(
+    row: GameServerRow,
+    serverId: string,
+    ports: HostPort[],
+  ): Promise<GameStatusData | null> {
+    return this.queryStatus({ ...row, serverId, portsJson: JSON.stringify(ports) });
+  }
+
+  /**
+   * The game now lives on `serverId` (same id: share links keep working). The
+   * RCON password stays encrypted as it is (AAD is the game id).
+   */
+  moveTo(id: string, serverId: string, ports: HostPort[], rconPort: number | null): void {
+    const prev = this.lastSummary.get(id);
+    this.deps.db
+      .update(gameServers)
+      .set({
+        serverId,
+        portsJson: JSON.stringify(ports),
+        rconPort,
+        updatedAt: this.deps.now(),
+      })
+      .where(eq(gameServers.id, id))
+      .run();
+    this.setRunState(id, 'running');
+    if (prev) this.lastSummary.set(id, { ...prev, serverId });
+    this.emit(id);
+  }
+
+  /** Marks the game stopped (after the migration stopped it on the target again). */
+  markStopped(id: string): void {
+    this.setRunState(id, 'stopped');
+    this.emit(id);
+  }
+
   // ---- delete ---------------------------------------------------------------------------
 
   /** Backup first (a missing world folder is fine), then game.remove, then the row. */
@@ -1661,6 +1887,20 @@ const PROTO_LABEL = { tcp: 'TCP', udp: 'UDP', 'tcp+udp': 'TCP+UDP' } as const;
 
 const portRange = (port: number, count: number): string =>
   count > 1 ? `${port}–${port + count - 1}` : String(port);
+
+/**
+ * M11: "Portweiterleitung am Ziel einrichten: game 25570 (TCP)" for every public
+ * port on the new server (the router must forward to the new machine even if
+ * the number stayed); null without public ports.
+ */
+export function targetForwardingHint(ports: readonly HostPort[]): string | null {
+  const pub = ports.filter((p) => !p.local);
+  if (pub.length === 0) return null;
+  const parts = pub.map(
+    (p) => `${p.name} ${portRange(p.port, p.count)} (${PROTO_LABEL[p.protocol]})`,
+  );
+  return `Portweiterleitung am Ziel einrichten: ${parts.join(', ')}`;
+}
 
 /** "Portweiterleitung anpassen: game 25565 → 25570 (TCP)"; null if no public port changed. */
 export function forwardingHint(changed: GamePortsUpdateResponse['changed']): string | null {

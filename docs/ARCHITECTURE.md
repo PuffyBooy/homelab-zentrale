@@ -85,6 +85,9 @@ design/                   Designsystem (nicht von Hand ändern, siehe design/REA
 | `server_state` | server_id, metrics_json (letzte `metrics`), metrics_at, system_json, updates_json, reboot_required, ssh_failed_24h, fail2ban_banned, listening_ports_json, inventory_at (letztes `inventory`) |
 | `agent_tokens` | id, server_id, token_hash (SHA-256 von `agent:<token>`), created_at, revoked_at |
 | `enroll_tokens` | id, name, location, token_hash (SHA-256 von `enroll:<token>`), created_at, expires_at (15 Min), used_at, server_id |
+| `onboarding_codes` | id, name, location, code_hash (HMAC-SHA-256 des Codes, Schlüssel per HKDF aus `HZ_SECRET_KEY`), created_at, expires_at (15 Min), exchanged_at, cancelled_at, enroll_token_id (M11, Server anbinden in einem Schritt) |
+| `server_allowed_ports` | server_id, proto, port, note, created_at (Soll-Liste offener Ports, M11) |
+| `server_port_audit` | server_id, seeded_at (vorhanden, sobald die Soll-Liste existiert) |
 | `metrics_raw` | server_id, ts (Empfangszeit im Core), cpu, ram, swap (Prozent), disk_max, disk_json (`[{mount, pct}]`), temp, net_in, net_out (Byte/s), 48 h |
 | `metrics_5m`, `metrics_1h` | server_id, ts (Bucket-Start), cpu, ram, swap, disk_max, temp, net_in, net_out (gemittelt, 1h gewichtet nach samples), samples; 30 Tage bzw. 1 Jahr. Pro Disk wird nur roh gespeichert. |
 | `containers` | id, server_id, docker_id (unique je Server), name, image, compose_project, state, health, ports_json, info_json (ganzes `ContainerInfo`, mit `role` aus `hz.role` und `cpuLimit`), last_mem_bytes (zuletzt bekannter Speicher, für die RAM-Reserve), updated_at |
@@ -94,6 +97,7 @@ design/                   Designsystem (nicht von Hand ändern, siehe design/REA
 | `container_throttles` | container_id, server_id, container_name, game_id, docker_id (das Limit gehört zu diesem Docker-Container), cpus, original_cpus (wird beim Aufheben wiederhergestellt), by (`auto`/`admin`/`schedule`), reason, since, auto_stopped_at |
 | `wichtig_restarts` | id, container_id, server_id, ts, ok (Startversuche gestoppter `wichtig`-Container, 10 Min) |
 | `game_backups` | id, game_id, path, size, created_at |
+| `game_migrations` | id, game_id, game_name, source/target_server_id und _name (ohne Fremdschlüssel), phase, failed_phase, bytes_done, bytes_total, sha256, error, error_text, rollback, ports_json, rcon_port, forwarding_hint (Ports am Ziel), was_running, target_touched (Import angenommen), cleanup_target, restart_source (offene Rückbau-Schritte), started_at, updated_at, finished_at (M11, Migration 13) |
 | `share_links` | id, game_id, person, token_hash (SHA-256 von `share:<token>`), pin_hash (argon2id), perms_json, expires_at, revoked_at, last_used_at, pin_failures, locked_until, created_at |
 | `share_audit` | id, share_id (ohne Fremdschlüssel, bleibt nach Löschen des Links), game_id, person, action, detail, ts, ip, via (`tailnet`/`gateway`); 90 Tage |
 | `github_repos` | id, full_name, default_branch, etag, last_commit_sha, ci_status, updated_at |
@@ -122,6 +126,7 @@ Die erste Nachricht muss innerhalb von 10 s ein gültiges `hello` sein. Danach a
 - `event {kind: 'container' | 'oom' | …, data}`
 - `rpc.result {id, ok, data | error}`
 - `stream.data {streamId, chunk}`, `stream.end {streamId, code}`
+- `transfer.begin {streamId, bytes, sha256, chunks}`, `transfer.chunk {streamId, seq, data}`, `transfer.ack {streamId, seq}`, `transfer.end {streamId, chunks, bytes, sha256}` (M11, nur für offene `game.export`/`game.import`-Streams dieser Verbindung, siehe „Umzug von Gameservern“)
 
 **Core → Agent** (`rpc {id, action, params}`). Erlaubte Aktionen (Allowlist, sonst Fehler):
 
@@ -136,6 +141,8 @@ Die erste Nachricht muss innerhalb von 10 s ein gültiges `hello` sein. Danach a
 | `game.backup` | `{gameDir}` → Stream |
 | `game.status` | `{gameDir, method, port, gamedigType?, tpsCommand?}` → Spieler, Version, TPS (RCON-Daten liest der Agent aus der `.env` im Ordner) |
 | `game.remove` | `{gameDir}` → `compose down` und Ordner löschen (nur unter `/opt/homelab/games/`) |
+| `game.export` | `{gameId, maxBytes}` → Stream: Archiv von `data/` des Spielordners, dann `transfer.begin/chunk/end` (M11) |
+| `game.import` | `{gameId, bytes, sha256, chunks}` → Stream: empfängt `transfer.chunk`/`transfer.end`, prüft Größe, sha256 und jeden Archiv-Eintrag, entpackt nach `/opt/homelab/games/<gameId>/data` (M11) |
 | `game.backups.purge` | `{gameId, olderThanDays}` → löscht eigene Backup-Archive dieses Gameservers unter `/opt/homelab/backups/<id>/`, die älter sind (für gelöschte Gameserver nach 30 Tagen) |
 | `deploy.run` | `{dir, repoUrl, sha, method, keyName?}` → Stream |
 | `deploy.key` | `{name}` → `{publicKey}` (ed25519, privater Schlüssel bleibt auf dem Server) |
@@ -147,6 +154,36 @@ Die erste Nachricht muss innerhalb von 10 s ein gültiges `hello` sein. Danach a
 Pfade werden im Agent normalisiert und müssen mit `/opt/homelab/` beginnen. Kein `exec` beliebiger Strings: Jede Aktion ruft feste Programme mit Argument-Arrays auf (`execFile`, nie `shell: true`).
 
 **Agent-Container:** `docker.sock` gemountet, `/proc` und `/sys` lesend gemountet (`/host/proc`), `/opt/homelab` gemountet, `pid: host` für Temperatur und Prozesse, `network_mode: host`. Für `system.*` läuft ein schmaler Helfer über `nsenter` bzw. dokumentierte Host-Kommandos. Wie genau, entscheidet Meilenstein 2 und dokumentiert es in `deploy/`.
+
+## Server anbinden in einem Schritt (M11)
+
+Vertrag: `packages/shared/src/api/onboarding.ts`, Code: `apps/core/src/servers/onboarding*.ts`, Skript-Vorlage `apps/core/templates/install.sh`.
+
+1. `POST /api/servers/onboarding` (Session + Step-up) legt einen Code an (8 Zeichen aus `ONBOARDING_CODE_ALPHABET`, 15 Min, einmalig, höchstens 10 offene, Name darf nicht belegt oder schon in einem offenen Onboarding sein). Gespeichert wird nur der HMAC. Antwort: Code (einmal sichtbar) und Einzeiler `curl -fsSL <HZ_BASE_URL>/install.sh | sudo sh -s -- <code>`.
+2. `GET /install.sh` ist öffentlich im Tailnet (außerhalb von `/api`, kein Session-Check). Das Skript ist für alle Server gleich; eingesetzt wird nur die Adresse aus `HZ_BASE_URL` (nie aus dem `Host`-Header). Ohne https-`HZ_BASE_URL` antwortet es in Produktion 404, sonst (Entwicklung, Tests) mit `http://127.0.0.1:<HZ_PORT>`.
+3. Das Skript (POSIX `sh`, `set -eu`) prüft Format des Codes, root, curl, Docker + Compose v2 und Tailscale, bricht ab, wenn schon ein Agent eingerichtet ist, und tauscht dann den Code über `POST /api/onboarding/exchange` (Code über stdin, nicht in `ps`). Antwort `text/plain` mit vier `KEY=value`-Zeilen; jeder Wert wird mit einem festen Muster geprüft (kein `eval`). Es schreibt `/etc/homelab-agent/agent.env` (0600), die Compose-Datei (gleich wie `deploy/docker-compose.agent.yml`, per Test geprüft) und `.env`, holt das Image (`HZ_AGENT_IMAGE` des Core) und startet den Agent. Das Token wird nie ausgegeben.
+4. Der Tausch ist ohne Session erreichbar (genau dieser Pfad in `PUBLIC_API_ROUTES`), ohne `Origin`-Header erlaubt (curl), mit fremdem `Origin` 403. Rate-Limit: 5 Versuche pro IP und 15 Min (auch erfolgreiche), 30 Fehlversuche über alle IPs sperren jeden Tausch für 15 Min. Die IP kommt aus `X-Forwarded-For` nur, wenn die Verbindung von Loopback kommt (`tailscale serve`). Jeder falsche, abgelaufene, benutzte oder abgebrochene Code bekommt dieselbe Antwort (400 `invalid_credentials`). Erst beim Tausch entsteht ein Enrollment-Token (`AgentTokens.createEnrollment`, 15 Min).
+5. `GET /api/servers/onboarding/:id`: `waiting` → `installing` (getauscht) → `connected` (der Agent hat sich mit dem Token angemeldet, `enroll_tokens.server_id` gesetzt) oder `expired`. `DELETE` bricht ab und macht auch ein schon getauschtes Enrollment-Token ungültig.
+
+Audit: `server.onboarding_created`, `server.onboarding_exchanged`, `server.onboarding_refused`, `server.onboarding_cancelled`, danach wie bisher `server.enrolled`. Code und Token stehen nie im Log oder Audit.
+
+## Port-Abgleich (M11)
+
+Vertrag: `packages/shared/src/api/ports.ts`, Code: `apps/core/src/servers/ports*.ts`. Nach jedem gespeicherten `inventory` (Hook `ServerService.onInventoryStored`) prüft der Core die öffentlichen lauschenden Ports (`isPublicBindAddress`: `0.0.0.0`, `::`, globale Adressen; Loopback, RFC 1918, Tailscale/CGNAT, ULA und Link-Local zählen nicht).
+
+- Gibt es für den Server noch keine Soll-Liste, übernimmt das erste Inventar mit Ports alle öffentlichen Ports, ohne Meldung. Ein Inventar mit leerer Portliste ändert nichts (der Agent konnte sie nicht lesen).
+- Danach: jeder öffentliche Port außerhalb der Liste ergibt eine `warn`-Meldung mit Schlüssel `port:<serverId>:<proto>:<port>` (Dedupe über den Meldungsdienst). Ist der Port erlaubt oder weg, wird sie aufgelöst (weg: mit OK-Eintrag; erlaubt: ohne).
+- `GET`/`PUT /api/servers/:id/ports/allowed`, `POST /api/servers/:id/ports/allow` (Session, kein Step-up, Audit `ports.update`/`ports.allow`). PUT und POST zählen auch als Anlegen der Liste.
+
+## Umzug von Gameservern (M11)
+
+Vertrag: `packages/shared/src/api/migrate.ts`, Frames in `agent-protocol.ts`. Code: `apps/core/src/games/migrate.ts` (Ablauf), `apps/core/src/games/migrate-routes.ts` (Routen), `apps/core/src/agents/transfer.ts` (Relay), Hooks in `apps/core/src/agents/hub.ts`.
+
+- Routen: `POST /api/games/:id/migrate` (Session + Step-up, Modul games) → 202 `{migrationId}`; `GET /api/games/:id/migration`, `GET /api/games/:id/migration/suggest?targetServerId=`, `POST /api/games/:id/migration/cancel` (nur vor `start`). Ein Umzug pro Gameserver und pro Zielserver gleichzeitig (409 `busy`), Ziel = Quelle 400, Ziel offline 409 `agent_offline`, Ordnername am Ziel belegt oder Ports belegt 409 `conflict`, RAM-Reserve (M10) am Ziel 409 `insufficient_ram`.
+- Ablauf: **backup** (RCON-Speichern, dann wird der Gameserver an der Quelle gestoppt, `game.export` startet) → **transfer** (Relay Quelle → Core → Ziel, RAM am Ziel nochmal geprüft, `game.import`) → **restore** (Ziel prüft und entpackt, Core schreibt `compose.yml`/`.env` mit den neuen Ports; das RCON-Passwort bleibt unverändert verschlüsselt) → **start** (RAM-Prüfung, `compose.up`, warten bis `game.status` antwortet; danach zeigt der Datensatz auf das Ziel, gleiche ID, Benutzerlinks gelten weiter) → **stop_old** (Quelle ist schon gestoppt, ihr Ordner bleibt als Rückfall) → **done**. War der Gameserver vorher gestoppt, wird er nach der Startprüfung am Ziel wieder gestoppt.
+- Relay: Der Core leitet `transfer.chunk` der Quelle unverändert an den Import-Stream des Ziels weiter und bestätigt der Quelle einen Chunk erst, wenn das Ziel ihn bestätigt hat. Die Quelle darf höchstens `TRANSFER_WINDOW` Chunks über die letzte Bestätigung des Ziels hinaus senden, sonst bricht der Core ab; damit hält der Core nie mehr als das Fenster im Speicher. Jeder Chunk wird geprüft (Reihenfolge, Größe, angekündigte Bytes und `MIGRATION_MAX_BYTES`), sha256 rechnet der Core selbst nach und vergleicht mit `transfer.begin`/`transfer.end`; erst dann geht `transfer.end` mit den eigenen Werten ans Ziel. Kein Frame für `TRANSFER_IDLE_TIMEOUT_MS`: Abbruch. Transfer-Frames für unbekannte Stream-IDs, fremde Verbindungen oder Nicht-Transfer-Streams zählen als ungültig (zu viele schließen die Verbindung mit 1008). Transfer-Frames haben ein eigenes Nachrichtenbudget (`maxTransferMessages`).
+- Fehler vor dem erfolgreichen Start am Ziel: Streams werden abgebrochen, die Kopie am Ziel per `game.remove` entfernt (nur wenn `game.import` angenommen wurde, ein fremder Ordner wird nie angefasst), die Quelle wieder gestartet, wenn sie lief. Ist ein Agent offline, bleibt der Schritt offen (`cleanup_target`/`restart_source`) und der Job `games.migrateCleanup` (alle 15 s) holt ihn nach. Ein Neustart des Core markiert laufende Umzüge als `failed` mit `interrupted` und denselben offenen Schritten.
+- Fortschritt: Zeilen im Topic `game:<id>`, Busy-Text des Gameservers („Umzug: Übertragung 40 %“), `bytes_done` höchstens einmal pro Sekunde in der DB. Audit: `game.migrate_started`, `game.migrate_done`, `game.migrate_failed`, `game.migrate_refused`, `game.migrate_cancel`.
 
 ## Live-Daten zum Browser
 

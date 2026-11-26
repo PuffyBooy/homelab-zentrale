@@ -49,6 +49,10 @@ const tables = [
   schema.serverThrottle,
   schema.containerThrottles,
   schema.wichtigRestarts,
+  schema.onboardingCodes,
+  schema.serverAllowedPorts,
+  schema.serverPortAudit,
+  schema.gameMigrations,
 ];
 
 describe('database', () => {

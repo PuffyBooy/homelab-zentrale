@@ -2,6 +2,8 @@ import {
   createCipheriv,
   createDecipheriv,
   createHash,
+  createHmac,
+  hkdfSync,
   randomBytes,
   timingSafeEqual as nodeTimingSafeEqual,
 } from 'node:crypto';
@@ -81,4 +83,17 @@ export function timingSafeEqual(a: string, b: string): boolean {
   const ha = createHash('sha256').update(a, 'utf8').digest();
   const hb = createHash('sha256').update(b, 'utf8').digest();
   return nodeTimingSafeEqual(ha, hb) && a.length === b.length;
+}
+
+/**
+ * Purpose-bound subkey of HZ_SECRET_KEY (HKDF-SHA-256), so a key used for
+ * hashing never doubles as the encryption key.
+ */
+export function deriveSubkey(key: Buffer, info: string): Buffer {
+  return Buffer.from(hkdfSync('sha256', key, Buffer.alloc(0), Buffer.from(info, 'utf8'), 32));
+}
+
+/** HMAC-SHA-256 hex digest. For short secrets (codes) where a plain hash is cheap to reverse. */
+export function hmacSha256Hex(key: Buffer, input: string): string {
+  return createHmac('sha256', key).update(input, 'utf8').digest('hex');
 }

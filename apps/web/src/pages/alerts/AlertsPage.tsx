@@ -28,6 +28,7 @@ import { mergeById } from '../../lib/live.js';
 import { ALL_SERVERS } from '../../lib/servers.js';
 import { parseAutostopKey } from '../../lib/throttle.js';
 import { RestartAutostopButton } from '../throttle/RestartAutostopButton.js';
+import { AllowPortButton } from './AllowPortButton.js';
 
 const STATE_TEXT: Record<AlertData['state'], string> = {
   open: 'offen',
@@ -163,6 +164,7 @@ export function AlertsPage(): ReactElement {
                             onError={setStartError}
                           />
                         ) : null}
+                        <AllowPortButton alert={a} onError={setStartError} />
                         {a.state === 'open' ? (
                           <Button
                             size="sm"

@@ -17,12 +17,15 @@ import {
 } from '../../lib/games.js';
 import { useLiveTopic } from '../../lib/live.js';
 import { priorityText } from '../../lib/throttle.js';
+import { isMigrationActive } from '../../lib/migrate.js';
 import { useNow } from '../../lib/useNow.js';
 import { BackupsTile } from './BackupsTile.js';
 import { ConsoleTile } from './ConsoleTile.js';
 import { DeleteGameDialog } from './DeleteGameDialog.js';
 import { ForwardHint } from './ForwardHint.js';
 import { GameTile } from './GameTile.js';
+import { MigrateDialog } from './MigrateDialog.js';
+import { MigrationTile, useMigration } from './MigrationTile.js';
 import { GamePriorityTile } from '../throttle/PriorityTile.js';
 import { PortsTile } from './PortsTile.js';
 import { SettingsTile } from './SettingsTile.js';
@@ -70,6 +73,9 @@ function Detail({ game }: { game: GameSummary }): ReactElement {
   const [params, setParams] = useSearchParams();
   const { hash } = useLocation();
   const [deleting, setDeleting] = useState(false);
+  const [moving, setMoving] = useState(false);
+  const migration = useMigration(game.id);
+  const migrating = isMigrationActive(migration.data);
   const consoleInput = useRef<HTMLInputElement>(null);
   const consoleAnchor = useRef<HTMLDivElement>(null);
 
@@ -104,6 +110,7 @@ function Detail({ game }: { game: GameSummary }): ReactElement {
   return (
     <div className="hz-grid app-grid">
       {showSetup ? <SetupTile game={game} events={list} onClose={closeSetup} /> : null}
+      <MigrationTile game={game} now={now} />
       <div className="hz-span-2 app-game">
         <GameTile game={game} onConsole={toConsole} />
       </div>
@@ -154,6 +161,21 @@ function Detail({ game }: { game: GameSummary }): ReactElement {
       <Tile title="Von außen erreichbar" icon="globe" span={2}>
         <ForwardHint ports={ports} server={server} />
       </Tile>
+      <Tile title="Umziehen" icon="server" span={2}>
+        <p className="app-text">
+          Zieht {game.name} mit Welt und Einstellungen auf einen anderen Server um. Am Ziel schlägt
+          die Zentrale freie Ports vor.
+        </p>
+        <div className="hz-form-actions">
+          <Button
+            icon="server"
+            disabled={migrating || game.status === 'busy'}
+            onClick={() => setMoving(true)}
+          >
+            {migrating ? 'Umzug läuft …' : 'Umziehen …'}
+          </Button>
+        </div>
+      </Tile>
       <Tile title="Löschen" icon="alert" span={2}>
         <p className="app-text">
           Entfernt Container und Ordner von {game.name} auf {game.serverName}. Die Welt wird vorher
@@ -166,6 +188,7 @@ function Detail({ game }: { game: GameSummary }): ReactElement {
         </div>
       </Tile>
       {deleting ? <DeleteGameDialog game={game} onClose={() => setDeleting(false)} /> : null}
+      {moving ? <MigrateDialog game={game} onClose={() => setMoving(false)} /> : null}
     </div>
   );
 }

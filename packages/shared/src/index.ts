@@ -14,3 +14,6 @@ export * from './api/ha.js';
 export * from './api/console-wall.js';
 export * from './api/modules.js';
 export * from './api/throttle.js';
+export * from './api/onboarding.js';
+export * from './api/migrate.js';
+export * from './api/ports.js';

@@ -1,5 +1,5 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
-import { WALL_COOKIE } from '@hz/shared';
+import { ONBOARDING_EXCHANGE_PATH, WALL_COOKIE } from '@hz/shared';
 import type { Clock } from '../clock.js';
 import { sendError } from '../http/errors.js';
 import { SESSION_COOKIE, SESSION_TTL_MS, type AuthContext, type SessionStore } from './sessions.js';
@@ -34,7 +34,15 @@ export const PUBLIC_API_ROUTES: readonly string[] = [
   '/api/setup/confirm',
   // Swaps a wall device token for the wall cookie (own rate limit, Origin checked).
   '/api/wall/session',
+  // M11: install.sh swaps a one-time onboarding code (own rate limit, see below for Origin).
+  ONBOARDING_EXCHANGE_PATH,
 ];
+/**
+ * Exact public routes called by scripts (curl sends no Origin). A request
+ * without Origin passes; one with an Origin still has to match, so a web page
+ * cannot post there from another site.
+ */
+export const SCRIPT_API_ROUTES: readonly string[] = [ONBOARDING_EXCHANGE_PATH];
 /**
  * The only routes (GET) that accept the read-only wall device cookie instead of an
  * admin session. Every other route ignores that cookie.
@@ -161,9 +169,11 @@ export function installAuthGuard(
       if (!device) return sendError(reply, 401, 'unauthorized');
       request.wallDevice = device;
     }
+    const scriptCall = SCRIPT_API_ROUTES.includes(path) && request.headers.origin === undefined;
     if (
       MUTATING.has(request.method) &&
       !ownAuthPath(path) &&
+      !scriptCall &&
       !originAllowed(request, opts.baseUrl)
     ) {
       return sendError(reply, 403, 'bad_origin');

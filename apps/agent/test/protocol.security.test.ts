@@ -340,3 +340,51 @@ describe('reconnect', () => {
     await until(() => received.length >= 2, 4000);
   });
 });
+
+describe('transfer frames (M11)', () => {
+  it('routes valid transfer frames after welcome and drops invalid ones', async () => {
+    const got: unknown[] = [];
+    onConnection = (ws) => {
+      ws.once('message', () => {
+        send(ws, { type: 'transfer.chunk', streamId: 'early-stream', seq: 0, data: 'AAAA' });
+        send(ws, welcome);
+        setTimeout(() => {
+          // Not base64, wrong padding, negative seq, unknown field: all dropped.
+          send(ws, {
+            type: 'transfer.chunk',
+            streamId: 'stream-0001',
+            seq: 0,
+            data: 'not base64!',
+          });
+          send(ws, { type: 'transfer.chunk', streamId: 'stream-0001', seq: 0, data: 'AAA' });
+          send(ws, { type: 'transfer.ack', streamId: 'stream-0001', seq: -1 });
+          send(ws, { type: 'transfer.ack', streamId: 'stream-0001', seq: 0, extra: 1 });
+          send(ws, { type: 'transfer.chunk', streamId: 'stream-0001', seq: 0, data: 'AAAA' });
+          send(ws, { type: 'transfer.ack', streamId: 'stream-0001', seq: 3 });
+          send(ws, {
+            type: 'transfer.end',
+            streamId: 'stream-0001',
+            chunks: 1,
+            bytes: 3,
+            sha256: 'a'.repeat(64),
+          });
+        }, 50);
+      });
+    };
+    makeConn({ onTransfer: (m) => got.push(m) });
+    await conn?.start();
+    await until(() => got.length >= 3);
+    await new Promise((r) => setTimeout(r, 50));
+    expect(got).toEqual([
+      { type: 'transfer.chunk', streamId: 'stream-0001', seq: 0, data: 'AAAA' },
+      { type: 'transfer.ack', streamId: 'stream-0001', seq: 3 },
+      {
+        type: 'transfer.end',
+        streamId: 'stream-0001',
+        chunks: 1,
+        bytes: 3,
+        sha256: 'a'.repeat(64),
+      },
+    ]);
+  });
+});

@@ -177,7 +177,7 @@ export async function cleanupPartialBackups(homelabRoot: string): Promise<string
 }
 
 /** Template of the running game container (label homelab.template), if docker is available. */
-async function templateOf(ctx: ActionContext, name: string): Promise<string | null> {
+export async function templateOf(ctx: ActionContext, name: string): Promise<string | null> {
   const docker = ctx.host.docker;
   if (!docker) return null;
   try {

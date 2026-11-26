@@ -1,13 +1,26 @@
-import { randomBytes } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { WebSocket } from 'ws';
 
 /**
  * Simulated agent for e2e: speaks the protocol from packages/shared/src/agent-protocol.ts
  * (hello -> enrolled/welcome -> metrics + inventory) and answers the RPCs the web UI can
  * trigger: cleanup preview and cleanup (M2), container.* and compose.* with a fresh
- * inventory, container.logs as a stream (M3) and container.limit (M10). Nothing here
- * runs a real command.
+ * inventory, container.logs as a stream (M3), container.limit (M10), and for M11 the
+ * listening ports of the inventory plus game.export / game.import (binary transfer with
+ * transfer.begin/chunk/ack/end and a sha256 check). Nothing here runs a real command.
  */
+
+/** Same shape as listeningPortSchema in packages/shared. */
+export interface SimListeningPort {
+  proto: 'tcp' | 'udp';
+  address: string;
+  port: number;
+  process?: string;
+}
+
+/** Same values as packages/shared (agent-protocol.ts, M11 transfer). */
+const TRANSFER_CHUNK_BYTES = 48 * 1024;
+const TRANSFER_WINDOW = 32;
 
 /** Same shape as containerInfoSchema in packages/shared (kept local, e2e has no deps). */
 export interface SimContainer {
@@ -73,6 +86,28 @@ export interface SimAgentOptions {
   games?: boolean;
   /** Announce the terminal capability and answer pty.* with an echo shell. */
   terminal?: boolean;
+  /** inventory.listeningPorts; default sshd on 0.0.0.0:22 and python3 on 127.0.0.1:8123. */
+  listeningPorts?: SimListeningPort[];
+  /** Size of the simulated world archive game.export sends (default 100 KiB, 3 chunks). */
+  exportBytes?: number;
+}
+
+/** An archive game.import is receiving. */
+interface SimImport {
+  gameId: string;
+  bytes: number;
+  sha256: string;
+  chunks: number;
+  parts: Buffer[];
+}
+
+/** An archive game.export is sending, waiting for acks beyond the window. */
+interface SimExport {
+  streamId: string;
+  data: Buffer;
+  chunks: number;
+  next: number;
+  acked: number;
 }
 
 /** One simulated PTY: echoes input like a line-mode shell, never runs anything. */
@@ -101,9 +136,21 @@ export class SimAgent {
   readonly ptySizes: { cols: number; rows: number }[] = [];
   /** All input that reached the agent (the core must not log it, the test checks it got here). */
   ptyInput = '';
+  /** Public and local listening ports reported in every inventory (M11 port audit). */
+  listeningPorts: SimListeningPort[];
+  /** World data per game folder name: set by game.import, read by game.export. */
+  readonly gameData = new Map<string, Buffer>();
+  private readonly imports = new Map<string, SimImport>();
+  private readonly exports = new Map<string, SimExport>();
 
   constructor(private readonly o: SimAgentOptions) {
     this.containers = (o.containers ?? []).map((c) => ({ ...c }));
+    this.listeningPorts = (
+      o.listeningPorts ?? [
+        { proto: 'tcp', address: '0.0.0.0', port: 22, process: 'sshd' },
+        { proto: 'tcp', address: '127.0.0.1', port: 8123, process: 'python3' },
+      ]
+    ).map((p) => ({ ...p }));
   }
 
   container(name: string): SimContainer | undefined {
@@ -156,6 +203,9 @@ export class SimAgent {
         } else if (msg.type === 'stream.cancel') {
           this.endStream(String(msg.streamId), null);
           this.ptys.delete(String(msg.streamId));
+          this.cancelTransfer(String(msg.streamId));
+        } else if (msg.type.startsWith('transfer.')) {
+          this.onTransfer(msg);
         }
       });
     });
@@ -284,10 +334,7 @@ export class SimAgent {
       rebootRequired: true,
       sshFailed24h: 41,
       fail2banBanned: 2,
-      listeningPorts: [
-        { proto: 'tcp', address: '0.0.0.0', port: 22, process: 'sshd' },
-        { proto: 'tcp', address: '127.0.0.1', port: 8123, process: 'python3' },
-      ],
+      listeningPorts: this.listeningPorts,
     });
   }
 
@@ -493,8 +540,157 @@ export class SimAgent {
     this.send({ type: 'rpc.result', id, ok: true, data: { cpus } });
   }
 
+  /** Opens a port (like a new nginx on 0.0.0.0) and reports it in a fresh inventory. */
+  listen(p: SimListeningPort): void {
+    this.listeningPorts.push({ ...p });
+    this.sendInventory();
+  }
+
+  /** game.export: accepted, a progress line, transfer.begin, chunks in the ack window. */
+  private startExport(id: string, params: Record<string, unknown>): void {
+    const gameId = String(params.gameId ?? '');
+    let data = this.gameData.get(gameId);
+    if (!data) {
+      data = randomBytes(this.o.exportBytes ?? 100 * 1024);
+      this.gameData.set(gameId, data);
+    }
+    const chunks = Math.max(1, Math.ceil(data.length / TRANSFER_CHUNK_BYTES));
+    const ex: SimExport = { streamId: id, data, chunks, next: 0, acked: -1 };
+    this.exports.set(id, ex);
+    this.send({ type: 'rpc.result', id, ok: true, data: { streamId: id } });
+    this.send({
+      type: 'stream.data',
+      streamId: id,
+      channel: 'progress',
+      chunk: `archive ${gameId}/data ${data.length} bytes\n`,
+    });
+    this.send({
+      type: 'transfer.begin',
+      streamId: id,
+      bytes: data.length,
+      sha256: createHash('sha256').update(data).digest('hex'),
+      chunks,
+    });
+    this.pumpExport(ex);
+  }
+
+  private pumpExport(ex: SimExport): void {
+    while (ex.next < ex.chunks && ex.next - ex.acked <= TRANSFER_WINDOW) {
+      const part = ex.data.subarray(
+        ex.next * TRANSFER_CHUNK_BYTES,
+        (ex.next + 1) * TRANSFER_CHUNK_BYTES,
+      );
+      this.send({
+        type: 'transfer.chunk',
+        streamId: ex.streamId,
+        seq: ex.next,
+        data: part.toString('base64'),
+      });
+      ex.next++;
+    }
+    if (ex.next === ex.chunks && ex.acked === ex.chunks - 1) {
+      this.exports.delete(ex.streamId);
+      this.send({
+        type: 'transfer.end',
+        streamId: ex.streamId,
+        chunks: ex.chunks,
+        bytes: ex.data.length,
+        sha256: createHash('sha256').update(ex.data).digest('hex'),
+      });
+      this.send({ type: 'stream.end', streamId: ex.streamId, code: 0 });
+    }
+  }
+
+  /** game.import: accepted, then the core sends the chunks. */
+  private startImport(id: string, params: Record<string, unknown>): void {
+    const gameId = String(params.gameId ?? '');
+    // Like the real agent: refused when /opt/homelab/games/<gameId>/data exists.
+    if (this.gameData.has(gameId)) {
+      this.send({
+        type: 'rpc.result',
+        id,
+        ok: false,
+        error: { code: 'busy', message: 'data exists' },
+      });
+      return;
+    }
+    this.imports.set(id, {
+      gameId,
+      bytes: Number(params.bytes),
+      sha256: String(params.sha256),
+      chunks: Number(params.chunks),
+      parts: [],
+    });
+    this.send({ type: 'rpc.result', id, ok: true, data: { streamId: id } });
+  }
+
+  private onTransfer(msg: Msg): void {
+    const streamId = String(msg.streamId);
+    if (msg.type === 'transfer.ack') {
+      const ex = this.exports.get(streamId);
+      if (!ex) return;
+      ex.acked = Math.max(ex.acked, Number(msg.seq));
+      this.pumpExport(ex);
+      return;
+    }
+    const im = this.imports.get(streamId);
+    if (!im) return;
+    if (msg.type === 'transfer.chunk') {
+      if (Number(msg.seq) !== im.parts.length) {
+        this.failImport(streamId, 'sequence');
+        return;
+      }
+      im.parts.push(Buffer.from(String(msg.data), 'base64'));
+      this.send({ type: 'transfer.ack', streamId, seq: Number(msg.seq) });
+    } else if (msg.type === 'transfer.end') {
+      const data = Buffer.concat(im.parts);
+      const sha = createHash('sha256').update(data).digest('hex');
+      if (data.length !== im.bytes || sha !== im.sha256 || msg.sha256 !== sha) {
+        this.failImport(streamId, 'checksum_mismatch');
+        return;
+      }
+      this.imports.delete(streamId);
+      this.gameData.set(im.gameId, data);
+      const result = { bytes: data.length, sha256: sha, entries: 3 };
+      this.send({
+        type: 'stream.data',
+        streamId,
+        channel: 'progress',
+        chunk: `extracted ${im.gameId}/data\nresult ${JSON.stringify(result)}\n`,
+      });
+      this.send({ type: 'stream.end', streamId, code: 0 });
+    }
+  }
+
+  private failImport(streamId: string, error: string): void {
+    this.imports.delete(streamId);
+    this.send({ type: 'stream.end', streamId, code: 1, error });
+  }
+
+  private cancelTransfer(streamId: string): void {
+    this.imports.delete(streamId);
+    this.exports.delete(streamId);
+  }
+
   /** Game server actions (only with `games`); false when the action is not one of them. */
   private answerGame(id: string, action: string, params: Record<string, unknown>): boolean {
+    if (action === 'game.export') {
+      this.startExport(id, params);
+      return true;
+    }
+    if (action === 'game.import') {
+      this.startImport(id, params);
+      return true;
+    }
+    if (action === 'game.remove') {
+      const gameDir = String(params.gameDir ?? '');
+      const name = gameDir.split('/').pop() ?? '';
+      this.containers = this.containers.filter((c) => c.composeDir !== gameDir);
+      this.gameData.delete(name);
+      this.sendInventory();
+      this.send({ type: 'rpc.result', id, ok: true, data: {} });
+      return true;
+    }
     const dir = String(params.dir ?? params.gameDir ?? '');
     const name = dir.split('/').pop() ?? 'game';
     const list = this.containers.filter((c) => c.composeDir === dir);

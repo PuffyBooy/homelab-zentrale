@@ -30,6 +30,7 @@ import { githubRoutes } from './github/routes.js';
 import { GithubService } from './github/service.js';
 import type { FetchLike as GithubFetch } from './github/client.js';
 import { gameRoutes } from './games/routes.js';
+import { migrateRoutes } from './games/migrate-routes.js';
 import { GameService } from './games/service.js';
 import { loadTemplates } from './games/templates.js';
 import type { HaClientOptions } from './homeassistant/client.js';
@@ -48,6 +49,10 @@ import { loadVapidKeys } from './push/vapid.js';
 import { healthRoutes } from './routes/health.js';
 import { Scheduler } from './scheduler.js';
 import { serverRoutes } from './servers/routes.js';
+import { installScriptRoutes, onboardingRoutes } from './servers/onboarding-routes.js';
+import { OnboardingService } from './servers/onboarding.js';
+import { PortAuditService } from './servers/ports.js';
+import { portRoutes } from './servers/ports-routes.js';
 import { ServerService } from './servers/service.js';
 import { shareGatewayRoutes, shareTailnetRoutes } from './share/friend-routes.js';
 import { redactShareUrl } from './share/redact.js';
@@ -120,6 +125,8 @@ export interface CoreServices {
   wall: WallService;
   modules: ModuleService;
   throttle: ThrottleService;
+  onboarding: OnboardingService;
+  ports: PortAuditService;
   db: DbHandle;
 }
 
@@ -527,6 +534,28 @@ export async function buildApp(config: Config, deps: AppDeps = {}): Promise<Fast
   });
   auth.wallDevices = (token) => wall.resolve(token);
 
+  // ---- M11: onboarding, port audit ----------------------------------------------
+  const onboarding = new OnboardingService({ db: db.db, now, tokens, config });
+  const ports = new PortAuditService({
+    db: db.db,
+    now,
+    alerts,
+    log: app.log.child({ mod: 'ports' }),
+  });
+  servers.onInventoryStored((id, inv) => {
+    try {
+      ports.onInventory(id, inv.listeningPorts);
+    } catch (err) {
+      app.log.error(
+        {
+          serverId: id,
+          err: err instanceof Error ? { name: err.name, stack: err.stack } : 'error',
+        },
+        'port audit failed',
+      );
+    }
+  });
+
   app.decorate('hzCore', {
     scheduler,
     tokens,
@@ -548,6 +577,8 @@ export async function buildApp(config: Config, deps: AppDeps = {}): Promise<Fast
     wall,
     modules,
     throttle,
+    onboarding,
+    ports,
     db,
   });
 
@@ -562,6 +593,7 @@ export async function buildApp(config: Config, deps: AppDeps = {}): Promise<Fast
     alerts.prune();
     shares.prune();
   });
+  scheduler.every('onboarding.prune', HOUR, () => void onboarding.prune());
   scheduler.every('logs.leases', 30_000, () => logs.expireLeases());
   // Rule set of M10 on the metrics interval (agents send metrics every 10 s).
   scheduler.every('throttle.tick', 10_000, () => throttle.tick());
@@ -667,6 +699,9 @@ export async function buildApp(config: Config, deps: AppDeps = {}): Promise<Fast
     metrics,
     alerts,
   });
+  await app.register(onboardingRoutes, { prefix: '/api', db: db.db, now, onboarding });
+  await app.register(installScriptRoutes, { onboarding });
+  await app.register(portRoutes, { prefix: '/api', db: db.db, now, servers, ports });
   await app.register(moduleRoutes, { prefix: '/api', db: db.db, now, modules });
   await app.register(alertRoutes, { prefix: '/api', db: db.db, now, alerts });
   await app.register(containerRoutes, { prefix: '/api', db: db.db, now, containers, servers, hub });
@@ -682,6 +717,16 @@ export async function buildApp(config: Config, deps: AppDeps = {}): Promise<Fast
   await app.register(pushRoutes, { prefix: '/api', db: db.db, now, push });
   await app.register(githubRoutes, { prefix: '/api', db: db.db, now, github });
   await app.register(gameRoutes, { prefix: '/api', db: db.db, now, games });
+  await app.register(migrateRoutes, {
+    prefix: '/api',
+    db: db.db,
+    now,
+    hub,
+    games,
+    scheduler,
+    log: app.log.child({ mod: 'migrate' }),
+    onMoved: (id) => throttle.forgetGame(id),
+  });
   await app.register(shareRoutes, {
     prefix: '/api',
     db: db.db,

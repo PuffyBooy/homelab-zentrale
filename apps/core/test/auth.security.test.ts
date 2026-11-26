@@ -74,6 +74,7 @@ describe('every /api route needs a session', () => {
         '/api/auth/login',
         '/api/auth/state',
         '/api/health',
+        '/api/onboarding/exchange',
         '/api/setup/confirm',
         '/api/setup/start',
         '/api/wall/session',

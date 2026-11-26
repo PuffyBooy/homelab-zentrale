@@ -726,3 +726,96 @@ export const wichtigRestarts = sqliteTable(
 export type ContainerPriorityRow = typeof containerPriorities.$inferSelect;
 export type ServerThrottleRow = typeof serverThrottle.$inferSelect;
 export type ContainerThrottleRow = typeof containerThrottles.$inferSelect;
+
+// ---- M11: onboarding, port audit ----------------------------------------------
+
+/** One-step onboarding codes (8 chars, 15 min, once). */
+export const onboardingCodes = sqliteTable(
+  'onboarding_codes',
+  {
+    id: text('id').primaryKey(),
+    name: text('name').notNull(),
+    location: text('location').notNull().default(''),
+    /** HMAC-SHA-256 of the canonical code (subkey of HZ_SECRET_KEY). Never the code. */
+    codeHash: text('code_hash').notNull().unique(),
+    createdAt: integer('created_at').notNull(),
+    expiresAt: integer('expires_at').notNull(),
+    /** Swapped for an enrollment token (enrollTokenId). */
+    exchangedAt: integer('exchanged_at'),
+    cancelledAt: integer('cancelled_at'),
+    enrollTokenId: text('enroll_token_id'),
+  },
+  (t) => [index('onboarding_codes_expires').on(t.expiresAt)],
+);
+
+/** Allowed public listening ports of a server. */
+export const serverAllowedPorts = sqliteTable(
+  'server_allowed_ports',
+  {
+    serverId: text('server_id')
+      .notNull()
+      .references(() => servers.id, { onDelete: 'cascade' }),
+    proto: text('proto').notNull(),
+    port: integer('port').notNull(),
+    note: text('note'),
+    createdAt: integer('created_at').notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.serverId, t.proto, t.port] })],
+);
+
+/** Present once the allowed list of a server exists (seeded or set by hand). */
+export const serverPortAudit = sqliteTable('server_port_audit', {
+  serverId: text('server_id')
+    .primaryKey()
+    .references(() => servers.id, { onDelete: 'cascade' }),
+  seededAt: integer('seeded_at').notNull(),
+});
+
+export type OnboardingCodeRow = typeof onboardingCodes.$inferSelect;
+export type ServerAllowedPortRow = typeof serverAllowedPorts.$inferSelect;
+
+// ---- M11: game migration ------------------------------------------------------
+
+/** One attempt to move a game server to another server (games/migrate.ts). */
+export const gameMigrations = sqliteTable(
+  'game_migrations',
+  {
+    id: text('id').primaryKey(),
+    gameId: text('game_id')
+      .notNull()
+      .references(() => gameServers.id, { onDelete: 'cascade' }),
+    gameName: text('game_name').notNull(),
+    sourceServerId: text('source_server_id').notNull(),
+    sourceServerName: text('source_server_name').notNull(),
+    targetServerId: text('target_server_id').notNull(),
+    targetServerName: text('target_server_name').notNull(),
+    /** MigrationPhase (api/migrate.ts). */
+    phase: text('phase').notNull(),
+    failedPhase: text('failed_phase'),
+    bytesDone: integer('bytes_done').notNull().default(0),
+    bytesTotal: integer('bytes_total'),
+    sha256: text('sha256'),
+    /** MigrationErrorCode. */
+    error: text('error'),
+    /** Fixed German text, never agent output. */
+    errorText: text('error_text'),
+    rollback: text('rollback'),
+    /** HostPort[] on the target. */
+    portsJson: text('ports_json').notNull().default('[]'),
+    rconPort: integer('rcon_port'),
+    forwardingHint: text('forwarding_hint'),
+    wasRunning: integer('was_running', { mode: 'boolean' }).notNull().default(false),
+    /** game.import was accepted: the target folder belongs to this migration. */
+    targetTouched: integer('target_touched', { mode: 'boolean' }).notNull().default(false),
+    /** Rollback still has to remove the target copy. */
+    cleanupTarget: integer('cleanup_target', { mode: 'boolean' }).notNull().default(false),
+    /** Rollback still has to start the source game again. */
+    restartSource: integer('restart_source', { mode: 'boolean' }).notNull().default(false),
+    startedAt: integer('started_at').notNull(),
+    updatedAt: integer('updated_at').notNull(),
+    finishedAt: integer('finished_at'),
+  },
+  (t) => [index('game_migrations_game').on(t.gameId, t.startedAt)],
+);
+
+export type GameMigrationRow = typeof gameMigrations.$inferSelect;
