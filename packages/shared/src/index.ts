@@ -19,3 +19,4 @@ export * from './api/migrate.js';
 export * from './api/ports.js';
 export * from './api/storage.js';
 export * from './api/game-features.js';
+export * from './api/relay.js';

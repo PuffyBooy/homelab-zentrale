@@ -17,6 +17,7 @@ import { makeHostExec, runFile, spawnFile } from './exec.js';
 import { normalizeArch, type HostContext } from './host.js';
 import { createLogger } from './log.js';
 import { PtyManager } from './actions/pty.js';
+import { RelayManager } from './actions/relay.js';
 import { StreamManager } from './streams.js';
 
 async function agentVersion(): Promise<string> {
@@ -75,8 +76,10 @@ async function main(): Promise<void> {
     : undefined;
   // Wake listeners of sleeping games (game.wake.arm); the event goes out on the
   // agent connection like every other event.
-  const wake = new WakeManager({
+  const wake: WakeManager = new WakeManager({
     log,
+    // relay is created right below; the closure only runs on game.wake.arm.
+    relayHolds: (port, protocol) => relay?.holds(port, protocol) ?? false,
     emit: (event) => {
       if (!conn.send({ type: 'event', ts: new Date().toISOString(), event })) {
         log.warn('game_wake event not sent (offline); the core re-arms on reconnect', {
@@ -85,6 +88,11 @@ async function main(): Promise<void> {
       }
     },
   });
+  // Game relay ingress: only constructed with HZ_AGENT_ALLOW_RELAY=1; it never
+  // takes a port of a wake listener.
+  const relay: RelayManager | undefined = config.allowRelay
+    ? new RelayManager({ log, wakeHolds: (port, protocol) => wake.holds(port, protocol) })
+    : undefined;
   const dispatcher = new Dispatcher(
     {
       name: config.name,
@@ -106,6 +114,7 @@ async function main(): Promise<void> {
       dataDir: config.dataDir,
       ...(pty ? { pty } : {}),
       wake,
+      ...(relay ? { relay } : {}),
     },
     (event) => conn.send(event),
   );
@@ -116,6 +125,7 @@ async function main(): Promise<void> {
     dataDir: config.dataDir,
     envToken: config.token,
     allowTerminal: config.allowTerminal,
+    allowRelay: config.allowRelay,
     docker: docker !== null,
     version: await agentVersion(),
     arch: normalizeArch(os.arch()),
@@ -154,6 +164,7 @@ async function main(): Promise<void> {
     hostExec: config.hostExec,
     docker: docker !== null,
     terminal: config.allowTerminal,
+    relay: config.allowRelay,
   });
   // Temp archives of backups that died with a previous agent process (no backup runs yet).
   const stale = await cleanupPartialBackups(config.homelabRoot);
@@ -177,7 +188,7 @@ async function main(): Promise<void> {
     for (const t of timers) clearTimeout(t);
     // Free the game ports before exiting (bounded: exit closes them anyway).
     const exit = setTimeout(() => process.exit(0), 1000);
-    void wake.closeAll().finally(() => {
+    void Promise.all([wake.closeAll(), relay?.closeAll()]).finally(() => {
       clearTimeout(exit);
       process.exit(0);
     });

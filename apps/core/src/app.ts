@@ -77,6 +77,9 @@ import { ThrottleService } from './throttle/service.js';
 import { moduleRoutes } from './modules/routes.js';
 import { installModuleGate, ModuleService } from './modules/service.js';
 import { storageRoutes } from './storage/routes.js';
+import { seedDemoRelay } from './demo/relay.js';
+import { relayRoutes } from './relay/routes.js';
+import { RelayService } from './relay/service.js';
 import { StorageService } from './storage/service.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -113,6 +116,8 @@ export interface AppDeps {
   consoleOptions?: ConsoleOptions;
   /** M12: HTTP for Discord webhooks and the Modrinth API (tests: a fake). */
   gameFetch?: FetchLike;
+  /** M15: HTTP for the DNS providers Cloudflare / DuckDNS (tests: a fake). */
+  dnsFetch?: FetchLike;
 }
 
 /** Core services, decorated on the app as `hzCore` (routes, tests). */
@@ -144,6 +149,7 @@ export interface CoreServices {
   throttle: ThrottleService;
   onboarding: OnboardingService;
   ports: PortAuditService;
+  relay: RelayService;
   db: DbHandle;
 }
 
@@ -607,6 +613,25 @@ export async function buildApp(config: Config, deps: AppDeps = {}): Promise<Fast
       );
     }
   });
+  // ---- M15: game relay (ingresses, fixed addresses, DNS) ------------------------
+  const relay = new RelayService({
+    db: db.db,
+    box,
+    now,
+    hub,
+    servers,
+    games,
+    log: app.log.child({ mod: 'relay' }),
+    ...(deps.dnsFetch ? { fetch: deps.dnsFetch } : {}),
+  });
+  games.setRelay(relay);
+  // Ports, a move, a deleted game: the routes of the ingresses follow (sent only on change).
+  games.onChange(() => relay.queueAll());
+  servers.onAgentConnected((id) => relay.onAgentConnected(id));
+  servers.onInventoryStored((id) => relay.onInventory(id));
+  servers.onChange((id, deleted) => {
+    if (deleted) relay.onServerDeleted(id);
+  });
   // ---- M13: NAS und Speicher -------------------------------------------------
   const storage = new StorageService({
     db: db.db,
@@ -657,6 +682,7 @@ export async function buildApp(config: Config, deps: AppDeps = {}): Promise<Fast
     throttle,
     onboarding,
     ports,
+    relay,
     db,
   });
 
@@ -719,7 +745,14 @@ export async function buildApp(config: Config, deps: AppDeps = {}): Promise<Fast
   });
   if (config.demo) {
     const demoIds = seedDemo({ db: db.db, now, servers, metrics, scheduler, logs });
-    seedDemoGames({ db: db.db, now, serverIds: demoIds, templates: games.templates, box });
+    const demoGame = seedDemoGames({
+      db: db.db,
+      now,
+      serverIds: demoIds,
+      templates: games.templates,
+      box,
+    });
+    seedDemoRelay({ db: db.db, now, serverIds: demoIds, gameId: demoGame });
     app.log.warn('HZ_DEMO=1: demo servers with simulated metrics');
   }
 
@@ -733,9 +766,17 @@ export async function buildApp(config: Config, deps: AppDeps = {}): Promise<Fast
   });
   app.addHook('preClose', async () => {
     scheduler.stop();
+    relay.stop();
     // Let running checks and pushes finish before the database closes (bounded).
     await Promise.race([
-      Promise.all([checks.idle(), push.idle(), github.idle(), games.idle(), gameNotifier.idle()]),
+      Promise.all([
+        checks.idle(),
+        push.idle(),
+        github.idle(),
+        games.idle(),
+        gameNotifier.idle(),
+        relay.idle(),
+      ]),
       new Promise((r) => setTimeout(r, 3_000).unref()),
     ]);
     ha.stop();
@@ -836,6 +877,7 @@ export async function buildApp(config: Config, deps: AppDeps = {}): Promise<Fast
     shares,
     baseUrl: config.baseUrl,
   });
+  await app.register(relayRoutes, { prefix: '/api', db: db.db, now, games, relay });
   await app.register(haRoutes, { prefix: '/api', db: db.db, now, ha });
   await app.register(shareGatewayRoutes, { prefix: '/api/share-gateway', shares, now });
   await app.register(shareTailnetRoutes, {

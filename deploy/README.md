@@ -70,6 +70,7 @@ Beim ersten Verbinden tauscht der Agent das Einmal-Token gegen ein dauerhaftes A
 | `HZ_AGENT_TOKEN` | Enrollment-Token (erster Start) oder Agent-Token. |
 | `HZ_AGENT_NAME` | Name des Servers, `a-z0-9-`. Muss bei „Neu starten“ zur Bestätigung eingegeben werden. |
 | `HZ_AGENT_ALLOW_TERMINAL` | `1` erlaubt die Web-Konsole (PTY). Standard `0`: alle `pty.*` werden abgelehnt. |
+| `HZ_AGENT_ALLOW_RELAY` | `1` macht den Server zum Game-Eingang (M15, `install-agent.sh --allow-relay`, aus mit `--no-relay`): der Agent nimmt die Spielports (ab 1024) an und leitet TCP/UDP über Tailscale zum Server des Spiels. **Nur am Eingang** setzen (öffentliche IPv4, Portbereich in der Anbieter-Firewall offen), nie am Heimserver. Standard `0`: `relay.set` wird abgelehnt. |
 | `HZ_AGENT_SMART` | `1` liest SMART der Platten (M13). Setzt das Override `docker-compose.agent.smart.yml`, nicht von Hand: es bringt auch die nötigen Rechte. |
 | `HZ_AGENT_DATA` | Datenordner (`/data`). |
 | `HZ_AGENT_HOST_EXEC` | `nsenter` (Image-Standard), `direct` (Agent direkt auf dem Host, Entwicklung), `none`. |

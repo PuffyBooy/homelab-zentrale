@@ -92,6 +92,8 @@ export interface SimAgentOptions {
   exportBytes?: number;
   /** M13: inventory.storage (RAID, volumes, disks); left out when undefined. */
   storage?: Record<string, unknown>;
+  /** M15: announce the relay capability and accept relay.set (no sockets are opened). */
+  relay?: boolean;
 }
 
 /** An archive game.import is receiving. */
@@ -146,6 +148,10 @@ export class SimAgent {
   readonly gameData = new Map<string, Buffer>();
   private readonly imports = new Map<string, SimImport>();
   private readonly exports = new Map<string, SimExport>();
+  /** M15: the routes of the last accepted relay.set. */
+  relayRoutes: Record<string, unknown>[] = [];
+  /** M15: route ids relay.set reports as failed (port in use). */
+  readonly relayFail = new Set<string>();
 
   constructor(private readonly o: SimAgentOptions) {
     this.containers = (o.containers ?? []).map((c) => ({ ...c }));
@@ -180,7 +186,11 @@ export class SimAgent {
           arch: 'x64',
           os: 'Debian GNU/Linux 12 (bookworm)',
           token: this.agentToken ?? this.o.token,
-          capabilities: { terminal: !!this.o.terminal, docker: this.o.containers !== undefined },
+          capabilities: {
+            terminal: !!this.o.terminal,
+            docker: this.o.containers !== undefined,
+            relay: !!this.o.relay,
+          },
         });
       });
       ws.on('message', (raw) => {
@@ -285,6 +295,33 @@ export class SimAgent {
       return true;
     }
     return fail('not_allowed');
+  }
+
+  /** relay.set: ok per route unless its id is in relayFail; not_allowed without `relay`. */
+  private answerRelay(id: string, params: Record<string, unknown>): void {
+    if (!this.o.relay) {
+      this.send({
+        type: 'rpc.result',
+        id,
+        ok: false,
+        error: { code: 'not_allowed', message: 'relay is disabled on this server' },
+      });
+      return;
+    }
+    const routes = Array.isArray(params.routes) ? (params.routes as Record<string, unknown>[]) : [];
+    this.relayRoutes = routes.filter((r) => !this.relayFail.has(String(r.id)));
+    this.send({
+      type: 'rpc.result',
+      id,
+      ok: true,
+      data: {
+        routes: routes.map((r) =>
+          this.relayFail.has(String(r.id))
+            ? { id: String(r.id), ok: false, error: `Port ${String(r.listenPort)} ist belegt` }
+            : { id: String(r.id), ok: true, error: null },
+        ),
+      },
+    });
   }
 
   /** Simulates a stopped agent: socket gone, no more reports. */
@@ -472,6 +509,10 @@ export class SimAgent {
       return;
     }
     if (this.answerPty(id, action, params)) return;
+    if (action === 'relay.set') {
+      this.answerRelay(id, params);
+      return;
+    }
     if (this.o.games && this.answerGame(id, action, params)) return;
     if (action === 'container.limit') {
       this.answerLimit(id, params);

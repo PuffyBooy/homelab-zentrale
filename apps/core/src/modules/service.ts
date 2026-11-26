@@ -73,8 +73,20 @@ const MODULE_PREFIXES: Record<ModuleId, readonly string[]> = {
     '/api/settings/share-gateway',
     '/api/share-gateway',
     '/s',
+    // M15 game relay
+    '/api/relay',
+    '/api/settings/dns',
   ],
   storage: ['/api/storage'],
+};
+
+/** Module routes below another prefix (decoded path or route pattern). */
+const MODULE_PATTERNS: Record<ModuleId, readonly RegExp[]> = {
+  github: [],
+  homeassistant: [],
+  // M15: PUT /api/servers/:id/ingress
+  games: [/^\/api\/servers\/[^/]+\/ingress\/?$/],
+  storage: [],
 };
 
 function under(path: string, prefix: string): boolean {
@@ -85,6 +97,7 @@ function under(path: string, prefix: string): boolean {
 export function moduleOfPath(path: string): ModuleId | null {
   for (const m of MODULES) {
     if (MODULE_PREFIXES[m].some((p) => under(path, p))) return m;
+    if (MODULE_PATTERNS[m].some((re) => re.test(path))) return m;
   }
   return null;
 }

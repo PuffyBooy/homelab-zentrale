@@ -30,6 +30,7 @@ import { GithubTile } from './GithubTiles.js';
 import { HaEntitiesTile, HaSettingsTile } from './HaTiles.js';
 import { NotifyTile, PushTile } from './PushTiles.js';
 import { ShareGatewayTile } from './ShareGatewayTile.js';
+import { DnsTile, IngressTile } from './RelayTiles.js';
 import { ModulesTile } from './ModulesTile.js';
 import { useModules } from '../../lib/useModules.js';
 
@@ -45,6 +46,8 @@ export const SETTINGS_SECTIONS: readonly { id: string; label: string; module?: M
   { id: 'ha', label: 'Home Assistant', module: 'homeassistant' },
   { id: 'wandmodus', label: 'Wandmodus' },
   { id: 'share-gateway', label: 'Share-Gateway', module: 'games' },
+  { id: 'eingaenge', label: 'Eingänge', module: 'games' },
+  { id: 'dns', label: 'DNS', module: 'games' },
   { id: 'backup', label: 'Backup' },
 ];
 
@@ -67,7 +70,7 @@ function Anchor({
 export function SettingsPage(): ReactElement {
   const { hash } = useLocation();
   const modules = useModules();
-  // Tiles with their own anchor (github, ha, share-gateway) scroll themselves once loaded.
+  // Tiles with their own anchor (github, ha, share-gateway, eingaenge, dns) scroll themselves once loaded.
   useEffect(() => {
     const id = decodeURIComponent(hash.slice(1));
     if (!id) return;
@@ -118,7 +121,14 @@ export function SettingsPage(): ReactElement {
         <Anchor id="wandmodus" wide>
           <WallDevicesTile />
         </Anchor>
-        {modules.games ? <ShareGatewayTile /> : null}
+        {modules.games ? (
+          <>
+            <ShareGatewayTile />
+            {/* Wide: each server row has a status, a firewall line and an action. */}
+            <IngressTile />
+            <DnsTile />
+          </>
+        ) : null}
         <Anchor id="backup">
           <BackupTile />
         </Anchor>

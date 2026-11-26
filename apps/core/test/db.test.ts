@@ -59,6 +59,8 @@ const tables = [
   schema.gamePlayerHours,
   schema.gameMods,
   schema.whitelistRequests,
+  schema.serverIngress,
+  schema.gameRelays,
 ];
 
 describe('database', () => {
