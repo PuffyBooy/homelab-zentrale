@@ -49,7 +49,21 @@ async function startFake(
         return;
       }
       fake.downBytes += n;
-      res.end(Buffer.alloc(n));
+      // Streamed from one fixed 64 KiB chunk; no buffer sized by the request.
+      const chunk = Buffer.alloc(64 * 1024);
+      let left = n;
+      const pump = (): void => {
+        while (left > 0) {
+          const part = left >= chunk.length ? chunk : chunk.subarray(0, left);
+          left -= part.length;
+          if (!res.write(part)) {
+            res.once('drain', pump);
+            return;
+          }
+        }
+        res.end();
+      };
+      pump();
       return;
     }
     if (url.pathname === '/__up' && req.method === 'POST') {
