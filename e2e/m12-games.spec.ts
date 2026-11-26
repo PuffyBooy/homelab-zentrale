@@ -148,7 +148,7 @@ test('the sleeping game shows "Schläft" in the list', async () => {
   await page.goto('/games');
   const tile = page.locator('section.hz-game').filter({ hasText: 'survival' });
   await expect(tile.locator('.hz-status-off')).toContainText('Schläft');
-  await expect(tile.getByRole('button', { name: 'Start' })).toBeVisible();
+  await expect(tile.getByRole('button', { name: 'Start', exact: true })).toBeVisible();
   await themes(page, 'games-sleeping');
 });
 
