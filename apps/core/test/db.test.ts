@@ -150,7 +150,7 @@ describe('database', () => {
         .prepare('SELECT id, token_hash, session_hash, paired_at FROM wall_devices ORDER BY id')
         .all(),
     ).toEqual([
-      { id: 'd1', token_hash: 'hash-paired', session_hash: 'hash-paired', paired_at: 5 },
+      { id: 'd1', token_hash: null, session_hash: 'hash-paired', paired_at: 5 },
       { id: 'd2', token_hash: 'hash-new', session_hash: null, paired_at: null },
     ]);
   });

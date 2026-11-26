@@ -200,7 +200,7 @@ export class FakeGithub {
         node_id: 'x',
         commit: {
           message: c.message,
-          author: { name: c.author, email: 'alex@example.invalid', date: c.date },
+          author: { name: c.author, email: 'admin@example.invalid', date: c.date },
           committer: { name: c.author, date: c.date },
         },
         author: { login: 'admin-hz' },

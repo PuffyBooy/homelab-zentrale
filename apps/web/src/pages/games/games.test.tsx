@@ -133,15 +133,15 @@ describe('ForwardHint', () => {
     const out = html(<ForwardHint ports={ports} server={server({ name: 'oracle-a1' })} />);
     expect(out).toContain('2456–2458/UDP');
     expect(out).toContain('Security List');
-    expect(out).not.toContain('Deco');
+    expect(out).not.toContain('Zuhause (Router)');
   });
 
-  it('shows the Deco router at home and both without a guess', () => {
+  it('shows the home router at home and both without a guess', () => {
     const home = html(<ForwardHint ports={ports} server={server({ name: 'heimserver' })} />);
-    expect(home).toContain('Deco');
+    expect(home).toContain('Zuhause (Router)');
     expect(home).not.toContain('Security List');
     const both = html(<ForwardHint ports={ports} server={undefined} />);
-    expect(both).toContain('Deco');
+    expect(both).toContain('Zuhause (Router)');
     expect(both).toContain('Security List');
   });
 });

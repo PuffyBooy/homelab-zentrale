@@ -47,8 +47,8 @@ describe('ssh failures', () => {
       { pid: '1', message: 'Failed password for invalid user admin from 1.2.3.4 port 5 ssh2' },
       { pid: '1', message: 'Failed password for invalid user admin from 1.2.3.4 port 5 ssh2' },
       { pid: '2', message: 'Invalid user test from 1.2.3.4 port 6' },
-      { pid: '3', message: 'Failed publickey for alex from 1.2.3.4 port 7 ssh2' },
-      { pid: '4', message: 'Accepted publickey for alex from 100.64.0.2 port 8 ssh2' },
+      { pid: '3', message: 'Failed publickey for admin from 1.2.3.4 port 7 ssh2' },
+      { pid: '4', message: 'Accepted publickey for admin from 100.64.0.2 port 8 ssh2' },
     ];
     expect(countSshFailures(entries)).toBe(4);
   });

@@ -133,6 +133,8 @@ export class AgentTokens {
           // A new location in the enrollment wins; an empty one keeps the old.
           ...(consumed.location !== '' ? { location: consumed.location } : {}),
           lastSeen: now,
+          // A new machine under the old name must not inherit the web console.
+          allowTerminal: false,
         };
         tx.update(servers).set(set).where(eq(servers.id, existing.id)).run();
         const agentToken = randomToken(32);

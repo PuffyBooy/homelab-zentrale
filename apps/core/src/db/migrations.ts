@@ -537,8 +537,13 @@ CREATE TABLE wall_devices_new (
   paired_at INTEGER
 );
 INSERT INTO wall_devices_new (id, name, token_hash, session_hash, used_token_hash, created_at, last_seen_at, paired_at)
-  SELECT id, name, token_hash, CASE WHEN last_seen_at IS NULL THEN NULL ELSE token_hash END,
-         NULL, created_at, last_seen_at, last_seen_at
+  -- Devices already seen keep their cookie (the old token becomes the session secret),
+  -- but the old link must not pair a second time: it moves to used_token_hash.
+  SELECT id, name,
+         CASE WHEN last_seen_at IS NULL THEN token_hash ELSE NULL END,
+         CASE WHEN last_seen_at IS NULL THEN NULL ELSE token_hash END,
+         CASE WHEN last_seen_at IS NULL THEN NULL ELSE token_hash END,
+         created_at, last_seen_at, last_seen_at
   FROM wall_devices;
 DROP TABLE wall_devices;
 ALTER TABLE wall_devices_new RENAME TO wall_devices;

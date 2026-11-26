@@ -36,9 +36,12 @@ export function ForwardHint({ ports, server }: ForwardHintProps): ReactElement {
       {list}
       {place !== 'oracle' ? (
         <>
-          <h3 className="hz-label">Zuhause (Deco-Router)</h3>
+          <h3 className="hz-label">Zuhause (Router)</h3>
           <ol className="app-howto">
-            <li>Deco-App öffnen: Mehr → Erweitert → NAT-Weiterleitung → Port-Weiterleitung.</li>
+            <li>
+              Im Router (Web-Oberfläche oder App) die Port-Weiterleitung öffnen (oft unter NAT oder
+              Freigaben).
+            </li>
             <li>
               Pro Zeile oben einen Eintrag: Ziel ist die LAN-IP von {where}, interner und externer
               Port gleich, Protokoll wie angegeben.

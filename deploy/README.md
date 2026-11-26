@@ -2,7 +2,7 @@
 
 ## Images (GHCR)
 
-Die Images baut `.github/workflows/images.yml` bei jedem Push auf `main` und bei jedem Tag `v*`, für `linux/amd64` und `linux/arm64` (Oracle A1 und der Pi sind ARM), und legt sie in der GitHub Container Registry ab:
+Die Images baut `.github/workflows/images.yml` nach jedem grünen CI-Lauf auf `main` und bei jedem Tag `v*`, für `linux/amd64` und `linux/arm64` (viele Cloud-VMs und der Raspberry Pi sind ARM), und legt sie in der GitHub Container Registry ab:
 
 | Image | Dockerfile |
 | --- | --- |

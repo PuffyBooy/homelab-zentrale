@@ -181,6 +181,7 @@ describe('re-enrollment of a revoked server', () => {
       () =>
         (t.db.sqlite.prepare('SELECT COUNT(*) n FROM metrics_raw').get() as { n: number }).n === 1,
     );
+    t.db.sqlite.prepare('UPDATE servers SET allow_terminal = 1 WHERE id = ?').run(e.serverId);
     await revoke(t, secret, cookie, e.serverId);
     await e.agent.closed;
     expect(t.app.hzCore.tokens.hasActiveToken(e.serverId)).toBe(false);
@@ -197,6 +198,8 @@ describe('re-enrollment of a revoked server', () => {
     // Same row, history kept, revoked state cleared.
     expect(t.app.hzCore.servers.list()).toHaveLength(1);
     expect(t.app.hzCore.servers.row(e.serverId)?.agentVersion).toBe('0.3.0');
+    // A new machine under the old name does not inherit the web console.
+    expect(t.app.hzCore.servers.row(e.serverId)?.allowTerminal).toBe(false);
     expect(t.db.sqlite.prepare('SELECT COUNT(*) n FROM metrics_raw').get()).toEqual({ n: 1 });
     expect(t.app.hzCore.tokens.hasActiveToken(e.serverId)).toBe(true);
 

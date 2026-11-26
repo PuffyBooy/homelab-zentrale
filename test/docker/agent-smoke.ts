@@ -859,7 +859,7 @@ async function main(): Promise<void> {
   // Setup: account + TOTP.
   const start = setupStartResponseSchema.parse(
     await json(
-      await api('POST', '/api/setup/start', { setupToken, username: 'alex', password }),
+      await api('POST', '/api/setup/start', { setupToken, username: 'admin', password }),
       'setup/start',
     ),
   );
