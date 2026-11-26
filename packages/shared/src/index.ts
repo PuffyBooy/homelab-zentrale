@@ -23,3 +23,4 @@ export * from './api/relay.js';
 export * from './agent-ops.js';
 export * from './api/ops.js';
 export * from './api/integrations.js';
+export * from './api/cloud.js';

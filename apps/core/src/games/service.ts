@@ -3,6 +3,7 @@ import { and, asc, desc, eq, inArray, isNull, or, type SQL } from 'drizzle-orm';
 import type { FastifyBaseLogger } from 'fastify';
 import type { z } from 'zod';
 import {
+  CLOUD_GAME_TEXT,
   backupDoneDataSchema,
   backupFileNameSchema,
   gameBackupsPurgeDataSchema,
@@ -83,6 +84,10 @@ import { parseBackupResult, translateProgress, type BackupDone } from './agent-t
 import { gameState, type GamePhase } from './status.js';
 import { serverNetworkOf } from '../servers/service.js';
 import type { LoadedTemplate } from './templates.js';
+
+/** M22: admin game start on a cloud VM over budget (the cloud page can start it anyway). */
+export const CLOUD_OVER_BUDGET_GAME_MESSAGE =
+  'Cloud-Budget aufgebraucht. Auf der Cloud-Seite mit Bestätigung starten.';
 
 export type GameCreateRequest = z.output<typeof gameCreateRequestSchema>;
 export type GameUpdateRequest = z.output<typeof gameUpdateRequestSchema>;
@@ -347,6 +352,24 @@ export interface GameControl {
   reserveOf(serverId: string, ownContainerIds: readonly string[]): number | null;
 }
 
+/**
+ * M22 hook of the cloud module: a game on a cloud VM that is asleep (deallocated)
+ * starts the VM first. The game service knows nothing about Azure.
+ */
+export interface GameCloudHost {
+  /**
+   * Before a start on `serverId`: `ready` (no cloud server, or its VM runs), `wake`
+   * (the VM must be started or is starting) or `over_budget` (the budget is used up and
+   * the VM would have to be started; refused for every caller, the admin starts the
+   * machine with overBudget on the cloud page).
+   */
+  startGate(serverId: string): 'ready' | 'wake' | 'over_budget';
+  /** Starts the VM if needed; resolves true once its agent is back with fresh metrics. */
+  ensureRunning(serverId: string, actor: string): Promise<boolean>;
+  /** Status text for games on a sleeping VM (CLOUD_GAME_TEXT.deallocated), else null. */
+  statusText(serverId: string): string | null;
+}
+
 type BackupOutcome = { ok: true; backup: GameBackup } | { ok: false; reason: string; code: string };
 
 /**
@@ -368,6 +391,9 @@ export class GameService {
   private refreshQueued = false;
   private control: GameControl | null = null;
   private portAudit: GamePortAudit | null = null;
+  private cloudHost: GameCloudHost | null = null;
+  /** Games whose start waits for their cloud VM (busy text CLOUD_GAME_TEXT.starting). */
+  private readonly cloudWaiting = new Set<string>();
   private relay: GameRelayHooks | null = null;
   private readonly lifecycle = new Set<GameLifecycleListener>();
   private readonly statusListeners = new Set<GameStatusListener>();
@@ -401,6 +427,10 @@ export class GameService {
 
   setPortAudit(p: GamePortAudit): void {
     this.portAudit = p;
+  }
+
+  setCloudHost(h: GameCloudHost | null): void {
+    this.cloudHost = h;
   }
 
   setRelay(r: GameRelayHooks): void {
@@ -696,7 +726,10 @@ export class GameService {
     const running = c?.state === 'running';
     const sleeping = row.sleeping && row.phase === 'stopped' && !running;
     // Asleep is shown as such, also while the agent is away (it re-arms on hello).
-    const statusText = sleeping && state.status === 'off' ? SLEEP_TEXT : state.statusText;
+    const cloudText =
+      state.status === 'off' ? (this.cloudHost?.statusText(row.serverId) ?? null) : null;
+    const statusText =
+      cloudText ?? (sleeping && state.status === 'off' ? SLEEP_TEXT : state.statusText);
     return {
       id: row.id,
       name: row.name,
@@ -908,11 +941,18 @@ export class GameService {
     serverId: string,
     requested: Record<string, number> | undefined,
   ): { ports: HostPort[]; rconPort: number | null } {
+    return this.resolvePortsOn(t, this.usedPorts(serverId), requested);
+  }
+
+  private resolvePortsOn(
+    t: GameTemplate,
+    used: UsedPorts,
+    requested: Record<string, number> | undefined,
+  ): { ports: HostPort[]; rconPort: number | null } {
     const names = new Set(t.ports.map((p) => p.name));
     for (const k of Object.keys(requested ?? {})) {
       if (!names.has(k)) throw new HttpError(400, 'invalid_input');
     }
-    const used = this.usedPorts(serverId);
     const own: UsedPorts = { tcp: new Set(), udp: new Set() };
     const ports: HostPort[] = [];
     for (const p of t.ports) {
@@ -1470,12 +1510,19 @@ export class GameService {
       return this.summary(id) as GameSummary;
     }
     const texts = { start: 'Startet', stop: 'Wird gestoppt', restart: 'Neustart' } as const;
+    const starts =
+      action === 'start' || (action === 'restart' && this.containerOf(row)?.state !== 'running');
+    // M22: a game on a sleeping cloud VM starts the VM first (in the background).
+    if (starts && this.cloudHost) {
+      const gate = this.cloudHost.startGate(row.serverId);
+      if (gate === 'over_budget') {
+        throw new HttpError(409, 'over_budget', undefined, CLOUD_OVER_BUDGET_GAME_MESSAGE);
+      }
+      if (gate === 'wake') return this.startAfterCloud(row, actor);
+    }
     // A restart of a game that does not run is a start (compose up): same RAM check.
     let release = (): void => undefined;
-    if (
-      action === 'start' ||
-      (action === 'restart' && this.containerOf(row)?.state !== 'running')
-    ) {
+    if (starts) {
       release = this.admitStart(row.serverId, this.ramLimitOf(row), this.containerIds(row), actor);
     }
     try {
@@ -1527,6 +1574,93 @@ export class GameService {
       if (!opts.sleep) this.announce(id, 'offline');
     } else this.pendingOnline.add(id);
     return this.summary(id) as GameSummary;
+  }
+
+  /** The start of this game waits for its cloud VM (POST start answers 202). */
+  waitsForCloud(id: string): boolean {
+    return this.cloudWaiting.has(id);
+  }
+
+  /**
+   * M22: holds the game busy ("Cloud-Server startet") while the VM starts, then runs
+   * the normal start (RAM reserve, compose up) with the same actor. Not awaited.
+   */
+  private startAfterCloud(
+    row: GameServerRow,
+    actor: Parameters<GameService['action']>[2],
+  ): GameSummary {
+    const host = this.cloudHost;
+    if (!host) throw new HttpError(409, 'agent_offline');
+    if (this.busy.has(row.id) || row.phase === 'setup') throw new HttpError(409, 'busy');
+    this.busy.set(row.id, CLOUD_GAME_TEXT.starting);
+    this.cloudWaiting.add(row.id);
+    this.emit(row.id);
+    const run = async (): Promise<void> => {
+      let ok: boolean;
+      try {
+        ok = await host.ensureRunning(row.serverId, actor ?? 'admin');
+      } finally {
+        this.cloudWaiting.delete(row.id);
+        this.unlock(row.id);
+      }
+      if (!this.row(row.id)) return;
+      if (!ok) {
+        this.event(row.id, 'error', 'Start fehlgeschlagen: Cloud-Server nicht erreichbar');
+        return;
+      }
+      try {
+        await this.action(row.id, 'start', actor);
+      } catch (err) {
+        const reason =
+          err instanceof HttpError ? (err.userMessage ?? err.code) : rpcReason(err, 'Start');
+        this.event(row.id, 'error', `Start fehlgeschlagen: ${reason}`);
+      }
+    };
+    this.track(run());
+    return this.summary(row.id) as GameSummary;
+  }
+
+  /**
+   * M22: checks a gameserver for a cloud machine that does not exist yet, like POST
+   * /api/games would (template, values, ports, external address). Returns its RAM limit.
+   */
+  validatePending(req: Omit<GameCreateRequest, 'serverId'>): { ramBytes: number | null } {
+    const l = this.templates.get(req.templateId);
+    if (!l) throw new HttpError(400, 'invalid_input');
+    const t = l.template;
+    if (!validExternalAddress(req.externalAddress)) throw new HttpError(400, 'invalid_input');
+    if (!t.arch.includes('amd64')) {
+      throw new HttpError(400, 'invalid_input', undefined, 'Läuft nicht auf amd64');
+    }
+    const values = this.validate(t, req.values);
+    this.resolvePortsOn(t, { tcp: new Set(), udp: new Set() }, req.ports);
+    return { ramBytes: this.ramLimitFor(t.id, values.values) };
+  }
+
+  /** Ids of the games on a server. */
+  gameIdsOn(serverId: string): string[] {
+    return this.deps.db
+      .select({ id: gameServers.id })
+      .from(gameServers)
+      .where(eq(gameServers.serverId, serverId))
+      .all()
+      .map((r) => r.id);
+  }
+
+  /** Public host ports of all games on a server (never local ones, never RCON). */
+  publicPortsOn(serverId: string): { port: number; proto: 'tcp' | 'udp' }[] {
+    const out: { port: number; proto: 'tcp' | 'udp' }[] = [];
+    for (const row of this.rows().filter((r) => r.serverId === serverId)) {
+      const tplPorts = new Map(
+        (this.templates.get(row.templateId)?.template.ports ?? []).map((p) => [p.name, p]),
+      );
+      const ports = storedOf(row).ports.map((p) => ({
+        ...p,
+        local: p.local ?? tplPorts.get(p.name)?.local ?? false,
+      }));
+      out.push(...publicGamePorts(ports));
+    }
+    return out;
   }
 
   /** compose up in the game folder on its server (the start path of action()). */

@@ -38,6 +38,16 @@ Alles hier braucht deine Zugänge oder ist nicht rückgängig zu machen. Bis dah
 25. **Discord-Bot (ab M18):** Im Discord Developer Portal eine Application anlegen, unter „Bot“ den Token kopieren, Application-ID und die ID deines Discord-Servers (Entwicklermodus → Rechtsklick auf den Server → „Server-ID kopieren“) in der Zentrale unter Einstellungen → Discord-Bot eintragen (fragt nach dem TOTP-Code), dann den angezeigten Einladungslink öffnen. Pro Freund im Benutzerlink-Abschnitt die Discord-User-ID eintragen; nur diese Freunde dürfen Befehle nutzen.
 26. **Echo Show und Alexa (ab M18, Sprachsteuerung):** In Home Assistant pro Gameserver zwei Helfer anlegen: Schalter (`input_boolean.minecraft`) und optional Text (`input_text.minecraft_status`). Den Schalter an Alexa freigeben: mit Nabu Casa (Home Assistant Cloud) oder kostenlos mit `emulated_hue` im LAN. Dann in der Zentrale unter Einstellungen → Sprachsteuerung zuordnen. Auf der Echo Show das HA-Dashboard im Silk-Browser öffnen („Alexa, öffne Silk“) und die Helfer als Karten anzeigen. Die Zentrale selbst bleibt nur über Tailscale erreichbar.
 
+27. **Cloud-Server bei Azure (ab M22):** Einmalig im Azure-Portal (portal.azure.com) oben die Cloud Shell (Bash) öffnen und eingeben:
+    - `az group create -n homelab-zentrale -l germanywestcentral` (eigene Ressourcengruppe, nur darin darf die Zentrale etwas tun)
+    - `az ad sp create-for-rbac --name homelab-zentrale --role Contributor --scopes $(az group show -n homelab-zentrale --query id -o tsv)` gibt `appId` (App-ID), `password` (Client-Secret) und `tenant` (Tenant-ID) aus. Das Secret nur einmal sichtbar, gleich in die Zentrale übernehmen.
+    - `az account show --query id -o tsv` ist die Abo-ID.
+    - Als zweite Bremse unter Kostenverwaltung → Budgets ein Budget für die Ressourcengruppe mit E-Mail-Warnung anlegen (z. B. 20 €).
+
+    Tailscale: im Admin unter Access controls `"tagOwners": {"tag:homelab-cloud": ["autogroup:admin"]}` ergänzen, dann unter Settings → Keys einen Auth-Key erzeugen: *Reusable*, *Pre-approved*, Tag `tag:homelab-cloud`, Ablauf höchstens 90 Tage (danach einen neuen eintragen; laufende Cloud-Server bleiben verbunden). Wenn du ACLs nutzt: `tag:homelab-cloud` muss die Zentrale auf Port 443 erreichen.
+
+    In der Zentrale unter Einstellungen → Module „Cloud-Server“ einschalten (TOTP), dann auf der Seite „Cloud“ Tenant-ID, App-ID, Secret, Abo-ID, Ressourcengruppe `homelab-zentrale`, Region und Tailscale-Key eintragen und „Verbindung testen“. Danach beim Anlegen eines Gameservers als Ziel „Neuer Azure-Server“ wählen. Hinweis: Das Startguthaben eines Azure-Free-Kontos gilt 30 Tage; danach muss das Konto auf „Pay-As-You-Go“ umgestellt werden, sonst schaltet Azure die VMs ab. Die Free-Tier-Größe `B2ats_v2` (1 GB RAM, 750 h/Monat für 12 Monate) reicht nur für sehr kleine Spiele.
+
 ## Entschieden (26.11.2026)
 
 - Ein PR pro Meilenstein auf dem festen Arbeitsbranch bleibt so.

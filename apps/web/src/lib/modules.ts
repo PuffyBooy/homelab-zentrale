@@ -5,7 +5,7 @@ import { api } from './api.js';
 /**
  * Optional modules (decision 2026-11-26): github, homeassistant, games, the M14
  * Anbindungen proxmox, dnsfilter, fritzbox, uptimekuma, storage (M13) and the M18
- * operations modules (api/ops.ts). Their nav items, overview tiles, palette entries and
+ * operations modules (api/ops.ts) and cloud (M22, api/cloud.ts). Their nav items, overview tiles, palette entries and
  * settings tiles are hidden while switched off.
  */
 
@@ -29,6 +29,7 @@ export const ALL_MODULES_ON: Modules = {
   fail2ban: false,
   discordbot: false,
   voice: false,
+  cloud: false,
 };
 
 export const MODULE_LABEL: Record<ModuleId, string> = {
@@ -45,6 +46,7 @@ export const MODULE_LABEL: Record<ModuleId, string> = {
   fail2ban: 'Fail2ban',
   discordbot: 'Discord-Bot',
   voice: 'Sprachsteuerung',
+  cloud: 'Cloud-Server',
 };
 
 export const MODULE_HINT: Record<ModuleId, string> = {
@@ -62,6 +64,7 @@ export const MODULE_HINT: Record<ModuleId, string> = {
   fail2ban: 'Gesperrte IPs pro Server sehen und entsperren',
   discordbot: 'Freunde starten Gameserver mit /start, mit den Rechten ihres Benutzerlinks',
   voice: 'Echo Show und Alexa über Home Assistant',
+  cloud: 'Server bei Azure bestellen, die nur laufen, solange gespielt wird. Kostet Geld.',
 };
 
 /** Page of the module, for the "Modul ausgeschaltet" note. */
@@ -79,6 +82,7 @@ export const MODULE_PAGE: Record<ModuleId, string> = {
   fail2ban: 'Sicherheit',
   discordbot: 'Einstellungen',
   voice: 'Einstellungen',
+  cloud: 'Cloud',
 };
 
 export const MODULE_ICON: Record<ModuleId, IconName> = {
@@ -95,6 +99,7 @@ export const MODULE_ICON: Record<ModuleId, IconName> = {
   fail2ban: 'lock',
   discordbot: 'users',
   voice: 'home',
+  cloud: 'cloud',
 };
 
 /**
@@ -109,6 +114,7 @@ const NAV_MODULES: Record<string, readonly ModuleId[]> = {
   security: ['vulnscan', 'fail2ban'],
   vms: ['proxmox'],
   network: ['fritzbox', 'dnsfilter'],
+  cloud: ['cloud'],
 };
 
 /** First module of a nav item, if any. */
@@ -120,7 +126,7 @@ export function navModules(navId: string): readonly ModuleId[] {
   return NAV_MODULES[navId] ?? [];
 }
 
-/** All modules behind a path (`/github/…`, `/home`, `/games/…`, `/vms`, `/logs`, `/security`). */
+/** All modules behind a path (`/github/…`, `/home`, `/games/…`, `/vms`, `/logs`, `/security`, `/cloud`). */
 export function modulesOfPath(pathname: string): readonly ModuleId[] {
   const first = pathname.split('/')[1] ?? '';
   if (first === 'github') return ['github'];
@@ -129,6 +135,7 @@ export function modulesOfPath(pathname: string): readonly ModuleId[] {
   if (first === 'vms') return ['proxmox'];
   if (first === 'logs') return ['logsearch'];
   if (first === 'security') return ['vulnscan', 'fail2ban'];
+  if (first === 'cloud') return ['cloud'];
   return [];
 }
 
@@ -169,7 +176,7 @@ export function fetchModules(signal?: AbortSignal): Promise<Modules> {
 }
 
 /**
- * Step-up when switching GitHub, Home Assistant, Discord-Bot or Sprachsteuerung on
+ * Step-up when switching GitHub, Home Assistant, Discord-Bot, Sprachsteuerung or Cloud on
  * (MODULES_ENABLE_STEP_UP); api() asks and retries.
  */
 export function saveModules(body: Partial<Modules>): Promise<Modules> {

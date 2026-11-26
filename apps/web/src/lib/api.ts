@@ -17,6 +17,8 @@ export class ApiError extends Error {
   readonly hint: string | undefined;
   /** Only with `insufficient_ram` (admin routes): free RAM, reserve and need. */
   readonly details: InsufficientRamDetails | undefined;
+  /** Only with `price_changed` (M22): the core's current running price per hour. */
+  readonly currentEurPerHour: number | undefined;
 
   constructor(
     status: number,
@@ -24,6 +26,7 @@ export class ApiError extends Error {
     retryAfter?: number,
     hint?: string,
     details?: InsufficientRamDetails,
+    currentEurPerHour?: number,
   ) {
     super(`api ${status} ${error}`);
     this.name = 'ApiError';
@@ -32,6 +35,7 @@ export class ApiError extends Error {
     this.retryAfter = retryAfter;
     this.hint = hint;
     this.details = details;
+    this.currentEurPerHour = currentEurPerHour;
   }
 }
 
@@ -156,7 +160,8 @@ export async function api<T>(path: string, opts: RequestOptions<T>): Promise<T> 
     if (code === 'unauthorized' && !opts.quiet401) handlers.onUnauthorized?.();
     const hint = parsed.success ? parsed.data.message?.trim() || undefined : undefined;
     const details = parsed.success ? parsed.data.details : undefined;
-    throw new ApiError(res.status, code, retryAfter, hint, details);
+    const eur = parsed.success ? parsed.data.currentEurPerHour : undefined;
+    throw new ApiError(res.status, code, retryAfter, hint, details, eur);
   }
 
   try {
