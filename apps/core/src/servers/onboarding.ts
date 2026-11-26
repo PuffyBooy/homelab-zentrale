@@ -176,7 +176,7 @@ export class OnboardingService {
   }
 
   /** Another onboarding for this name that is waiting or installing. */
-  private nameBusy(name: string): boolean {
+  nameBusy(name: string): boolean {
     const rows = this.deps.db
       .select()
       .from(onboardingCodes)
@@ -188,7 +188,11 @@ export class OnboardingService {
     });
   }
 
-  create(name: string, location: string): OnboardingCreateResponse {
+  /**
+   * `ttlMs`: only the cloud service (M22) passes a longer lifetime, because a fresh
+   * VM needs longer than 15 minutes to install Docker and Tailscale before it exchanges.
+   */
+  create(name: string, location: string, opts: { ttlMs?: number } = {}): OnboardingCreateResponse {
     const hub = this.hub();
     if (!hub) throw new OnboardingError('not_configured');
     const now = this.deps.now();
@@ -197,7 +201,7 @@ export class OnboardingService {
     }
     if (this.pendingCount(now) >= ONBOARDING_MAX_PENDING) throw new OnboardingError('too_many');
     const id = randomToken(16);
-    const expiresAt = now + ONBOARDING_TTL_MS;
+    const expiresAt = now + (opts.ttlMs ?? ONBOARDING_TTL_MS);
     // A collision of two open codes is astronomically unlikely; the UNIQUE index
     // would reject it, so retry a few times with a new code.
     for (let attempt = 0; ; attempt++) {

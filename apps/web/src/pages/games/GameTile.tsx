@@ -1,7 +1,10 @@
 import type { GameSummary } from '@hz/shared';
 import { useEffect, useState, type ReactElement } from 'react';
-import { Badge, GameServer } from '@hz/ui';
+import { Link } from 'react-router';
+import { Alert, Badge, GameServer } from '@hz/ui';
 import { FormError } from '../../components/FormError.js';
+import { isApiError } from '../../lib/api.js';
+import { OVER_BUDGET_GAME_TEXT, OVER_BUDGET_START_HINT } from '../../lib/cloud.js';
 import { disabledTileActions, gameTileProps } from '../../lib/games.js';
 import { relayVia } from '../../lib/relay.js';
 import { ThrottleBadge } from '../throttle/ThrottleBadge.js';
@@ -54,7 +57,21 @@ export function GameTile({ game, onConsole }: GameTileProps): ReactElement {
       <span className="hz-sr" aria-live="polite">
         {copied ? `Adresse ${game.address} kopiert` : ''}
       </span>
-      {act.error ? <FormError title={gameErrorText(act.error)} /> : null}
+      {isApiError(act.error, 'over_budget') ? (
+        <Alert
+          tone="crit"
+          title={OVER_BUDGET_GAME_TEXT}
+          action={
+            <Link className="hz-btn hz-btn-secondary hz-btn-sm" to="/cloud">
+              <span>Seite Cloud</span>
+            </Link>
+          }
+        >
+          {OVER_BUDGET_START_HINT}
+        </Alert>
+      ) : act.error ? (
+        <FormError title={gameErrorText(act.error)} />
+      ) : null}
       {sharing ? <ShareCreateDialog game={game} onClose={() => setSharing(false)} /> : null}
     </>
   );

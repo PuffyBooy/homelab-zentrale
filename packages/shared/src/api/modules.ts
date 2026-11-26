@@ -24,6 +24,7 @@ export const MODULES = [
   'fail2ban',
   'discordbot',
   'voice',
+  'cloud',
 ] as const;
 export const moduleIdSchema = z.enum(MODULES);
 export type ModuleId = z.infer<typeof moduleIdSchema>;
@@ -45,6 +46,8 @@ export const modulesSchema = z.strictObject({
   fail2ban: z.boolean(),
   discordbot: z.boolean(),
   voice: z.boolean(),
+  /** M22 Cloud-Server (api/cloud.ts): orders VMs at a cloud provider (Azure), off by default. */
+  cloud: z.boolean(),
 });
 export type Modules = z.infer<typeof modulesSchema>;
 
@@ -62,6 +65,7 @@ export const MODULE_DEFAULTS: Modules = {
   fail2ban: false,
   discordbot: false,
   voice: false,
+  cloud: false,
 };
 
 /** Enabling these needs step-up (they hold tokens with access to outside systems). */
@@ -75,6 +79,8 @@ export const MODULES_ENABLE_STEP_UP: readonly ModuleId[] = [
   // Control from outside the hub (Discord, Home Assistant / Alexa).
   'discordbot',
   'voice',
+  // Orders VMs that cost money with the admin's cloud credentials.
+  'cloud',
 ];
 
 // GET /api/settings/modules -> Modules

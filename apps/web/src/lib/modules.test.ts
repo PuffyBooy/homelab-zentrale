@@ -25,6 +25,7 @@ const off = {
   fail2ban: false,
   discordbot: false,
   voice: false,
+  cloud: false,
 };
 
 describe('modules', () => {
@@ -39,6 +40,16 @@ describe('modules', () => {
     expect(moduleOfPath('/homeassistant')).toBeUndefined();
     expect(moduleOfPath('/logs')).toBe('logsearch');
     expect(modulesOfPath('/security')).toEqual(['vulnscan', 'fail2ban']);
+    expect(moduleOfPath('/cloud')).toBe('cloud');
+  });
+
+  it('shows Cloud only while the cloud module is on', () => {
+    const ids = (m: Partial<typeof off>) =>
+      visibleNavItems(navItems, { ...off, ...m }).map((i) => i.id);
+    expect(ids({})).not.toContain('cloud');
+    expect(ids({ cloud: true })).toContain('cloud');
+    expect(isModuleOn(undefined, 'cloud')).toBe(false);
+    expect(pageMeta('/cloud', { modules: off }).title.rest).toBe('Cloud-Server ist ausgeschaltet.');
   });
 
   it('shows Sicherheit while vulnscan or fail2ban is on', () => {

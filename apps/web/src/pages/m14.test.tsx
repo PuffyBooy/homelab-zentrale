@@ -133,6 +133,7 @@ describe('VMs page', () => {
         fail2ban: false,
         discordbot: false,
         voice: false,
+        cloud: false,
       },
     });
     expect(off.title.rest).toBe('Proxmox ist ausgeschaltet.');

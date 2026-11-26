@@ -182,6 +182,17 @@ Wunsch des Admins vom 26.11.2026. Vier neue Module (alle standardmäßig aus, Ei
 
 ---
 
+## M22: Cloud-Server (zuerst Azure)
+Wunsch des Admins vom 26.11.2026: Azure-Konto einmal verknüpfen, dann bestellt die Zentrale beim Anlegen eines Gameservers selbst einen passenden Server und zahlt nur, wenn wirklich gespielt wird. Modul `cloud` (Standard aus, Einschalten mit Step-up), generisch über `CLOUD_PROVIDERS`, damit später weitere Anbieter dazukommen. Schemas: `packages/shared/src/api/cloud.ts`.
+
+- **WP Schema** (`packages/shared`): Azure-Zugang (Tenant, App, Secret, Abo, Ressourcengruppe, Region, Tailscale-Auth-Key, Budget), feste Größen-, Disk- und Regionsliste mit Preis-Schätzung, Größen-Empfehlung pro Spiel-RAM, Maschinen mit Zuständen, Bestellung mit bestätigtem Preis und optionalem Gameserver.
+- **WP Core ∥** (`apps/core/src/cloud`): Azure-Client nur gegen feste Hosts (Token per Client Credentials, ARM-REST für VNet, NSG, öffentliche IP, NIC, VM; Retail Prices API für echte Preise), cloud-init installiert Docker, Tailscale und den Agent mit Einzeiler-Code (M11), danach wird der Gameserver darauf angelegt und die NSG öffnet genau seine Ports. Schlafmodus: liegen alle Spiele einer Maschine die eingestellte Zeit still, wird die VM deallocated; ein Start eines Spiels (Admin, Benutzerlink, Discord, Sprache) startet zuerst die VM. Laufzeit pro Monat, Kosten-Schätzung, Budget mit Warnung bei 80 % und Sperre automatischer Starts ab 100 %. Löschen mit Step-up und Namensbestätigung räumt alle Azure-Ressourcen der Maschine weg.
+- **WP Web ∥** (`apps/web`): Seite „Cloud“ (Zugang, Budget, Maschinen mit Zustand, Kosten, Starten/Schlafen/Löschen), im Gameserver-Formular das Ziel „Neuer Azure-Server“ mit empfohlener Größe, Kosten pro Stunde/Monat und Bestätigung, Schalter unter Module.
+
+**Abnahme:** Gegen eine Azure-Attrappe (Test und e2e) wird eine Maschine mit Minecraft bestellt (empfohlen B2ms, nicht die größte), der simulierte Agent meldet sich, der Gameserver entsteht darauf; nach der Leerlaufzeit wird die VM deallocated, ein Start über den Benutzerlink startet zuerst die VM; das Budget warnt und sperrt automatische Starts; Löschen verlangt Step-up und Namen. Sicherheitstests: Modul aus = 404, nur feste Azure-Hosts (Override nur mit `HZ_DEMO=1` auf 127.0.0.1), keine Pfadteile aus Eingaben ohne Prüfung, Secrets nie in Antwort, Log oder Fehler, Secret verworfen bei Wechsel von Tenant/App/Abo, keine Bestellung ohne passenden bestätigten Preis, NSG nur Spielports (kein SSH, kein RCON), VM ohne Passwort.
+
+---
+
 ## Definition of Done (für jeden PR)
 - Code, Tests und Doku sind aktuell (`docs/` mitpflegen, wenn sich etwas ändert)
 - Keine `any`, keine auskommentierten Blöcke, keine TODOs ohne Issue

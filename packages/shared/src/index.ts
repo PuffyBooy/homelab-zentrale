@@ -25,3 +25,4 @@ export * from './agent-ops.js';
 export * from './agent-backup-target.js';
 export * from './api/ops.js';
 export * from './api/integrations.js';
+export * from './api/cloud.js';

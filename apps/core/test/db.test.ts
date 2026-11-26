@@ -61,6 +61,8 @@ const tables = [
   schema.whitelistRequests,
   schema.serverIngress,
   schema.gameRelays,
+  schema.cloudMachines,
+  schema.cloudUsage,
 ];
 
 describe('database', () => {
