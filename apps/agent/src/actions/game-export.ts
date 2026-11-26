@@ -1,6 +1,5 @@
 import { createHash } from 'node:crypto';
-import { constants } from 'node:fs';
-import { lstat, open, stat, unlink, type FileHandle } from 'node:fs/promises';
+import { lstat, open, unlink, type FileHandle } from 'node:fs/promises';
 import path from 'node:path';
 import {
   TRANSFER_CHUNK_BYTES,
@@ -177,9 +176,11 @@ export async function runExport(
     if (cancelled) return;
 
     // O_EXCL: fails on anything existing, symlinks included. tar then truncates it.
-    const created = await open(tmp, 'wx', 0o600);
+    // The handle stays open: size checks and reading use this inode, never the path
+    // again (no check-then-use race on the file name).
+    fh = await open(tmp, 'wx+', 0o600);
     tmpCreated = true;
-    await created.close();
+    const own = fh;
 
     progress(`$ tar ${compression === 'zstd' ? '--zstd' : '--gzip'} -c -C ${game.dir} data`);
     let tooLarge = false;
@@ -191,7 +192,8 @@ export async function runExport(
     );
     const running = tar;
     poll = setInterval(() => {
-      void stat(tmp)
+      void own
+        .stat()
         .then((st) => {
           if (st.size > maxBytes) {
             tooLarge = true;
@@ -226,13 +228,12 @@ export async function runExport(
     if (cancelled) return;
     progress('archive checked');
 
-    fh = await open(tmp, constants.O_RDONLY | constants.O_NOFOLLOW);
-    const st = await fh.stat();
+    const st = await own.stat();
     if (!st.isFile()) throw new TransferFailure('io', 'archive is not a regular file');
     const bytes = st.size;
     if (bytes > maxBytes) throw new TransferFailure('too_large', 'archive is larger than allowed');
     if (bytes < 1) throw new TransferFailure('io', 'empty archive');
-    const sha256 = await sha256Of(fh, bytes, () => cancelled);
+    const sha256 = await sha256Of(own, bytes, () => cancelled);
     if (cancelled) return;
     const chunks = Math.ceil(bytes / TRANSFER_CHUNK_BYTES);
     progress(`archive: ${bytes} bytes, ${chunks} chunks`);
@@ -245,7 +246,7 @@ export async function runExport(
       await waitUntil(() => sent - (acked + 1) < TRANSFER_WINDOW && !sink.congested());
       if (sent === acked + 1) lastAckAt = Date.now();
       const pos = seq * TRANSFER_CHUNK_BYTES;
-      const buf = await readExact(fh, Math.min(TRANSFER_CHUNK_BYTES, bytes - pos), pos);
+      const buf = await readExact(own, Math.min(TRANSFER_CHUNK_BYTES, bytes - pos), pos);
       check.update(buf);
       sink.transfer({ type: 'transfer.chunk', streamId, seq, data: buf.toString('base64') });
       sent = seq + 1;
