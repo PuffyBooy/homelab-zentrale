@@ -42,6 +42,11 @@ describe('Einstellungen → Anbindungen', () => {
         fritzbox: true,
         uptimekuma: false,
         storage: true,
+        logsearch: false,
+        vulnscan: false,
+        fail2ban: false,
+        discordbot: false,
+        voice: false,
       }),
     ).toEqual(['proxmox', 'fritzbox']);
   });

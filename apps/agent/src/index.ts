@@ -43,6 +43,11 @@ async function main(): Promise<void> {
   }
   const log = createLogger(config.logLevel);
   log.addSecret(config.token);
+  if (config.trivyImageRejected) {
+    log.warn(
+      'HZ_AGENT_TRIVY_IMAGE is not pinned by digest (repo[:tag]@sha256:...), using the default',
+    );
+  }
 
   const docker = await openDocker(config.dockerSocket);
   const host: HostContext = {
@@ -104,6 +109,7 @@ async function main(): Promise<void> {
       dockerSocket: config.dockerSocket,
       spawn: spawnFile,
       dataDir: config.dataDir,
+      trivyImage: config.trivyImage,
       ...(pty ? { pty } : {}),
       wake,
     },

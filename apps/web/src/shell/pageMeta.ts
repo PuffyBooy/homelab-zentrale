@@ -18,11 +18,12 @@ import { STATUS_TEXT, groupByRoom, haSentence } from '../lib/ha.js';
 import { githubSentence, repoOnServer, repoSentence } from '../lib/github.js';
 import type { LiveState } from '../lib/live.js';
 import {
+  anyModuleOn,
   isModuleOn,
   isNetworkOn,
-  MODULE_LABEL,
   MODULE_PAGE,
-  moduleOfPath,
+  moduleLabels,
+  modulesOfPath,
 } from '../lib/modules.js';
 import { networkSentence, networkSub } from '../lib/network.js';
 import { proxmoxSentence, PROXMOX_REFRESH_MS, type ProxmoxGuests } from '../lib/proxmox.js';
@@ -152,10 +153,11 @@ export function pageMeta(pathname: string, data: PageData = {}): PageMeta {
       ? servers.find((s) => s.id === data.filter)
       : undefined;
 
-  const mod = moduleOfPath(pathname);
-  if (mod && !isModuleOn(data.modules, mod)) {
+  const mods = modulesOfPath(pathname);
+  const mod = mods[0];
+  if (mod && !anyModuleOn(data.modules, mods)) {
     return {
-      title: plain(`${MODULE_LABEL[mod]} ist ausgeschaltet.`),
+      title: plain(`${moduleLabels(mods)} ${mods.length > 1 ? 'sind' : 'ist'} ausgeschaltet.`),
       sub: `${MODULE_PAGE[mod]} · Modul einschalten unter Einstellungen → Module`,
       serverSwitch: false,
     };
@@ -352,6 +354,20 @@ export function pageMeta(pathname: string, data: PageData = {}): PageMeta {
         ? plain(`Konsole bereit auf ${ready} von ${plural(total, 'Server', 'Servern')}.`)
         : plain('Keine Konsole verfügbar.'),
       sub: 'Konsole · nur mit Code · jede Sitzung wird protokolliert',
+      serverSwitch: false,
+    };
+  }
+  if (pathname === '/logs') {
+    return {
+      title: plain('Log-Suche'),
+      sub: 'Log-Suche · Textsuche in allen Containern · höchstens 7 Tage zurück',
+      serverSwitch: false,
+    };
+  }
+  if (pathname === '/security') {
+    return {
+      title: plain('Sicherheit'),
+      sub: 'Sicherheit · Schwachstellen in Images · Fail2ban-Sperren',
       serverSwitch: false,
     };
   }

@@ -64,6 +64,10 @@ describe('agent protocol allowlist', () => {
         'system.cleanup',
         'system.cleanupPreview',
         'system.reboot',
+        'logs.search',
+        'image.scan',
+        'fail2ban.status',
+        'fail2ban.unban',
         'wol.send',
       ].sort(),
     );

@@ -36,6 +36,8 @@ describe('navigation', () => {
       'Wohnung',
       'Meldungen',
       'Konsole',
+      'Log-Suche',
+      'Sicherheit',
     ]);
   });
 
@@ -78,12 +80,21 @@ describe('shortcuts', () => {
       '9',
       '\u00a0',
       '`',
+      'l',
+      's',
     ]);
     expect(shortcutLabel({ id: 'x', label: 'X', icon: 'bell' }, 9)).toBe('');
     // Same targets with the keyed items as NavRail shows them.
     expect(shortcutTarget('9', keyed)).toBe('/home');
     expect(shortcutTarget('`', keyed)).toBe('/console');
     expect(shortcutTarget('\u00a0', keyed)).toBeUndefined();
+  });
+
+  it('opens Log-Suche with l and Sicherheit with s', () => {
+    expect(shortcutTarget('l')).toBe('/logs');
+    expect(shortcutTarget('s')).toBe('/security');
+    expect(activeNavId('/logs')).toBe('logs');
+    expect(activeNavId('/security')).toBe('security');
   });
 
   it('ignores plain keys while typing', () => {
@@ -113,6 +124,11 @@ describe('shortcuts', () => {
       games: true,
       ...NONE_EXTRA,
       storage: true,
+      logsearch: false,
+      vulnscan: false,
+      fail2ban: false,
+      discordbot: false,
+      voice: false,
     });
     expect(items.map((i) => i.id)).toEqual([
       'overview',

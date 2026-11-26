@@ -159,6 +159,9 @@ Die erste Nachricht muss innerhalb von 10 s ein gültiges `hello` sein. Danach a
 | `system.cleanupPreview` / `system.cleanup` | `{}` |
 | `system.reboot` | `{confirmName}` |
 | `check.http` / `check.tcp` / `check.ping` | wie Check-Definition |
+| `logs.search` | `{query, caseSensitive, sinceMinutes, containers?, maxMatches}` → Treffer neueste zuerst: reiner Teilstring (nie RegExp), höchstens `LOG_SEARCH_TAIL` Zeilen pro Container, 4 Container gleichzeitig, nach 25 s `truncated` |
+| `image.scan` | `{id}` → der Agent ermittelt den Registry-Digest selbst und startet das gepinnte Trivy-Image (`HZ_AGENT_TRIVY_IMAGE`) mit `--image-src remote`, ohne Docker-Socket und Host-Pfade, Cache im Volume `hz-trivy-cache`; lokal gebaute Images → `local_image`; ein Scan gleichzeitig (sonst `busy`) |
+| `fail2ban.status` / `fail2ban.unban` | `{}` / `{jail, ip}`: `fail2ban-client status [jail]` bzw. `fail2ban-client set <jail> unbanip <ip>` auf dem Host; der Jail muss in der Jail-Liste stehen |
 | `pty.open` / `pty.input` / `pty.resize` / `pty.close` | nur wenn `HZ_AGENT_ALLOW_TERMINAL=1` |
 
 Pfade werden im Agent normalisiert und müssen mit `/opt/homelab/` beginnen. Kein `exec` beliebiger Strings: Jede Aktion ruft feste Programme mit Argument-Arrays auf (`execFile`, nie `shell: true`).
@@ -198,6 +201,14 @@ Vertrag: `packages/shared/src/api/migrate.ts`, Frames in `agent-protocol.ts`. Co
 ## Anbindungen (M14)
 
 `apps/core/src/integrations/`: `http.ts` (der einzige ausgehende Client für Anbindungen, Regeln in `SECURITY.md`), `store.ts` (Einstellungen in `settings` unter `integration.<id>.*`, Secret verschlüsselt), `base.ts` (Status, Polling, Meldung nach 5 Min), dazu `proxmox.ts`, `dnsfilter.ts`, `fritzbox.ts` + `digest.ts`, `uptimekuma.ts`. Routen unter `/api/<id>/…`, hinter dem Modul-Gate. `apps/core/src/notify/` hängt sich als `ChannelFanoutSink` hinter den Notifier (gleiche Ruhezeit, Bündel und Morgen-Digest; Kanäle zählen als Pseudo-Geräte `channel:<id>`). `apps/core/src/wol/`: Konfiguration pro Server in `settings`, Senden per `dgram` aus der Zentrale (Host-Netz) oder über die Agent-Aktion `wol.send`. Keine eigene Migration.
+
+## Betriebsmodule: Log-Suche, Schwachstellen-Scan, Fail2ban
+
+Vertrag: `packages/shared/src/api/ops.ts` (Routen) und `packages/shared/src/agent-ops.ts` (Agent-Aktionen). Code: `apps/core/src/ops/` (`setupOps` in `index.ts` legt Dienste, Routen, Job und Modul-Schalter an). Alle Routen: Admin-Session, Modul-Gate.
+
+- `POST /api/logsearch` (Modul logsearch): `logs.search` parallel an alle gewählten verbundenen Server (30 s Timeout), Container-IDs aus dem Inventar des Core nach Namensfilter (keiner passt: `no_containers`, kein RPC). Treffer neueste zuerst (ohne Zeitstempel zuletzt), gekappt auf `maxMatches`. 10 pro Minute und Session (429). Audit `logsearch.query` nur mit `{servers, sinceMinutes, queryLength}`.
+- `GET /api/vulnscan`, `PUT /api/vulnscan/settings`, `POST /api/vulnscan/run` (202; 409 `busy` während eines Laufs; 429 bei mehr als einem manuellen Lauf in 10 Min). Job `vulnscan.nightly` (`scheduler.at` + `nextWallClock`, HZ_TIMEZONE) nur bei eingeschaltetem Modul. Pro Server nacheinander `image.scan {id}` (13 Min Timeout) für jeden laufenden Container, Server parallel; gleiche Image-ID wird einmal gescannt. `not_allowed`/offline → `skippedServers`. Ergebnisse in `settings` (`vulnscan.settings`, `vulnscan.results`): neuestes pro Server + Containername, Einträge verschwundener Container und gelöschter Server fallen weg. Meldungen `vulnscan:<serverId>:<container>` (warn); Modul aus erledigt alle.
+- `GET /api/fail2ban` (`fail2ban.status` parallel, 15 s, 30 s Cache pro Server), `POST /api/fail2ban/unban` (`fail2ban.unban`, Cache verworfen, Antwort der frische Server-Eintrag, Audit `fail2ban.unban`). Fehlerzuordnung pro Server: `not_allowed` → `unsupported`, offline → `offline`, sonst `failed`.
 
 ## Live-Daten zum Browser
 

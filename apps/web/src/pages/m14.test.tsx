@@ -128,6 +128,11 @@ describe('VMs page', () => {
         fritzbox: false,
         uptimekuma: false,
         storage: true,
+        logsearch: false,
+        vulnscan: false,
+        fail2ban: false,
+        discordbot: false,
+        voice: false,
       },
     });
     expect(off.title.rest).toBe('Proxmox ist ausgeschaltet.');

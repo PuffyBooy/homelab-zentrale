@@ -50,3 +50,9 @@ Benutzerlinks funktionieren standardmäßig nur im Tailnet. Sollen Freunde ohne 
 ## Checks von außen
 
 Damit „Website erreichbar“ auch wirklich von außen geprüft wird, kann ein Check auf `oracle-a1` ausgeführt werden (`from_agent_id`). So erkennt man z. B., ob die Heim-IP oder eine Portweiterleitung ausgefallen ist.
+
+## Ausgehende Verbindungen der Zusatzmodule (M18)
+
+- **Discord-Bot:** Core → `https://discord.com/api/v10` (REST) und `wss://gateway.discord.gg` (Gateway), nur ausgehend. Es gibt keinen öffentlichen Endpunkt für Discord.
+- **Schwachstellen-Scan:** Der Trivy-Container auf jedem Server lädt sein Image (Docker Hub), die Schwachstellen-Datenbank (`ghcr.io`/`mirror.gcr.io`) und die Image-Metadaten aus der jeweiligen Registry. Kein Port wird geöffnet.
+- **Sprachsteuerung:** nutzt nur die bestehende Verbindung Core → Home Assistant. Alexa spricht mit Home Assistant (Nabu Casa oder `emulated_hue` im LAN), nie mit der Zentrale.

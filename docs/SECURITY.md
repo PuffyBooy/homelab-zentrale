@@ -48,6 +48,13 @@ Die Zentrale hat Root-ähnliche Macht über alle Server. Diese Regeln sind **nic
 - Meldungskanäle: Discord nur an die offiziellen Discord-Webhook-Adressen, Telegram nur an `api.telegram.org`, ntfy nach denselben URL-Regeln. Adressen in den Texten werden maskiert, weil die Nachrichten das Tailnet verlassen; keine Erwähnungen (Discord) und kein Markup (Telegram).
 - Wake-on-LAN sendet nur das Magic Packet an 255.255.255.255 oder eine private IPv4-Adresse, Port 7 oder 9, höchstens 6 pro Minute (Core pro Server und Agent gesamt).
 
+## Zusatzmodule (M18)
+- **Log-Suche:** Der Suchtext ist reiner Text (nie ein regulärer Ausdruck, kein ReDoS), wird nie geloggt (im Protokoll nur die Länge) und ist auf 10 Suchen pro Minute und Session begrenzt.
+- **Schwachstellen-Scan:** Trivy läuft nur als per Digest gepinntes Image (`HZ_AGENT_TRIVY_IMAGE` ohne Digest wird ignoriert), mit `--image-src remote`, ohne Docker-Socket und ohne Host-Pfad (nur das Volume `hz-trivy-cache`), read-only, `cap-drop ALL`, `no-new-privileges`, Speicher-, CPU- und PID-Limit. Die Zentrale nennt nie ein Image, nur einen Container; das Image samt Digest bestimmt der Agent.
+- **Fail2ban:** Entsperren nur für einen Jail, den `fail2ban-client status` kennt, und genau eine gültige IPv4/IPv6-Adresse, als Argument-Array ohne Shell; jede Entsperrung steht im `audit_log`.
+- **Discord-Bot:** Bot-Token AES-256-GCM verschlüsselt, nur schreibbar, nie in Antwort, Log oder Fehlermeldung, nur an `https://discord.com/api/v10` gesendet; Gateway nur `wss://*.discord.gg` ohne Zugangsdaten oder Port. Kein öffentlicher Endpunkt (keine Interactions-URL). Befehle nur aus der eingestellten Guild, nur von Discord-Usern, die der Admin mit Step-up an einen aktiven Benutzerlink gebunden hat; Rechte, Ablauf, Widerruf, RAM-Reserve und `share_audit` (`via: discord`) wie beim Link. Die Bindung ersetzt den PIN des Links. Antworten nur für den Fragenden sichtbar, ohne Erwähnungen, Rate-Limit pro User und Abklingzeit pro Spiel.
+- **Sprachsteuerung:** Wer in Home Assistant den zugeordneten `input_boolean` schalten kann (HA-Benutzer, Automationen, Alexa und damit jeder, der mit der Echo spricht), kann das Spiel starten und mit „Stoppen erlauben“ auch stoppen, ohne Benutzerlink. Deshalb: Step-up für einen neuen Schalter, einen neuen Statustext und für „Stoppen erlauben“; nur Domänen `input_boolean`/`input_text`; Abklingzeit 60 s; RAM-Reserve gilt (unbekannter RAM = kein Start); jeder Auslöser im `audit_log` (`voice:ha`).
+
 ## Allgemein
 - Jede Eingabe wird mit zod geprüft (Body, Query, Params, WebSocket-Nachrichten, Agent-Nachrichten).
 - Sicherheits-Header über `@fastify/helmet` mit strenger CSP (keine Inline-Skripte, `connect-src 'self'`).

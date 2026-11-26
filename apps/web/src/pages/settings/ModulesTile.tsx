@@ -20,9 +20,8 @@ function shownError(err: unknown): string | null {
 }
 
 /**
- * Settings → Module (decision 2026-11-26, M14): GitHub, Home Assistant, Gameserver and
- * the Anbindungen (Proxmox, DNS-Filter, FRITZ!Box, Uptime Kuma) can be switched. Switching
- * one with tokens on needs step-up (MODULES_ENABLE_STEP_UP, api() asks).
+ * Settings → Module (decision 2026-11-26): every optional module can be switched. Switching
+ * one of MODULES_ENABLE_STEP_UP on needs step-up (api() asks).
  */
 export function ModulesTile(): ReactElement {
   const qc = useQueryClient();
@@ -46,7 +45,8 @@ export function ModulesTile(): ReactElement {
       <p className="app-text">
         Ausgeschaltete Module verschwinden aus Navigation und Übersicht, ihre Abfragen und Jobs
         ruhen. Daten und Einstellungen bleiben erhalten. Module mit Zugangsdaten (GitHub, Home
-        Assistant und die Anbindungen) einschalten braucht einen Code.
+        Assistant, die Anbindungen) und Module, die von außen steuern (Discord-Bot,
+        Sprachsteuerung), einschalten braucht einen Code.
       </p>
       {modules.isError ? <FormError title={errorText(modules.error)} /> : null}
       {m ? (
