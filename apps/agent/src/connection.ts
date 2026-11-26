@@ -31,6 +31,12 @@ export interface ConnectionOptions {
   collectMetrics: () => Promise<Metrics>;
   collectInventory: () => Promise<Inventory>;
   handleRpc: (env: RpcEnvelope) => Promise<RpcResult>;
+  /** After an rpc.result was sent (sent=false: the socket was gone). Streams go live here. */
+  onRpcResultSent?: (result: RpcResult, sent: boolean) => void;
+  /** stream.cancel from the core. */
+  onStreamCancel?: (streamId: string) => void;
+  /** The connection closed; every stream is lost for the core. */
+  onDisconnect?: () => void;
   /** Test hook: creates the WebSocket. */
   createSocket?: (url: string) => WebSocket;
   random?: () => number;
@@ -75,6 +81,8 @@ export class AgentConnection {
   private inFlight = 0;
   private busyMetrics = false;
   private busyInventory = false;
+  /** An inventory was requested while one was being collected. */
+  private inventoryAgain = false;
 
   constructor(private readonly o: ConnectionOptions) {
     o.log.addSecret(o.envToken);
@@ -253,7 +261,10 @@ export class AgentConnection {
         this.inFlight += 1;
         void this.o
           .handleRpc(msg)
-          .then((result) => this.send(result))
+          .then((result) => {
+            const sent = this.send(result);
+            this.o.onRpcResultSent?.(result, sent);
+          })
           .catch(() =>
             this.send({
               type: 'rpc.result',
@@ -268,7 +279,7 @@ export class AgentConnection {
         return;
       }
       case 'stream.cancel':
-        // Streams arrive with container.logs / deploy.run in later milestones.
+        this.o.onStreamCancel?.(msg.streamId);
         return;
     }
   }
@@ -299,6 +310,7 @@ export class AgentConnection {
     if (ws !== this.ws) return;
     this.ws = null;
     this.clearTimers();
+    this.o.onDisconnect?.();
     if (this.phase === 'stopped') return;
     // Reset the backoff only after a stable session, so a flapping core is not hammered.
     if (this.phase === 'ready' && Date.now() - this.readyAt >= STABLE_MS) this.attempt = 0;
@@ -331,21 +343,44 @@ export class AgentConnection {
         this.busyMetrics = false;
       }
     };
-    const sendInventory = async () => {
-      if (this.busyInventory || ws !== this.ws) return;
-      this.busyInventory = true;
-      try {
-        this.send(await this.o.collectInventory());
-      } catch (err) {
-        this.o.log.warn('inventory failed', { error: err });
-      } finally {
-        this.busyInventory = false;
-      }
-    };
     void sendMetrics();
-    void sendInventory();
+    void this.sendInventory(ws);
     this.timers.push(setInterval(() => void sendMetrics(), metricsS * 1000));
-    this.timers.push(setInterval(() => void sendInventory(), inventoryS * 1000));
+    this.timers.push(setInterval(() => void this.sendInventory(ws), inventoryS * 1000));
+  }
+
+  private async sendInventory(ws: WebSocket): Promise<void> {
+    if (ws !== this.ws) return;
+    if (this.busyInventory) {
+      this.inventoryAgain = true;
+      return;
+    }
+    this.busyInventory = true;
+    try {
+      do {
+        this.inventoryAgain = false;
+        const inv = await this.o.collectInventory();
+        if (ws !== this.ws) return;
+        this.send(inv);
+      } while (this.inventoryAgain);
+    } catch (err) {
+      this.o.log.warn('inventory failed', { error: err });
+    } finally {
+      this.busyInventory = false;
+      this.inventoryAgain = false;
+    }
+  }
+
+  /** Sends an inventory now (Docker event). No-op until the handshake is done. */
+  requestInventory(): void {
+    const ws = this.ws;
+    if (!ws || this.phase !== 'ready') return;
+    void this.sendInventory(ws);
+  }
+
+  /** Bytes waiting in the WebSocket send buffer (stream backpressure). */
+  bufferedAmount(): number {
+    return this.ws?.bufferedAmount ?? 0;
   }
 
   /** Sends a message after validating it against the protocol. Invalid messages are dropped. */

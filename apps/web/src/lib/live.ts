@@ -1,12 +1,17 @@
 import {
   LIVE_CLOSE_SESSION_ENDED,
   alertSchema,
+  containerSummarySchema,
+  logLineSchema,
+  logSnapshotSchema,
   liveServerMessageSchema,
   liveTopicSchema,
   serverDetailSchema,
   serverSummarySchema,
   type Alert,
+  type ContainerSummary,
   type LiveServerMessage,
+  type LogLine,
   type ServerDetail,
   type ServerSummary,
 } from '@hz/shared';
@@ -23,6 +28,8 @@ import {
 } from 'react';
 import { alertsAllKey, alertsKey, isActive } from './alerts.js';
 import type { Schema } from './api.js';
+import { containersKey } from './containers.js';
+import { appendLogLines, containerLogsKey, type LogBuffer } from './logs.js';
 import { serverKey, serversKey } from './servers.js';
 
 /**
@@ -128,6 +135,29 @@ export function applyLiveMessage(qc: QueryClient, msg: LiveServerMessage): Apply
     return result;
   }
 
+  if (topic === 'containers') {
+    if (msg.type === 'snapshot') {
+      const raw = snapshotList(msg.data, 'containers');
+      const { ok, bad } = parseItems(containerSummarySchema, raw ?? []);
+      if (raw) qc.setQueryData<ContainerSummary[]>(containersKey, ok);
+      // After the write, so the refetch flag is not reset by setQueryData.
+      if (!raw || bad) void qc.invalidateQueries({ queryKey: containersKey, exact: true });
+    } else {
+      const { ok, bad } = parseItems(containerSummarySchema, msg.upsert ?? []);
+      qc.setQueryData<ContainerSummary[]>(containersKey, (old) =>
+        old ? mergeById(old, ok, msg.remove) : old,
+      );
+      if (bad) void qc.invalidateQueries({ queryKey: containersKey, exact: true });
+    }
+    return result;
+  }
+
+  const logs = /^container-logs:([A-Za-z0-9_-]{1,64})$/.exec(topic);
+  if (logs?.[1]) {
+    applyLogMessage(qc, logs[1], msg);
+    return result;
+  }
+
   const m = /^server:([A-Za-z0-9_-]{1,64})$/.exec(topic);
   if (m?.[1]) {
     const id = m[1];
@@ -152,6 +182,46 @@ export function applyLiveMessage(qc: QueryClient, msg: LiveServerMessage): Apply
     void qc.invalidateQueries({ queryKey: key, exact: true });
   }
   return result;
+}
+
+/**
+ * Topic `container-logs:<id>`: the snapshot replaces the buffer, updates append lines.
+ * An update may also carry a snapshot-shaped item (`{ lines, ended }`) when the
+ * stream ends. Invalid lines are dropped; there is no REST fallback for logs.
+ */
+function applyLogMessage(
+  qc: QueryClient,
+  id: string,
+  msg: Extract<LiveServerMessage, { type: 'snapshot' | 'update' }>,
+): void {
+  const key = containerLogsKey(id);
+  if (msg.type === 'snapshot') {
+    const snap = logSnapshotSchema.safeParse(msg.data);
+    if (!snap.success) return;
+    qc.setQueryData<LogBuffer>(key, {
+      lines: appendLogLines([], snap.data.lines),
+      ended: snap.data.ended,
+    });
+    return;
+  }
+  const add: LogLine[] = [];
+  let ended: boolean | null = null;
+  for (const raw of msg.upsert ?? []) {
+    const line = logLineSchema.safeParse(raw);
+    if (line.success) {
+      add.push(line.data);
+      continue;
+    }
+    const snap = logSnapshotSchema.safeParse(raw);
+    if (snap.success) {
+      add.push(...snap.data.lines);
+      ended = snap.data.ended;
+    }
+  }
+  qc.setQueryData<LogBuffer>(key, (old) => ({
+    lines: appendLogLines(old?.lines ?? [], add),
+    ended: ended ?? old?.ended ?? false,
+  }));
 }
 
 /** Keeps the summary inside a cached detail in step with the list. */

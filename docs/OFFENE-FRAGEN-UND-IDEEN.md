@@ -22,6 +22,8 @@ Alles hier braucht deine Zugänge oder ist nicht rückgängig zu machen. Bis dah
 
 ## Annahmen
 
+- **Trivy-Ausnahme (bis 15.01.2027):** Im Agent-Image steckt das offizielle `docker compose`-Binary mit einer HIGH-Lücke in `golang.org/x/net` (HTML-Parser, CVE-2026-78661). Compose parst kein fremdes HTML, und es gibt noch keine Version mit Fix. Die Ausnahme steht in `apps/agent/.trivyignore` und läuft am 15.01.2027 ab; dann schlägt CI wieder an.
+
 - Sicherheitstests liegen in Dateien mit `security` im Namen und laufen zusätzlich als eigener Job `security tests` in GitHub Actions.
 
 ## Zukunftsideen

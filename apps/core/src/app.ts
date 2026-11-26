@@ -16,6 +16,9 @@ import { setupAuth, type AuthService } from './auth/index.js';
 import { isApiPath, requestPath } from './auth/guard.js';
 import { systemClock, type Clock } from './clock.js';
 import type { Config } from './config.js';
+import { ContainerLogs } from './containers/logs.js';
+import { containerRoutes } from './containers/routes.js';
+import { ContainerService } from './containers/service.js';
 import { createSecretBox } from './crypto.js';
 import { openDatabase, type DbHandle } from './db/index.js';
 import { seedDemo } from './demo/seed.js';
@@ -54,6 +57,8 @@ export interface CoreServices {
   metrics: MetricsStore;
   alerts: AlertService;
   servers: ServerService;
+  containers: ContainerService;
+  logs: ContainerLogs;
   live: LiveHub;
   db: DbHandle;
 }
@@ -184,6 +189,19 @@ export async function buildApp(config: Config, deps: AppDeps = {}): Promise<Fast
     ...(deps.agentOptions ? { options: deps.agentOptions } : {}),
   });
   servers.setConnections(hub);
+  const containers = new ContainerService({
+    db: db.db,
+    now,
+    alerts,
+    log: app.log.child({ mod: 'containers' }),
+  });
+  servers.setContainers(containers);
+  const logs = new ContainerLogs({
+    hub,
+    containers,
+    now,
+    log: app.log.child({ mod: 'logs' }),
+  });
   const live = new LiveHub({
     db: db.db,
     now,
@@ -192,7 +210,32 @@ export async function buildApp(config: Config, deps: AppDeps = {}): Promise<Fast
     log: app.log.child({ mod: 'live' }),
     ...(deps.liveOptions ? { options: deps.liveOptions } : {}),
   });
-  app.decorate('hzCore', { scheduler, tokens, hub, metrics, alerts, servers, live, db });
+  live.addProvider({
+    matches: (topic) => topic === 'containers',
+    snapshot: () => containers.list(),
+    item: (_topic, id) => containers.summary(id),
+  });
+  live.addProvider({
+    matches: (topic) => logs.matches(topic),
+    has: (topic) => logs.has(topic),
+    snapshot: (topic) => logs.snapshot(topic),
+    open: (topic) => logs.open(topic),
+    close: (topic) => logs.close(topic),
+  });
+  logs.setPublisher(live);
+  containers.onChange((id, deleted) => live.mark('containers', id, deleted ? 'remove' : 'upsert'));
+  app.decorate('hzCore', {
+    scheduler,
+    tokens,
+    hub,
+    metrics,
+    alerts,
+    servers,
+    containers,
+    logs,
+    live,
+    db,
+  });
 
   scheduler.every('servers.status', 5_000, () => servers.refreshAll());
   scheduler.every('live.sessions', 5_000, () => live.checkSessions());
@@ -201,7 +244,7 @@ export async function buildApp(config: Config, deps: AppDeps = {}): Promise<Fast
   scheduler.every('metrics.rollup1h', HOUR, () => void metrics.rollup1h(), { align: true });
   scheduler.every('metrics.prune', HOUR, () => void metrics.prune());
   if (config.demo) {
-    seedDemo({ db: db.db, now, servers, metrics, scheduler });
+    seedDemo({ db: db.db, now, servers, metrics, scheduler, logs });
     app.log.warn('HZ_DEMO=1: demo servers with simulated metrics');
   }
 
@@ -215,6 +258,7 @@ export async function buildApp(config: Config, deps: AppDeps = {}): Promise<Fast
     scheduler.stop();
     hub.shutdown();
     live.closeAll();
+    logs.closeAll();
   });
 
   await app.register(fastifyWebsocket, {
@@ -234,6 +278,7 @@ export async function buildApp(config: Config, deps: AppDeps = {}): Promise<Fast
     alerts,
   });
   await app.register(alertRoutes, { prefix: '/api', db: db.db, now, alerts });
+  await app.register(containerRoutes, { prefix: '/api', db: db.db, now, containers, servers, hub });
 
   const webDir = resolve(config.webDir ?? defaultWebDir);
   const hasWeb = existsSync(resolve(webDir, 'index.html'));

@@ -197,4 +197,41 @@ CREATE INDEX alerts_opened_at ON alerts(opened_at);
 CREATE INDEX alerts_server_id ON alerts(server_id);
 `,
   },
+  {
+    version: 3,
+    name: 'containers',
+    // The containers table is a cache of the last inventory, so it is rebuilt
+    // instead of altered: the core id is now stable per server + name (a
+    // recreated container keeps its id), and the inventory fields get columns.
+    sql: `
+DROP TABLE containers;
+CREATE TABLE containers (
+  id TEXT PRIMARY KEY,
+  server_id TEXT NOT NULL REFERENCES servers(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  docker_id TEXT NOT NULL,
+  image TEXT NOT NULL,
+  compose_project TEXT,
+  compose_service TEXT,
+  compose_dir TEXT,
+  state TEXT NOT NULL,
+  health TEXT NOT NULL,
+  status_text TEXT NOT NULL DEFAULT '',
+  exit_code INTEGER,
+  started_at INTEGER,
+  restart_count INTEGER,
+  cpu REAL,
+  mem_bytes REAL,
+  ports_json TEXT NOT NULL DEFAULT '[]',
+  info_json TEXT NOT NULL,
+  intent TEXT,
+  intent_until INTEGER,
+  oom_at INTEGER,
+  alert_class TEXT,
+  updated_at INTEGER NOT NULL,
+  UNIQUE (server_id, name)
+);
+CREATE INDEX containers_server_docker ON containers(server_id, docker_id);
+`,
+  },
 ];

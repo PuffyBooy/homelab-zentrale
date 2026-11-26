@@ -28,6 +28,12 @@ export function errorText(err: unknown): string {
       return 'Nicht gefunden.';
     case 'conflict':
       return 'Konflikt mit dem aktuellen Stand. Seite neu laden.';
+    case 'agent_offline':
+      return 'Agent offline. Die Aktion geht wieder, sobald sich der Server meldet.';
+    case 'agent_error':
+      return 'Agent hat die Aktion abgelehnt oder sie ist fehlgeschlagen. Log des Agents prüfen.';
+    case 'agent_timeout':
+      return 'Agent hat nicht rechtzeitig geantwortet. Status prüfen und erneut versuchen.';
     case 'bad_response':
       return 'Antwort der Zentrale unerwartet. Versionen von Core und Web prüfen.';
     default:

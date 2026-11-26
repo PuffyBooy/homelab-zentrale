@@ -1,4 +1,4 @@
-import { and, count, eq, notInArray } from 'drizzle-orm';
+import { count, eq } from 'drizzle-orm';
 import {
   defaultThresholds,
   thresholdsPatchSchema,
@@ -20,7 +20,6 @@ import type { FastifyBaseLogger } from 'fastify';
 import type { AlertService } from '../alerts/service.js';
 import type { AgentSink } from '../agents/hub.js';
 import type { Clock } from '../clock.js';
-import { randomToken } from '../crypto.js';
 import { writeAudit } from '../db/audit.js';
 import type { Db } from '../db/index.js';
 import {
@@ -45,6 +44,14 @@ type StoredMetrics = Omit<Metrics, 'type'>;
 export interface ConnectionInfo {
   isConnected(serverId: string): boolean;
   disconnectedAt(serverId: string): number | null;
+}
+
+/** Container bookkeeping (containers/service.ts), called by the server service. */
+export interface ContainerSync {
+  syncInventory(serverId: string, list: readonly ContainerInfo[]): void;
+  /** Returns true if a container changed (the server counts are refreshed). */
+  onEvent(serverId: string, event: AgentEvent['event']): boolean;
+  removeServer(serverId: string): void;
 }
 
 /** serverId and whether it was deleted. */
@@ -91,6 +98,7 @@ export class ServerService implements AgentSink {
   /** Demo servers (HZ_DEMO=1) count as connected without a socket. */
   private readonly virtual = new Set<string>();
   private connections: ConnectionInfo = { isConnected: () => false, disconnectedAt: () => null };
+  private containerSync: ContainerSync | null = null;
   private readonly bootAt: number;
 
   constructor(
@@ -107,6 +115,10 @@ export class ServerService implements AgentSink {
 
   setConnections(c: ConnectionInfo): void {
     this.connections = c;
+  }
+
+  setContainers(c: ContainerSync): void {
+    this.containerSync = c;
   }
 
   markVirtual(serverId: string): void {
@@ -193,6 +205,7 @@ export class ServerService implements AgentSink {
       });
     } else {
       this.deps.log.debug({ serverId, kind: e.kind }, 'agent event');
+      if (this.containerSync?.onEvent(serverId, e)) this.refresh(serverId);
     }
   }
 
@@ -258,35 +271,10 @@ export class ServerService implements AgentSink {
         })
         .where(eq(servers.id, serverId))
         .run();
-      const ids = inv.containers.map((c) => c.dockerId);
-      tx.delete(containers)
-        .where(
-          ids.length > 0
-            ? and(eq(containers.serverId, serverId), notInArray(containers.dockerId, ids))
-            : eq(containers.serverId, serverId),
-        )
-        .run();
-      for (const c of inv.containers) this.upsertContainer(tx, serverId, c, now);
     });
+    this.containerSync?.syncInventory(serverId, inv.containers);
     this.lastSeen.set(serverId, now);
     this.refresh(serverId, true);
-  }
-
-  private upsertContainer(tx: Db, serverId: string, c: ContainerInfo, now: number): void {
-    const values = {
-      name: c.name,
-      image: c.image,
-      composeProject: c.composeProject ?? null,
-      state: c.state,
-      health: c.health,
-      portsJson: JSON.stringify(c.ports),
-      infoJson: JSON.stringify(c),
-      updatedAt: now,
-    };
-    tx.insert(containers)
-      .values({ id: randomToken(16), serverId, dockerId: c.dockerId, ...values })
-      .onConflictDoUpdate({ target: [containers.serverId, containers.dockerId], set: values })
-      .run();
   }
 
   // ---- status ----------------------------------------------------------------
@@ -456,6 +444,7 @@ export class ServerService implements AgentSink {
   }
 
   delete(id: string): boolean {
+    this.containerSync?.removeServer(id);
     const r = this.deps.db.delete(servers).where(eq(servers.id, id)).run();
     this.lastSeen.delete(id);
     this.lastSummary.delete(id);

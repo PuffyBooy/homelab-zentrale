@@ -1,6 +1,9 @@
+import { createHash } from 'node:crypto';
 import { eq } from 'drizzle-orm';
-import type { Metrics } from '@hz/shared';
+import type { ContainerInfo, Metrics } from '@hz/shared';
 import type { Clock } from '../clock.js';
+import type { ContainerLogs } from '../containers/logs.js';
+import { containerCoreId } from '../containers/service.js';
 import { randomToken } from '../crypto.js';
 import type { Db } from '../db/index.js';
 import { servers } from '../db/schema.js';
@@ -76,6 +79,128 @@ export const DEMO_SERVERS: readonly DemoServer[] = [
   },
 ];
 
+const DAY_MS = 86_400_000;
+
+interface DemoContainer {
+  name: string;
+  image: string;
+  state: ContainerInfo['state'];
+  health?: ContainerInfo['health'];
+  exitCode?: number;
+  /** Days since start (running) or since exit. */
+  days: number;
+  port?: number;
+  compose?: { project: string; dir: string };
+  cpu?: number;
+  memMb?: number;
+}
+
+/**
+ * Containers from design/reference/previews/Dashboard.html and ServiceRow.html
+ * (homeassistant, lernplattform exit 1, uptime-kuma off, minecraft-paper) plus
+ * the agent on every server.
+ */
+export const DEMO_CONTAINERS: Readonly<Record<string, readonly DemoContainer[]>> = {
+  heimserver: [
+    {
+      name: 'homeassistant',
+      image: 'ghcr.io/home-assistant/home-assistant:stable',
+      state: 'running',
+      health: 'healthy',
+      days: 41,
+      port: 8123,
+      compose: { project: 'homeassistant', dir: '/opt/homelab/apps/homeassistant' },
+      cpu: 3.2,
+      memMb: 612,
+    },
+    {
+      name: 'lernplattform',
+      image: 'lernplattform:latest',
+      state: 'exited',
+      exitCode: 1,
+      days: 0.02,
+      port: 3000,
+      compose: { project: 'lernplattform', dir: '/opt/homelab/apps/lernplattform' },
+    },
+    {
+      name: 'uptime-kuma',
+      image: 'louislam/uptime-kuma:1',
+      state: 'exited',
+      exitCode: 0,
+      days: 3,
+      port: 3001,
+    },
+    {
+      name: 'homelab-agent',
+      image: 'homelab-zentrale/agent:local',
+      state: 'running',
+      days: 41,
+      cpu: 0.6,
+      memMb: 48,
+    },
+  ],
+  'oracle-a1': [
+    {
+      name: 'minecraft-paper',
+      image: 'itzg/minecraft-server:java21',
+      state: 'running',
+      health: 'healthy',
+      days: 12,
+      port: 25565,
+      compose: { project: 'minecraft-paper', dir: '/opt/homelab/games/minecraft-paper' },
+      cpu: 38,
+      memMb: 6144,
+    },
+    {
+      name: 'homelab-agent',
+      image: 'homelab-zentrale/agent:local',
+      state: 'running',
+      days: 12,
+      cpu: 0.8,
+      memMb: 52,
+    },
+  ],
+  'soundos-pi': [
+    {
+      name: 'homelab-agent',
+      image: 'homelab-zentrale/agent:local',
+      state: 'running',
+      days: 6,
+      cpu: 1.1,
+      memMb: 44,
+    },
+  ],
+};
+
+function demoContainerInfo(serverName: string, c: DemoContainer, t0: number): ContainerInfo {
+  const dockerId = createHash('sha256').update(`${serverName}/${c.name}`).digest('hex');
+  const ago = Math.round(c.days * DAY_MS);
+  return {
+    dockerId,
+    name: c.name,
+    image: c.image,
+    ...(c.compose
+      ? { composeProject: c.compose.project, composeService: c.name, composeDir: c.compose.dir }
+      : {}),
+    state: c.state,
+    health: c.health ?? 'none',
+    statusText: c.state === 'running' ? 'Up' : `Exited (${c.exitCode ?? 0})`,
+    ...(c.exitCode !== undefined ? { exitCode: c.exitCode } : {}),
+    startedAt: new Date(t0 - (c.state === 'running' ? ago : ago + DAY_MS)).toISOString(),
+    ports: c.port ? [{ privatePort: c.port, publicPort: c.port, ip: '0.0.0.0', proto: 'tcp' }] : [],
+    ...(c.cpu !== undefined ? { cpu: c.cpu } : {}),
+    ...(c.memMb !== undefined ? { memBytes: c.memMb * 1024 * 1024 } : {}),
+    restartCount: 0,
+  };
+}
+
+function demoLogLines(name: string, failed: boolean): string[] {
+  const lines = [`${name}: starting`, `${name}: loading configuration`, `${name}: listening`];
+  if (failed)
+    lines.push('Error: connect ECONNREFUSED 127.0.0.1:5432', `${name}: exited with code 1`);
+  return lines;
+}
+
 function wave(t: number, period: number, phase: number): number {
   return Math.sin((t / period) * 2 * Math.PI + phase);
 }
@@ -117,6 +242,7 @@ export function seedDemo(deps: {
   servers: ServerService;
   metrics: MetricsStore;
   scheduler: Scheduler;
+  logs?: ContainerLogs;
 }): string[] {
   const { db, now } = deps;
   const t0 = now();
@@ -157,7 +283,7 @@ export function seedDemo(deps: {
         cpuCores: 4,
         tailscaleIp: s.tailscaleIp,
       },
-      containers: [],
+      containers: (DEMO_CONTAINERS[s.name] ?? []).map((c) => demoContainerInfo(s.name, c, t0)),
       updates: { total: 3, security: 0 },
       rebootRequired: false,
       sshFailed24h: 0,
@@ -167,6 +293,15 @@ export function seedDemo(deps: {
     deps.servers.ingestMetrics(row.id, demoMetrics(s, i, t0, t0));
     ids.push(row.id);
   });
+  const demoLogs = new Map<string, string[]>();
+  DEMO_SERVERS.forEach((s, i) => {
+    const id = ids[i];
+    if (!id) return;
+    for (const c of DEMO_CONTAINERS[s.name] ?? []) {
+      demoLogs.set(containerCoreId(id, c.name), demoLogLines(c.name, (c.exitCode ?? 0) !== 0));
+    }
+  });
+  deps.logs?.setDemoSource((containerId) => demoLogs.get(containerId) ?? null);
   deps.metrics.rollup5m(48 * 3_600_000);
   deps.metrics.rollup1h(48 * 3_600_000);
 

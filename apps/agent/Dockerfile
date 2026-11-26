@@ -4,6 +4,11 @@
 #   docker buildx build --platform linux/amd64,linux/arm64 -f apps/agent/Dockerfile .
 # Run it with deploy/docker-compose.agent.yml (rights and mounts are explained there).
 
+# Docker CLI + Compose plugin for compose.* actions. The official image ships static,
+# multi-arch (amd64/arm64) binaries, so no apt repository or GPG key is needed.
+# Pinned by digest; update tag and digest together.
+FROM docker:29-cli@sha256:4e60c31615e83523afbb59773b25d055c0da9edcd5f80a4c6a6eebad49de1a25 AS dockercli
+
 FROM node:22-bookworm-slim AS base
 ENV PNPM_HOME=/pnpm PATH=/pnpm:$PATH CI=1
 RUN corepack enable
@@ -29,6 +34,9 @@ RUN apt-get update \
 RUN rm -rf /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/corepack \
     /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/corepack /opt/yarn* \
     /usr/local/bin/yarn /usr/local/bin/yarnpkg
+COPY --from=dockercli /usr/local/bin/docker /usr/local/bin/docker
+COPY --from=dockercli /usr/local/libexec/docker/cli-plugins/docker-compose \
+  /usr/local/libexec/docker/cli-plugins/docker-compose
 ENV NODE_ENV=production \
     HZ_AGENT_DATA=/data \
     HZ_AGENT_HOST_EXEC=nsenter \

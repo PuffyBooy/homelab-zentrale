@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { alertSchema } from './api/alerts.js';
+import { containerSummarySchema } from './api/containers.js';
 import { serverDetailSchema, serverSummarySchema } from './api/servers.js';
 
 /**
@@ -43,6 +44,7 @@ export type LiveServerMessage = z.infer<typeof liveServerMessageSchema>;
 export const liveTopicItemSchemas = {
   servers: serverSummarySchema,
   alerts: alertSchema,
+  containers: containerSummarySchema,
 } as const;
 
 /**

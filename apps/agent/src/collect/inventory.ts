@@ -1,6 +1,6 @@
 import type { Inventory } from '@hz/shared';
 import type { HostContext } from '../host.js';
-import { dockerVersion, listContainers } from './docker.js';
+import { ContainerCollector, dockerVersion } from './docker.js';
 import {
   collectFail2ban,
   collectPorts,
@@ -16,10 +16,11 @@ const safe = <T>(p: Promise<T>, fallback: T): Promise<T> => p.catch(() => fallba
 export async function collectInventory(
   ctx: HostContext,
   system: SystemCollector,
+  collector: ContainerCollector = new ContainerCollector(ctx.docker),
 ): Promise<Inventory> {
   const [version, containers, updates, reboot, ssh, f2b, ports] = await Promise.all([
     safe(dockerVersion(ctx.docker), undefined),
-    safe(listContainers(ctx.docker), []),
+    safe(collector.list(), []),
     safe(collectUpdates(ctx), null),
     safe(rebootRequired(ctx), false),
     safe(collectSshFailures(ctx), null),

@@ -122,3 +122,42 @@ describe('HZ_DEMO', () => {
     expect(res.statusCode).toBe(409);
   });
 });
+
+describe('HZ_DEMO containers', () => {
+  it('seeds the containers of the previews; actions answer 409, logs come from the demo', async () => {
+    t = await makeApp({ env: { HZ_DEMO: '1' } });
+    const { cookie } = await completeSetup(t);
+    const list = t.app.hzCore.containers.list();
+    const pick = (name: string, server: string) =>
+      list.find((c) => c.name === name && c.serverName === server);
+    expect(pick('homeassistant', 'heimserver')).toMatchObject({
+      status: 'ok',
+      composeManaged: true,
+    });
+    expect(pick('lernplattform', 'heimserver')).toMatchObject({ status: 'crit', exitCode: 1 });
+    expect(pick('uptime-kuma', 'heimserver')).toMatchObject({ status: 'off', exitCode: 0 });
+    expect(pick('minecraft-paper', 'oracle-a1')).toMatchObject({ status: 'ok' });
+    expect(list.filter((c) => c.name === 'homelab-agent')).toHaveLength(3);
+    // Problems first.
+    expect(list[0]?.name).toBe('lernplattform');
+    expect(t.app.hzCore.alerts.list({ state: 'active', limit: 50, source: 'container' })).toEqual([
+      expect.objectContaining({ title: 'lernplattform auf heimserver ist ausgefallen' }),
+    ]);
+    const heim = t.app.hzCore.servers.list().find((s) => s.name === 'heimserver');
+    expect(heim).toMatchObject({ containersRunning: 2, containersTotal: 4 });
+
+    const ha = pick('homeassistant', 'heimserver');
+    const res = await t.app.inject({
+      method: 'POST',
+      url: `/api/containers/${ha?.id}/restart`,
+      headers: authHeaders(cookie),
+    });
+    expect(res.statusCode).toBe(409);
+
+    const topic = `container-logs:${ha?.id}`;
+    t.app.hzCore.logs.open(topic);
+    expect(t.app.hzCore.logs.snapshot(topic)?.lines.length).toBeGreaterThan(0);
+    expect(t.app.hzCore.logs.snapshot(topic)?.ended).toBe(true);
+    t.app.hzCore.logs.close(topic);
+  });
+});
