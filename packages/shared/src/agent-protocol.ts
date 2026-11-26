@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { opsRpcParams } from './agent-ops.js';
 
 /**
  * Agent <-> core protocol (docs/ARCHITECTURE.md, "Agent-Protokoll").
@@ -760,6 +761,8 @@ const ptySize = { cols: z.number().int().min(10).max(500), rows: z.number().int(
  * Anything not listed here is rejected by the agent and logged.
  */
 export const rpcParamsByAction = {
+  /** Log search, vulnerability scan, fail2ban (agent-ops.ts). */
+  ...opsRpcParams,
   'container.start': containerIdParams,
   'container.stop': containerIdParams,
   'container.restart': containerIdParams,
