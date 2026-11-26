@@ -1042,3 +1042,94 @@ body,
     margin-left: auto;
   }
 }
+
+/* M6 Gameserver */
+.app-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  margin-bottom: var(--space-4);
+}
+.app-game,
+.app-game-stack {
+  display: grid;
+  gap: var(--space-2);
+  align-content: start;
+  min-width: 0;
+}
+.app-game-stack {
+  gap: var(--space-4);
+}
+.app-game .app-more,
+.app-game-stack > .app-more {
+  justify-self: start;
+}
+.app-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-3) var(--space-4);
+  align-items: start;
+}
+.app-fields-wide {
+  grid-column: 1 / -1;
+}
+@media (max-width: 699px) {
+  .app-fields {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+.app-fieldset {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  display: grid;
+  gap: var(--space-3);
+  min-width: 0;
+}
+.app-fieldset > legend {
+  padding: 0;
+  margin-bottom: var(--space-3);
+}
+.app-forward {
+  display: grid;
+  gap: var(--space-3);
+}
+.app-forward h3 {
+  margin: 0;
+}
+.app-rules {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 13px;
+}
+.app-rules li {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-1) 0;
+  border-bottom: 1px solid var(--line);
+}
+.app-rule-port {
+  color: var(--ink);
+}
+.app-rule-name {
+  color: var(--ink-faint);
+}
+.app-console-line {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+}
+.app-console-line .hz-input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.app-console-prompt {
+  font-family: var(--font-mono);
+  color: var(--ink-faint);
+}

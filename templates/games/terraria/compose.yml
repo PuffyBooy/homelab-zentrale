@@ -1,0 +1,30 @@
+# Rendered by the core (see templates/games/README.md). The world is created on the
+# first start (-autocreate) and loaded afterwards. Console: `docker attach` (stdin_open + tty).
+services:
+  server:
+    image: ryshe/terraria:tshock-1.4.5.8-6.2.1
+    container_name: game-${GAME_NAME}
+    restart: unless-stopped
+    mem_limit: ${MEMORY}
+    stdin_open: true
+    tty: true
+    env_file:
+      - .env
+    environment:
+      TZ: Europe/Vienna
+    command:
+      - -world
+      - /root/.local/share/Terraria/Worlds/${WORLD_NAME}.wld
+      - -autocreate
+      - '${WORLD_SIZE}'
+      - -maxplayers
+      - '${MAX_PLAYERS}'
+      - -port
+      - '7777'
+    ports:
+      - '${PORT_GAME}:7777/tcp'
+    volumes:
+      - ./data:/root/.local/share/Terraria/Worlds
+    labels:
+      homelab.game: ${GAME_NAME}
+      homelab.template: terraria

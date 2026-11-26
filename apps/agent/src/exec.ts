@@ -28,6 +28,9 @@ export const PROGRAMS = new Set([
   'docker',
   // git in the agent image, only for deploy.run (actions/deploy.ts, fixed argument builders).
   'git',
+  // tar in the agent image, only for game.backup (actions/game-backup.ts, fixed arguments;
+  // --zstd makes tar start zstd itself).
+  'tar',
 ]);
 
 export const CHILD_ENV: Readonly<Record<string, string>> = Object.freeze({

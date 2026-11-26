@@ -2,7 +2,7 @@ import { randomBytes } from 'node:crypto';
 import { lstat, mkdir, open, rename, unlink } from 'node:fs/promises';
 import { assertProjectNotProtected, type ProtectDocker } from './protected.js';
 import path from 'node:path';
-import { fileNameSchema, type RpcParams } from '@hz/shared';
+import { composeFileNameSchema, type RpcParams } from '@hz/shared';
 import type { RunResult } from '../exec.js';
 import { resolveHomelabPath } from '../paths.js';
 import { withDirLock } from './dir-lock.js';
@@ -31,14 +31,18 @@ export const COMPOSE_FILE_NAMES = [
   'docker-compose.yaml',
 ] as const;
 
-/** `deploy` is `up` with `--build`, only used by deploy.run. */
-export type ComposeOp = 'pull' | 'up' | 'down' | 'deploy';
+/**
+ * `deploy` is `up` with `--build`, only used by deploy.run. `remove` is `down` that also
+ * deletes the project's named volumes (server installs), only used by game.remove.
+ */
+export type ComposeOp = 'pull' | 'up' | 'down' | 'deploy' | 'remove';
 
 const SUBCOMMANDS: Record<ComposeOp, readonly string[]> = {
   pull: ['pull', '--quiet'],
   up: ['up', '-d', '--remove-orphans'],
   down: ['down', '--remove-orphans'],
   deploy: ['up', '-d', '--build', '--remove-orphans'],
+  remove: ['down', '--remove-orphans', '--volumes'],
 };
 
 export const COMPOSE_TIMEOUTS: Record<ComposeOp, number> = {
@@ -46,6 +50,7 @@ export const COMPOSE_TIMEOUTS: Record<ComposeOp, number> = {
   up: 10 * 60_000,
   down: 5 * 60_000,
   deploy: 20 * 60_000,
+  remove: 5 * 60_000,
 };
 
 /** The fixed argument list for one compose operation. */
@@ -174,7 +179,7 @@ export function tail(text: string, max: number): string {
 }
 
 async function composeOp(
-  op: Exclude<ComposeOp, 'deploy'>,
+  op: Exclude<ComposeOp, 'deploy' | 'remove'>,
   params: RpcParams<'compose.up'>,
   ctx: ActionContext,
 ): Promise<{ output: string }> {
@@ -205,18 +210,32 @@ export const composeUp = (p: RpcParams<'compose.up'>, ctx: ActionContext) =>
 export const composeDown = (p: RpcParams<'compose.down'>, ctx: ActionContext) =>
   composeOp('down', p, ctx);
 
-/** Writes one file atomically: exclusive temp file (never follows a symlink), fsync, rename. */
-export async function writeFileAtomic(dir: string, name: string, text: string): Promise<void> {
+/** `.env` holds secrets (RCON password, server passwords): owner only. */
+export const ENV_FILE_NAME = '.env';
+export function fileMode(name: string): number {
+  return name === ENV_FILE_NAME ? 0o600 : 0o640;
+}
+
+/**
+ * Writes one file atomically: exclusive temp file (never follows a symlink), fsync, rename.
+ * The temp file has its final mode from the start, so a secret is never readable by others.
+ */
+export async function writeFileAtomic(
+  dir: string,
+  name: string,
+  text: string,
+  mode = 0o640,
+): Promise<void> {
   const target = path.join(dir, name);
   const existing = await lstat(target).catch(() => null);
   if (existing?.isDirectory()) throw new ActionError('bad_path', `${name} is a directory`);
   const tmp = path.join(dir, `.${name}.${randomBytes(6).toString('hex')}.tmp`);
   // 'wx' = O_CREAT | O_EXCL: fails if anything (also a symlink) exists at tmp.
-  const fh = await open(tmp, 'wx', 0o640);
+  const fh = await open(tmp, 'wx', mode);
   try {
     try {
+      await fh.chmod(mode);
       await fh.writeFile(text, 'utf8');
-      await fh.chmod(0o640);
       await fh.sync();
     } finally {
       await fh.close();
@@ -235,7 +254,7 @@ export async function composeWrite(
 ): Promise<{ dir: string; files: string[] }> {
   const names = Object.keys(params.files);
   for (const name of names) {
-    if (!fileNameSchema.safeParse(name).success) {
+    if (!composeFileNameSchema.safeParse(name).success) {
       throw new ActionError('invalid_params', 'invalid file name');
     }
   }
@@ -259,8 +278,9 @@ export async function composeWrite(
     if (!st.isDirectory()) throw new ActionError('bad_path', 'dir is not a directory');
     for (const name of names) {
       try {
-        await writeFileAtomic(params.dir, name, params.files[name] ?? '');
+        await writeFileAtomic(params.dir, name, params.files[name] ?? '', fileMode(name));
       } catch (err) {
+        // Never log or echo the content (.env holds secrets); only the name.
         if (err instanceof ActionError) throw err;
         throw new ActionError('failed', `writing ${name} failed`);
       }

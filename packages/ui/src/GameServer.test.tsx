@@ -1,4 +1,5 @@
-import { describe, expect, it } from 'vitest';
+import { isValidElement, type ReactElement } from 'react';
+import { describe, expect, it, vi } from 'vitest';
 import { GameServer } from './GameServer.js';
 import { html } from './test-utils.js';
 
@@ -48,6 +49,78 @@ describe('GameServer', () => {
   it('marks crit', () => {
     expect(html(<GameServer name="v" game="g" address="a" status="crit" host="h" />)).toContain(
       'class="hz-tile hz-game hz-tile-crit"',
+    );
+  });
+});
+
+type AnyEl = ReactElement<Record<string, unknown>>;
+
+/** Elements of the (unrendered) tree returned by GameServer(), depth first. */
+function walk(node: unknown, out: AnyEl[] = []): AnyEl[] {
+  if (Array.isArray(node)) {
+    for (const n of node) walk(n, out);
+    return out;
+  }
+  if (isValidElement(node)) {
+    const el = node as AnyEl;
+    out.push(el);
+    walk(el.props.children, out);
+  }
+  return out;
+}
+
+describe('GameServer additions (handlers, formatted TPS)', () => {
+  const base = {
+    name: 'survival',
+    game: 'Minecraft Paper',
+    address: 'mc.hoebe.at:25565',
+    host: 'h',
+  };
+
+  it('copies the address on click and reports it', () => {
+    const writeText = vi.fn(() => Promise.resolve());
+    vi.stubGlobal('navigator', { clipboard: { writeText } });
+    const onCopy = vi.fn();
+    const tree = walk(GameServer({ ...base, onCopy }));
+    const addr = tree.find((e) => e.props.className === 'hz-addr');
+    expect(addr).toBeDefined();
+    (addr?.props.onClick as () => void)();
+    expect(writeText).toHaveBeenCalledWith('mc.hoebe.at:25565');
+    expect(onCopy).toHaveBeenCalledWith('mc.hoebe.at:25565');
+    vi.unstubAllGlobals();
+  });
+
+  it('wires the footer buttons to the handlers', () => {
+    const on = { onStop: vi.fn(), onRestart: vi.fn(), onConsole: vi.fn(), onShare: vi.fn() };
+    const tree = walk(GameServer({ ...base, status: 'ok', ...on }));
+    const byIcon = (icon: string): AnyEl | undefined => tree.find((e) => e.props.icon === icon);
+    (byIcon('stop')?.props.onClick as () => void)();
+    (byIcon('refresh')?.props.onClick as () => void)();
+    (byIcon('terminal')?.props.onClick as () => void)();
+    (byIcon('link')?.props.onClick as () => void)();
+    expect(on.onStop).toHaveBeenCalledOnce();
+    expect(on.onRestart).toHaveBeenCalledOnce();
+    expect(on.onConsole).toHaveBeenCalledOnce();
+    expect(on.onShare).toHaveBeenCalledOnce();
+    const onStart = vi.fn();
+    const off = walk(GameServer({ ...base, status: 'off', onStart }));
+    (off.find((e) => e.props.icon === 'play')?.props.onClick as () => void)();
+    expect(onStart).toHaveBeenCalledOnce();
+  });
+
+  it('disables listed actions and keeps the reference markup without them', () => {
+    const out = html(<GameServer {...base} disabledActions={['share', 'restart']} />);
+    expect(out.match(/disabled=""/g)).toHaveLength(2);
+    expect(out).toMatch(/<button[^>]*disabled=""[^>]*><svg[^>]*>.*?<\/svg><span>Restart<\/span>/);
+    expect(html(<GameServer {...base} />)).not.toContain('disabled');
+  });
+
+  it('shows the formatted TPS when given', () => {
+    expect(html(<GameServer {...base} tps={19.8} tpsDetail="19,8" />)).toContain(
+      '<span class="hz-usage-val">19,8</span>',
+    );
+    expect(html(<GameServer {...base} tps={null} tpsDetail="x" />)).toContain(
+      '<span class="hz-usage-val">—</span>',
     );
   });
 });

@@ -1,0 +1,12 @@
+services:
+  server:
+    image: lloesche/valheim-server:latest
+    container_name: game-${GAME_NAME}
+    env_file: .env
+    environment:
+      SERVER_NAME: ${SERVER_NAME}
+      SERVER_PASS: ${SERVER_PASS}
+    ports:
+      - "${PORT_GAME}-${PORT_GAME_END}:2456-2458/udp"
+    volumes:
+      - ./config:/config

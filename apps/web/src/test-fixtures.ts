@@ -7,9 +7,11 @@ import type {
   CheckDef,
   CheckSummary,
   ContainerSummary,
+  GameSummary,
   ServerDetail,
   ServerSummary,
 } from '@hz/shared';
+import type { TemplateInfo } from './lib/games.js';
 
 /** Test data builders (unit tests only). */
 
@@ -217,6 +219,59 @@ export function deploy(over: Partial<Deploy> = {}): Deploy {
     startedAt: '2026-11-25T22:00:00.000Z',
     finishedAt: '2026-11-25T22:00:42.000Z',
     summary: null,
+    ...over,
+  };
+}
+
+export function game(over: Partial<GameSummary> = {}): GameSummary {
+  n++;
+  return {
+    id: `game-${String(n).padStart(6, '0')}`,
+    name: 'survival',
+    templateId: 'minecraft-java',
+    game: 'Minecraft Paper',
+    version: '1.21.4',
+    serverId: 'srv-000001',
+    serverName: 'oracle-a1',
+    address: 'mc.hoebe.at:25565',
+    ports: [{ name: 'game', port: 25565, protocol: 'tcp' }],
+    status: 'ok',
+    statusText: 'Läuft',
+    players: { online: 4, max: 20, names: ['Alex', 'Lukas', 'mia_07', 'Tobi'] },
+    tps: 19.8,
+    ramBytes: 5.8 * 1024 ** 3,
+    ramLimitBytes: 8 * 1024 ** 3,
+    rcon: true,
+    autoStopMinutes: 0,
+    values: { TYPE: 'PAPER', MAX_PLAYERS: 20 },
+    lastBackupAt: null,
+    createdAt: '2026-11-20T18:00:00.000Z',
+    ...over,
+  };
+}
+
+/** Template list entry like GET /api/games/templates (Minecraft Java). */
+export function template(over: Partial<TemplateInfo> = {}): TemplateInfo {
+  return {
+    id: 'minecraft-java',
+    name: 'Minecraft Java',
+    image: 'itzg/minecraft-server',
+    ram: { min: '4G', recommended: '6G' },
+    ports: [{ name: 'game', protocol: 'tcp', default: 25565, count: 1 }],
+    rcon: true,
+    fields: [
+      {
+        key: 'TYPE',
+        label: 'Server-Typ',
+        type: 'select',
+        options: ['PAPER', 'VANILLA', 'FABRIC'],
+        default: 'PAPER',
+      },
+      { key: 'VERSION', label: 'Version', type: 'text', default: 'LATEST' },
+      { key: 'MAX_PLAYERS', label: 'Max. Spieler', type: 'number', default: 20, min: 1, max: 100 },
+      { key: 'SEED', label: 'Seed', type: 'text', default: '', optional: true },
+      { key: 'ENABLE_WHITELIST', label: 'Whitelist', type: 'boolean', default: true },
+    ],
     ...over,
   };
 }

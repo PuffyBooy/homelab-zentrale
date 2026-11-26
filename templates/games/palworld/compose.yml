@@ -1,0 +1,44 @@
+# Rendered by the core (see templates/games/README.md).
+# - ${RCON_PASSWORD} below is a runtime placeholder: the core leaves it as is and
+#   docker compose fills it from the 0600 .env at `up` (the image wants ADMIN_PASSWORD;
+#   it protects RCON and the REST API). SERVER_PASSWORD (secret field) comes from .env.
+# - RCON and the REST API (player list for game.status) are published on 127.0.0.1 only.
+# - Saves (Pal/Saved) are in ./data and backed up; the server files live in the named
+#   volume `server` and are removed with the game (compose down --volumes).
+services:
+  server:
+    image: thijsvanloef/palworld-server-docker:v2.8.1
+    container_name: game-${GAME_NAME}
+    restart: unless-stopped
+    mem_limit: ${MEMORY}
+    stop_grace_period: 60s
+    env_file:
+      - .env
+    environment:
+      PUID: '1000'
+      PGID: '1000'
+      PORT: '8211'
+      PLAYERS: ${PLAYERS}
+      SERVER_NAME: ${SERVER_NAME}
+      COMMUNITY: ${COMMUNITY}
+      MULTITHREADING: 'true'
+      ADMIN_PASSWORD: ${RCON_PASSWORD}
+      RCON_ENABLED: 'true'
+      RCON_PORT: '25575'
+      REST_API_ENABLED: 'true'
+      REST_API_PORT: '8212'
+      BACKUP_ENABLED: 'false'
+      TZ: Europe/Vienna
+    ports:
+      - '${PORT_GAME}:8211/udp'
+      - '127.0.0.1:${PORT_API}:8212/tcp'
+      - '127.0.0.1:${PORT_RCON}:25575/tcp'
+    volumes:
+      - server:/palworld
+      - ./data:/palworld/Pal/Saved
+    labels:
+      homelab.game: ${GAME_NAME}
+      homelab.template: palworld
+
+volumes:
+  server:

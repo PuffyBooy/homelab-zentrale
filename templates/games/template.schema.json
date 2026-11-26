@@ -1,0 +1,301 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Homelab-Zentrale game template (template.json)",
+  "description": "Generated from gameTemplateSchema in packages/shared/src/api/games.ts. Do not edit by hand; apps/agent/test/templates.test.ts checks that both match.",
+  "type": "object",
+  "properties": {
+    "$schema": {
+      "type": "string"
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]{1,40}$"
+    },
+    "name": {
+      "type": "string",
+      "maxLength": 80
+    },
+    "image": {
+      "type": "string",
+      "maxLength": 200
+    },
+    "ram": {
+      "type": "object",
+      "properties": {
+        "min": {
+          "type": "string",
+          "pattern": "^\\d{1,3}G$"
+        },
+        "recommended": {
+          "type": "string",
+          "pattern": "^\\d{1,3}G$"
+        }
+      },
+      "required": [
+        "min",
+        "recommended"
+      ],
+      "additionalProperties": false
+    },
+    "ports": {
+      "minItems": 1,
+      "maxItems": 5,
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9]{0,15}$"
+          },
+          "container": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 65535
+          },
+          "protocol": {
+            "type": "string",
+            "enum": [
+              "tcp",
+              "udp",
+              "tcp+udp"
+            ]
+          },
+          "default": {
+            "type": "integer",
+            "minimum": 1024,
+            "maximum": 65535
+          },
+          "count": {
+            "default": 1,
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 10
+          }
+        },
+        "required": [
+          "name",
+          "container",
+          "protocol",
+          "default"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "query": {
+      "type": "object",
+      "properties": {
+        "method": {
+          "type": "string",
+          "enum": [
+            "minecraft",
+            "minecraft-bedrock",
+            "gamedig",
+            "none"
+          ]
+        },
+        "port": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string",
+          "maxLength": 40
+        }
+      },
+      "required": [
+        "method"
+      ],
+      "additionalProperties": false
+    },
+    "rcon": {
+      "type": "object",
+      "properties": {
+        "supported": {
+          "type": "boolean"
+        },
+        "port": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535
+        },
+        "tpsCommand": {
+          "type": "string",
+          "maxLength": 40
+        }
+      },
+      "required": [
+        "supported"
+      ],
+      "additionalProperties": false
+    },
+    "dataDir": {
+      "type": "string",
+      "pattern": "^\\.\\/[A-Za-z0-9._/-]+$"
+    },
+    "fields": {
+      "maxItems": 30,
+      "type": "array",
+      "items": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "key": {
+                "type": "string",
+                "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+              },
+              "label": {
+                "type": "string",
+                "maxLength": 80
+              },
+              "type": {
+                "type": "string",
+                "const": "text"
+              },
+              "default": {
+                "type": "string",
+                "maxLength": 200
+              },
+              "optional": {
+                "type": "boolean"
+              },
+              "pattern": {
+                "type": "string",
+                "maxLength": 200
+              },
+              "secret": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "key",
+              "label",
+              "type",
+              "default"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "key": {
+                "type": "string",
+                "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+              },
+              "label": {
+                "type": "string",
+                "maxLength": 80
+              },
+              "type": {
+                "type": "string",
+                "const": "number"
+              },
+              "default": {
+                "type": "number"
+              },
+              "min": {
+                "type": "number"
+              },
+              "max": {
+                "type": "number"
+              },
+              "optional": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "key",
+              "label",
+              "type",
+              "default"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "key": {
+                "type": "string",
+                "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+              },
+              "label": {
+                "type": "string",
+                "maxLength": 80
+              },
+              "type": {
+                "type": "string",
+                "const": "select"
+              },
+              "options": {
+                "minItems": 1,
+                "maxItems": 50,
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "maxLength": 60
+                }
+              },
+              "default": {
+                "type": "string",
+                "maxLength": 60
+              },
+              "optional": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "key",
+              "label",
+              "type",
+              "options",
+              "default"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "key": {
+                "type": "string",
+                "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+              },
+              "label": {
+                "type": "string",
+                "maxLength": 80
+              },
+              "type": {
+                "type": "string",
+                "const": "boolean"
+              },
+              "default": {
+                "type": "boolean"
+              },
+              "optional": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "key",
+              "label",
+              "type",
+              "default"
+            ],
+            "additionalProperties": false
+          }
+        ]
+      }
+    }
+  },
+  "required": [
+    "id",
+    "name",
+    "image",
+    "ram",
+    "ports",
+    "query",
+    "rcon",
+    "dataDir",
+    "fields"
+  ],
+  "additionalProperties": false
+}

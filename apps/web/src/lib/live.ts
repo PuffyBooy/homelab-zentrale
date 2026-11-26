@@ -3,6 +3,7 @@ import {
   alertSchema,
   checkSummarySchema,
   containerSummarySchema,
+  gameSummarySchema,
   logLineSchema,
   logSnapshotSchema,
   liveServerMessageSchema,
@@ -13,6 +14,7 @@ import {
   type Alert,
   type CheckSummary,
   type ContainerSummary,
+  type GameSummary,
   type LiveServerMessage,
   type LogLine,
   type RepoSummary,
@@ -44,6 +46,15 @@ import {
   reposKey,
   type DeployLogBuffer,
 } from './github.js';
+import {
+  applyGameEvents,
+  backupsKey,
+  emptyGameEvents,
+  gameEventsKey,
+  gamesKey,
+  gameSnapshotToBuffer,
+  type GameEventBuffer,
+} from './games.js';
 import { appendLogLines, containerLogsKey, type LogBuffer } from './logs.js';
 import { serverKey, serversKey } from './servers.js';
 
@@ -200,6 +211,46 @@ export function applyLiveMessage(qc: QueryClient, msg: LiveServerMessage): Apply
       void qc.invalidateQueries({ queryKey: ['github', 'commits'] });
       void qc.invalidateQueries({ queryKey: ['github', 'deploys'] });
       void qc.invalidateQueries({ queryKey: ['github', 'deploy'] });
+    }
+    return result;
+  }
+
+  if (topic === 'games') {
+    const before = qc.getQueryData<GameSummary[]>(gamesKey);
+    let next: GameSummary[] | undefined;
+    if (msg.type === 'snapshot') {
+      const raw = snapshotList(msg.data, 'games');
+      const { ok, bad } = parseItems(gameSummarySchema, raw ?? []);
+      if (raw) next = qc.setQueryData<GameSummary[]>(gamesKey, ok);
+      if (!raw || bad) void qc.invalidateQueries({ queryKey: gamesKey, exact: true });
+    } else {
+      const { ok, bad } = parseItems(gameSummarySchema, msg.upsert ?? []);
+      next = qc.setQueryData<GameSummary[]>(gamesKey, (old) =>
+        old ? mergeById(old, ok, msg.remove) : old,
+      );
+      for (const id of msg.remove ?? []) qc.removeQueries({ queryKey: backupsKey(id) });
+      if (bad) void qc.invalidateQueries({ queryKey: gamesKey, exact: true });
+    }
+    // A finished backup shows as a new lastBackupAt: refresh that backup list.
+    for (const g of next ?? []) {
+      const old = before?.find((x) => x.id === g.id);
+      if (old && old.lastBackupAt !== g.lastBackupAt) {
+        void qc.invalidateQueries({ queryKey: backupsKey(g.id) });
+      }
+    }
+    return result;
+  }
+
+  const game = /^game:([A-Za-z0-9_-]{1,64})$/.exec(topic);
+  if (game?.[1]) {
+    const key = gameEventsKey(game[1]);
+    if (msg.type === 'snapshot') {
+      const buf = gameSnapshotToBuffer(msg.data);
+      if (buf) qc.setQueryData<GameEventBuffer>(key, buf);
+    } else {
+      qc.setQueryData<GameEventBuffer>(key, (old) =>
+        applyGameEvents(old ?? emptyGameEvents, msg.upsert ?? []),
+      );
     }
     return result;
   }

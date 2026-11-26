@@ -1,0 +1,43 @@
+{
+  "$schema": "../template.schema.json",
+  "id": "valheim",
+  "name": "Valheim",
+  "image": "lloesche/valheim-server:sha-0ab6cdcc16dd",
+  "ram": { "min": "3G", "recommended": "4G" },
+  "ports": [{ "name": "game", "container": 2456, "protocol": "udp", "default": 2456, "count": 3 }],
+  "query": { "method": "gamedig", "port": "game", "type": "valheim" },
+  "rcon": { "supported": false },
+  "dataDir": "./data",
+  "fields": [
+    {
+      "key": "SERVER_NAME",
+      "label": "Servername",
+      "type": "text",
+      "default": "Homelab",
+      "pattern": "[A-Za-z0-9 ._-]{1,40}"
+    },
+    {
+      "key": "WORLD_NAME",
+      "label": "Weltname",
+      "type": "text",
+      "default": "Dedicated",
+      "pattern": "[A-Za-z0-9_-]{1,40}"
+    },
+    {
+      "key": "SERVER_PASS",
+      "label": "Server-Passwort (mind. 5 Zeichen)",
+      "type": "text",
+      "default": "",
+      "pattern": "[^\\s'\"$\\\\]{5,64}",
+      "secret": true
+    },
+    { "key": "SERVER_PUBLIC", "label": "In der Serverliste zeigen", "type": "boolean", "default": false },
+    {
+      "key": "MEMORY",
+      "label": "RAM",
+      "type": "select",
+      "options": ["3G", "4G", "6G", "8G"],
+      "default": "4G"
+    }
+  ]
+}

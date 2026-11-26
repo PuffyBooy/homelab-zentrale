@@ -43,6 +43,13 @@ export function percent(value: number): string {
   return `${Math.floor(value)} %`;
 }
 
+const GIB = 1024 ** 3;
+
+/** `2,1 GB` (binary gigabytes, one decimal). */
+export function gigabytes(bytes: number): string {
+  return `${decimalFmt.format(Math.round((bytes / GIB) * 10) / 10)} GB`;
+}
+
 /** `21,4 °C` */
 export function celsius(value: number): string {
   return `${decimalFmt.format(Math.round(value * 10) / 10)} °C`;

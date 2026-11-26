@@ -1,0 +1,33 @@
+# Rendered by the core (see templates/games/README.md). The server listens on
+# PORT_GAME..PORT_GAME_END (3 consecutive UDP ports) inside and outside, so the Steam
+# query port (PORT_GAME + 1) matches. SERVER_PASS is a secret field: only in .env.
+# The image is amd64 only (no Raspberry Pi / Oracle ARM).
+services:
+  server:
+    image: lloesche/valheim-server:sha-0ab6cdcc16dd
+    container_name: game-${GAME_NAME}
+    restart: unless-stopped
+    mem_limit: ${MEMORY}
+    stop_grace_period: 2m
+    env_file:
+      - .env
+    environment:
+      SERVER_NAME: ${SERVER_NAME}
+      WORLD_NAME: ${WORLD_NAME}
+      SERVER_PORT: ${PORT_GAME}
+      SERVER_PUBLIC: ${SERVER_PUBLIC}
+      BACKUPS: 'false'
+      TZ: Europe/Vienna
+    ports:
+      - '${PORT_GAME}-${PORT_GAME_END}:${PORT_GAME}-${PORT_GAME_END}/udp'
+    volumes:
+      # Worlds and config (backed up by game.backup).
+      - ./data:/config
+      # Downloaded server files; removed with the game (compose down --volumes).
+      - server:/opt/valheim
+    labels:
+      homelab.game: ${GAME_NAME}
+      homelab.template: valheim
+
+volumes:
+  server:

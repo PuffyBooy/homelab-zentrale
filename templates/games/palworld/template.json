@@ -1,0 +1,53 @@
+{
+  "$schema": "../template.schema.json",
+  "id": "palworld",
+  "name": "Palworld",
+  "image": "thijsvanloef/palworld-server-docker:v2.8.1",
+  "ram": { "min": "8G", "recommended": "16G" },
+  "ports": [
+    { "name": "game", "container": 8211, "protocol": "udp", "default": 8211, "count": 1 },
+    { "name": "api", "container": 8212, "protocol": "tcp", "default": 8212, "count": 1 }
+  ],
+  "query": { "method": "gamedig", "port": "api", "type": "palworld" },
+  "rcon": { "supported": true, "port": 25575 },
+  "dataDir": "./data",
+  "fields": [
+    {
+      "key": "SERVER_NAME",
+      "label": "Servername",
+      "type": "text",
+      "default": "Homelab",
+      "pattern": "[A-Za-z0-9 ._-]{1,40}"
+    },
+    {
+      "key": "PLAYERS",
+      "label": "Max. Spieler",
+      "type": "number",
+      "default": 16,
+      "min": 1,
+      "max": 32
+    },
+    {
+      "key": "SERVER_PASSWORD",
+      "label": "Server-Passwort",
+      "type": "text",
+      "default": "",
+      "optional": true,
+      "pattern": "[^\\s'\"$\\\\]{0,64}",
+      "secret": true
+    },
+    {
+      "key": "COMMUNITY",
+      "label": "In der Community-Serverliste zeigen",
+      "type": "boolean",
+      "default": false
+    },
+    {
+      "key": "MEMORY",
+      "label": "RAM",
+      "type": "select",
+      "options": ["8G", "12G", "16G", "24G"],
+      "default": "16G"
+    }
+  ]
+}

@@ -1,0 +1,42 @@
+{
+  "$schema": "../template.schema.json",
+  "id": "terraria",
+  "name": "Terraria (TShock)",
+  "image": "ryshe/terraria:tshock-1.4.5.8-6.2.1",
+  "ram": { "min": "1G", "recommended": "2G" },
+  "ports": [{ "name": "game", "container": 7777, "protocol": "tcp", "default": 7777, "count": 1 }],
+  "query": { "method": "none", "port": "game" },
+  "rcon": { "supported": false },
+  "dataDir": "./data",
+  "fields": [
+    {
+      "key": "WORLD_NAME",
+      "label": "Weltname",
+      "type": "text",
+      "default": "Homelab",
+      "pattern": "[A-Za-z0-9_-]{1,40}"
+    },
+    {
+      "key": "WORLD_SIZE",
+      "label": "Weltgröße (1 klein, 2 mittel, 3 groß)",
+      "type": "select",
+      "options": ["1", "2", "3"],
+      "default": "2"
+    },
+    {
+      "key": "MAX_PLAYERS",
+      "label": "Max. Spieler",
+      "type": "number",
+      "default": 8,
+      "min": 1,
+      "max": 255
+    },
+    {
+      "key": "MEMORY",
+      "label": "RAM",
+      "type": "select",
+      "options": ["1G", "2G", "4G"],
+      "default": "2G"
+    }
+  ]
+}

@@ -43,6 +43,8 @@ describe('agent protocol allowlist', () => {
         'container.update',
         'deploy.run',
         'deploy.key',
+        'game.status',
+        'game.remove',
         'game.backup',
         'game.rcon',
         'pty.close',
@@ -114,6 +116,13 @@ describe('homelab path check (syntax)', () => {
     expect(composeFilesSchema.safeParse({ 'a/b.yml': 'a' }).success).toBe(false);
     expect(composeFilesSchema.safeParse({ 'compose.yml': 'a' }).success).toBe(true);
     expect(composeFilesSchema.safeParse({}).success).toBe(false);
+  });
+
+  it('compose.write allows .env but no other dotfiles', () => {
+    expect(composeFilesSchema.safeParse({ 'compose.yml': 'a', '.env': 'A=1' }).success).toBe(true);
+    for (const name of ['.git', '.envrc', '.env.local', '..env', '.ssh', '.env/x']) {
+      expect(composeFilesSchema.safeParse({ [name]: 'a' }).success, name).toBe(false);
+    }
   });
 
   it('repo urls are github only', () => {
