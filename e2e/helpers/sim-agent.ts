@@ -101,6 +101,8 @@ export interface SimAgentOptions {
   relay?: boolean;
   /** M18: answer logs.search, image.scan and fail2ban.* (see SimOps). */
   ops?: SimOps;
+  /** M13b: answer backup.target.* with a share in this state (setBackupTarget changes it). */
+  backupTarget?: 'mounted' | 'not_mounted';
 }
 
 /** M18 canned data for the operations modules. */
@@ -128,6 +130,8 @@ export interface SimOps {
 /** An archive game.import is receiving. */
 interface SimImport {
   gameId: string;
+  /** M13b backup.target.store: the database snapshot's name (no game). */
+  fileName?: string;
   bytes: number;
   sha256: string;
   chunks: number;
@@ -173,6 +177,9 @@ export class SimAgent {
   listeningPorts: SimListeningPort[];
   /** M13: inventory.storage sent with every inventory (setStorage changes it). */
   storage: Record<string, unknown> | undefined;
+  /** M13b: state of /opt/homelab/backup-target and the snapshots stored there. */
+  backupTarget: 'mounted' | 'not_mounted' | undefined;
+  readonly storedDb: { fileName: string; bytes: number }[] = [];
   /** World data per game folder name: set by game.import, read by game.export. */
   readonly gameData = new Map<string, Buffer>();
   private readonly imports = new Map<string, SimImport>();
@@ -193,6 +200,80 @@ export class SimAgent {
       ]
     ).map((p) => ({ ...p }));
     this.storage = o.storage;
+    this.backupTarget = o.backupTarget;
+  }
+
+  setBackupTarget(state: 'mounted' | 'not_mounted'): void {
+    this.backupTarget = state;
+  }
+
+  /** backup.target.*; false when the action is not one of them. */
+  private answerBackupTarget(id: string, action: string, params: Record<string, unknown>): boolean {
+    if (!action.startsWith('backup.target.') || !this.backupTarget) return false;
+    const mounted = this.backupTarget === 'mounted';
+    const free = Math.round(1.8 * 1024 ** 4);
+    if (action === 'backup.target.status') {
+      const last = this.storedDb.at(-1);
+      this.send({
+        type: 'rpc.result',
+        id,
+        ok: true,
+        data: {
+          state: this.backupTarget,
+          fs: mounted ? 'cifs' : null,
+          freeBytes: mounted ? free : null,
+          totalBytes: mounted ? Math.round(3.6 * 1024 ** 4) : null,
+          games: [],
+          core: {
+            files: mounted ? this.storedDb.length : 0,
+            bytes: mounted ? this.storedDb.reduce((n, d) => n + d.bytes, 0) : 0,
+            newest: mounted ? (last?.fileName ?? null) : null,
+          },
+        },
+      });
+    } else if (action === 'backup.target.sync') {
+      const gameIds = (params.gameIds as string[] | undefined) ?? [];
+      this.send({
+        type: 'rpc.result',
+        id,
+        ok: true,
+        data: {
+          state: this.backupTarget,
+          games: mounted
+            ? gameIds.map((g) => ({
+                gameId: g,
+                copied: 0,
+                skipped: 0,
+                removed: 0,
+                bytes: 0,
+                error: null,
+              }))
+            : [],
+          freeBytes: mounted ? free : null,
+          totalBytes: mounted ? Math.round(3.6 * 1024 ** 4) : null,
+        },
+      });
+    } else if (action === 'backup.target.store') {
+      if (!mounted) {
+        this.send({
+          type: 'rpc.result',
+          id,
+          ok: false,
+          error: { code: 'failed', message: 'backup target not mounted' },
+        });
+        return true;
+      }
+      this.imports.set(id, {
+        gameId: '',
+        fileName: String(params.fileName),
+        bytes: Number(params.bytes),
+        sha256: String(params.sha256),
+        chunks: Number(params.chunks),
+        parts: [],
+      });
+      this.send({ type: 'rpc.result', id, ok: true, data: { streamId: id } });
+    }
+    return true;
   }
 
   container(name: string): SimContainer | undefined {
@@ -540,6 +621,7 @@ export class SimAgent {
       return;
     }
     if (this.answerPty(id, action, params)) return;
+    if (this.answerBackupTarget(id, action, params)) return;
     if (action === 'relay.set') {
       this.answerRelay(id, params);
       return;
@@ -773,6 +855,18 @@ export class SimAgent {
         return;
       }
       this.imports.delete(streamId);
+      if (im.fileName) {
+        this.storedDb.push({ fileName: im.fileName, bytes: data.length });
+        const stored = { fileName: im.fileName, bytes: data.length, sha256: sha, removed: 0 };
+        this.send({
+          type: 'stream.data',
+          streamId,
+          channel: 'progress',
+          chunk: `result ${JSON.stringify(stored)}\n`,
+        });
+        this.send({ type: 'stream.end', streamId, code: 0 });
+        return;
+      }
       this.gameData.set(im.gameId, data);
       const result = { bytes: data.length, sha256: sha, entries: 3 };
       this.send({

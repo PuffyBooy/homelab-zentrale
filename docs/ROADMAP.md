@@ -137,7 +137,18 @@ Arbeite die Meilensteine **in dieser Reihenfolge** ab. Jeder Meilenstein bekommt
 
 **Abnahme:** Ein simuliertes UGREEN-NAS zeigt RAID, Volumes und Platten. Fällt eine Platte aus dem RAID, gibt es eine CRIT-Meldung, nach dem Neuaufbau eine OK-Meldung. Sicherheitstests: `smartctl` nur mit festen, lesenden Argumenten und gültigen Plattennamen, kein Wecken schlafender Platten, strenges Schema mit Obergrenzen, Routen nur mit Admin-Session und nur lesend, Override gibt nur Lesezugriff auf Blockgeräte.
 
-**Später (M13b):** Das NAS als Backup-Ziel für Gameserver-Backups (Kopie über die Zentrale wie beim Umzug), sobald M12 (Gameserver komplett) gemergt ist.
+### M13b: NAS als Backup-Ziel (ohne Agent auf dem NAS)
+
+Für NAS, auf denen kein Agent läuft (z. B. UGREEN DH2300, kein offizielles Docker). Das NAS bleibt unverändert.
+
+- [x] Eine Freigabe des NAS wird auf einem Server unter `/opt/homelab/backup-target` eingebunden (SMB/NFS/USB, Anleitung in `deploy/README.md`).
+- [x] Agent-Aktionen `backup.target.status`, `backup.target.sync`, `backup.target.store` (`packages/shared/src/agent-backup-target.ts`). Geschrieben wird nur, wenn der Pfad ein eigener, beschreibbarer Mount ist; sonst Meldung und keine Kopie.
+- [x] Jede Nacht (Uhrzeit einstellbar) und per „Jetzt kopieren“: Gameserver-Backups der gewählten Server aufs NAS, verifiziert (sha256 nach dem Zurücklesen), neueste N behalten.
+- [x] Datenbank-Schnappschuss (`VACUUM INTO`) von der Zentrale an den Agent gestreamt (Transfer-Protokoll aus M11, Core als Sender), verifiziert, neueste N behalten.
+- [x] Meldungen: Freigabe nicht eingebunden / schreibgeschützt, NAS voll, Kopie fehlgeschlagen; OK-Eintrag, wenn es wieder klappt.
+- [x] Einstellungen → Backup → „NAS als Backup-Ziel“ (Server, Datenbank-Ziel, Uhrzeit, Anzahl), Änderung nur mit Step-up. Teil des Moduls `storage`.
+- [x] Erreichbarkeit des NAS über normale HTTP-/TCP-Checks (Weboberfläche, SMB 445), dokumentiert.
+- [x] Sicherheitstests: keine Symlinks auf dem Ziel oder bei den Quellen, nur Namensmuster, kein Schreiben ohne Mount, Step-up, Module aus, Schlüssel nicht in der Kopie.
 
 ## M14: Anbindungen (Proxmox, Pi-hole/AdGuard, FRITZ!Box, Uptime Kuma, Wake-on-LAN, Discord/Telegram/ntfy)
 Wunsch des Admins vom 26.11.2026. Vier neue Module (alle standardmäßig aus, Einschalten mit Step-up), dazu Wake-on-LAN und weitere Meldungskanäle im Core. Schemas: `packages/shared/src/api/integrations.ts`.

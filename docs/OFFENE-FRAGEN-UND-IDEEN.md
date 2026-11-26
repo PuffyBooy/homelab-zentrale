@@ -85,12 +85,14 @@ Alles hier braucht deine Zugänge oder ist nicht rückgängig zu machen. Bis dah
 
 - **Medienordner für Apps (M21):** Jellyfin, Navidrome und Audiobookshelf sehen aus Sicherheitsgründen nur ihren eigenen Ordner `/opt/homelab/apps/<name>/data/`. Sollen sie zusätzlich einen Medienordner (z. B. vom NAS) nur lesend einbinden dürfen? Vorschlag: pro App freigegebene Ordner mit Step-up, nur lesend.
 - **IPv6 für DynDNS (M20):** Der Agent meldet nur eine öffentliche IP. AAAA-Einträge funktionieren erst, wenn er auch die IPv6 meldet. Brauchst du IPv6-Einträge?
+- **NAS als Backup-Ziel (M13b):** Für dein DH2300 habe ich die Variante ohne Agent gebaut. Du musst am NAS nur eine Freigabe und einen Benutzer anlegen und sie am Heimserver einbinden (Schritte in `deploy/README.md`, Abschnitt „NAS ohne Agent als Backup-Ziel“). Danach unter Einstellungen → Backup die Kopien einschalten. Bewahre `HZ_SECRET_KEY` getrennt vom NAS auf (z. B. im Passwort-Manager), sonst ist die Datenbank-Kopie nach einem Totalausfall wertlos.
 
 ## Annahmen
 
 - **Echo Show ohne Wandmodus der Zentrale:** Eine Echo Show kann nicht ins Tailnet, also kann sie die Zentrale (nur `*.ts.net`) nicht öffnen. Statt sie öffentlich zu machen, läuft die Echo-Show-Anzeige über das Home-Assistant-Dashboard im Silk-Browser, das die Zentrale über die HA-Helfer mit Status versorgt. Ein eigener Alexa-Skill bräuchte einen öffentlichen HTTPS-Endpunkt oder eine AWS-Lambda im Tailnet; das ist bewusst nicht gebaut (siehe Zukunftsideen).
 - **Discord-Bot ohne PIN:** Ein Benutzerlink mit PIN wirkt im Bot ohne PIN, weil du die Discord-ID selbst bindest. Wer das nicht will, bindet keine Discord-ID an diesen Link.
 - **Schwachstellen-Scan nur für Registry-Images:** Trivy prüft das Image direkt in der Registry (per Digest), damit der Scanner keinen Docker-Socket braucht. Selbst gebaute Images ohne Registry-Digest stehen als „nicht prüfbar“ da. Gemeldet wird ab „kritisch“ (einstellbar auf „hoch“).
+- **NAS als Backup-Ziel (M13b):** Jeder Server kopiert nur die Backups der Spiele, die auf ihm laufen, auf seine eigene eingebundene Freigabe. Laufen Spiele auf einem Cloud-Server, braucht der die Freigabe selbst (über Tailscale) oder sie werden nicht aufs NAS kopiert. Standard: 05:00 Uhr, 14 Kopien. Die Freigabe wird nicht automatisch eingebunden (keine Zugangsdaten in der Zentrale); fällt sie weg, meldet die Zentrale das, statt auf die lokale Platte zu schreiben.
 - **NAS ohne UGOS-Schnittstelle (M13):** UGOS Pro hat keine dokumentierte API. Der Agent liest deshalb den Linux-Unterbau selbst (`/proc/mdstat`, `/sys`, `smartctl`). Speicherpools mit SHR-ähnlichen Mischformen erscheinen als mehrere md-Arrays. Ein UGOS-Update kann Pfade ändern; dann fehlen Teile der Anzeige, nichts geht kaputt.
 - **SMART-Rechte:** SMART braucht `CAP_SYS_RAWIO` und Lesezugriff auf die Platten. Der Agent hat ohnehin Docker-Socket und `SYS_ADMIN` (gleichwertig zu root), das Override verschiebt die Grenze also kaum; es gibt bewusst kein Schreibrecht (`w`) auf Blockgeräte. Ohne Override zeigt die Zentrale Platten, RAID und Volumes, aber keine SMART-Werte, und sagt das.
 - **Anbindungen (M14):** Pi-hole nur ab v6 (REST-API), v5 nicht. Uptime Kuma wird über `/metrics` gelesen (das ist die einzige stabile Schnittstelle mit API-Key); Kuma-Benachrichtigungen und Statusseiten werden nicht übernommen. DNS-Blocken lässt sich nur befristet pausieren (5–60 Min). Wake-on-LAN geht nur im selben LAN (Broadcast), nie über Tailscale. Meldungskanäle folgen denselben Regeln wie Push (Ruhezeit, Bündeln), mit eigenem Mindest-Level pro Kanal.
@@ -119,7 +121,8 @@ Sortiert nach Bereich. Nichts davon ist in den Meilensteinen, alles wäre ein ei
 ### Server und Betrieb
 - Alexa-Skill für Freunde über das Share-Gateway (Status abfragen, Gameserver starten per Stimme mit Benutzerlink-Rechten), falls Sprachsteuerung ohne Home Assistant gewünscht ist.
 - Log-Suche als gespeicherte Suche mit Meldung („Melde mich, wenn `OutOfMemory` vorkommt“).
-- NAS als Backup-Ziel: Gameserver-Backups und der Datenbank-Export automatisch aufs NAS kopieren (M13b).
+- NAS als Backup-Ziel auch für Server ohne eingebundene Freigabe: Backups über die Zentrale an den Server mit Freigabe weiterreichen (heute kopiert jeder Server nur seine eigenen Spiele).
+- Wiederherstellen direkt vom NAS (Backup-Liste zeigt auch die Kopien auf dem NAS).
 - RAID-Prüfung (Scrub) per Zeitplan anstoßen und das Ergebnis melden; btrfs-Scrub und -Fehlerzähler auslesen.
 - Speicherplatz-Prognose: „/volume1 ist in etwa 40 Tagen voll“ aus dem Verlauf.
 - Backups mit restic zwischen den Servern (Heimserver ↔ Oracle), mit Wiederherstellungstest pro Woche und Anzeige „letztes geprüftes Backup vor 3 Tagen“.

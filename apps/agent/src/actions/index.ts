@@ -21,6 +21,7 @@ import { containerLogs } from './logs.js';
 import { logsSearch } from './logs-search.js';
 import { imageScan } from './image-scan.js';
 import { fail2banStatus, fail2banUnban } from './fail2ban.js';
+import { backupTargetStatus, backupTargetStore, backupTargetSync } from './backup-target.js';
 import { deployRun } from './deploy.js';
 import { deployKey } from './deploy-key.js';
 import { gameBackup } from './game-backup.js';
@@ -97,6 +98,9 @@ export const handlers: ActionHandlers = {
   'cert.write': certWrite,
   'cert.remove': certRemove,
   'app.remove': appRemove,
+  'backup.target.status': (p, ctx) => backupTargetStatus(p, ctx),
+  'backup.target.sync': (p, ctx) => backupTargetSync(p, ctx),
+  'backup.target.store': (p, ctx, id) => backupTargetStore(p, ctx, id),
 };
 
 export function hasGitSegment(p: unknown): boolean {

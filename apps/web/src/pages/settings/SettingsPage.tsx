@@ -21,6 +21,7 @@ import { errorText } from '../../lib/errors.js';
 import { describeUserAgent, formatAgo, formatDateTime, formatTime } from '../../lib/format.js';
 import { changePassword } from '../../lib/settings.js';
 import { useAuthState } from '../../lib/useAuthState.js';
+import { BackupTargetTile } from './BackupTargetTile.js';
 import { BackupTile } from './BackupTile.js';
 import { ChecksSettingsTile } from './ChecksSettingsTile.js';
 import { AgentsSettingsTile, ServersSettingsTile } from './ServerSettingsTiles.js';
@@ -169,6 +170,12 @@ export function SettingsPage(): ReactElement {
         <Anchor id="backup">
           <BackupTile />
         </Anchor>
+        {modules.storage ? (
+          // Wide: each target row has the share state and the last run.
+          <Anchor id="backup-ziel" wide>
+            <BackupTargetTile />
+          </Anchor>
+        ) : null}
       </div>
     </>
   );

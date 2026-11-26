@@ -91,6 +91,34 @@ RAID kommt aus `/proc/mdstat`, Volumes aus der Mount-Tabelle des Hosts, Platten 
 
 Gameserver auf dem NAS: `/opt/homelab` liegt bei UGOS auf dem kleinen Systemvolume. Wer Spiele dort laufen lassen will, legt `/volume1/homelab` an und mountet es per Bind-Mount auf `/opt/homelab`, bevor der Agent startet.
 
+### NAS ohne Agent als Backup-Ziel (M13b)
+
+Manche NAS können keinen Agent ausführen (z. B. UGREEN NASync DH2300: ARM, laut UGREEN kein offizielles Docker). Dann bleibt das NAS unverändert und dient nur als **Backup-Ziel**: Ein Server mit Agent (meist der Heimserver) bindet eine Freigabe des NAS unter `/opt/homelab/backup-target` ein. Die Zentrale kopiert jede Nacht die Gameserver-Backups dieses Servers dorthin und schickt eine Kopie ihrer Datenbank mit.
+
+1. **Am NAS** (UGOS: Systemsteuerung → Datei-Dienste → SMB einschalten): einen freigegebenen Ordner anlegen, z. B. `homelab-backup`, und einen eigenen Benutzer, der nur dort schreiben darf.
+2. **Am Server** (Debian/Ubuntu, als root):
+
+   ```bash
+   apt install cifs-utils
+   mkdir -p /opt/homelab/backup-target
+   install -m 600 /dev/null /root/.nas-backup.cred
+   printf 'username=%s\npassword=%s\n' '<nas-benutzer>' '<passwort>' > /root/.nas-backup.cred
+   echo '//<nas-ip>/homelab-backup /opt/homelab/backup-target cifs credentials=/root/.nas-backup.cred,vers=3.0,uid=0,gid=0,file_mode=0640,dir_mode=0750,_netdev,nofail 0 0' >> /etc/fstab
+   mount /opt/homelab/backup-target
+   ```
+
+   NFS oder eine USB-Platte gehen genauso, Hauptsache es ist ein eigener Mount genau auf `/opt/homelab/backup-target`.
+3. **In der Zentrale**: Einstellungen → Backup → „NAS als Backup-Ziel“: Server anhaken, „Datenbank-Kopie auf …“ wählen, Uhrzeit und Anzahl der Kopien setzen, speichern (mit TOTP-Bestätigung). „Jetzt kopieren“ prüft alles sofort.
+
+Was der Agent dabei macht:
+
+- Er schreibt **nur**, wenn `/opt/homelab/backup-target` in der Mount-Tabelle des Hosts steht, ein anderes Gerät als der Ordner darüber ist und nicht schreibgeschützt eingebunden ist. Fällt die Freigabe weg (NAS aus, Netz weg), wird nichts kopiert und die Zentrale meldet „Backup-Ziel auf … ist nicht eingebunden“. Die eigene Platte des Servers läuft so nie voll.
+- Er sieht die Freigabe über `/host/proc/1/root`, also auch, wenn sie nach dem Start des Agents eingebunden wurde. Kein Neustart, keine zusätzlichen Rechte.
+- Auf dem NAS legt er nur `games/<gameserver>/` und `core/` an. Jede Kopie wird zuerst als `.partial`-Datei geschrieben, zurückgelesen und per sha256 verglichen, dann umbenannt. Behalten werden die neuesten N Kopien; gelöscht werden nur Dateien mit dem Namensmuster der Backups, nie fremde Dateien. Symlinks werden nie verfolgt.
+- Die Datenbank-Kopie (`core/homelab-zentrale-JJJJMMTT-HHMM.sqlite`) ist ein `VACUUM INTO`-Schnappschuss wie „Backup jetzt“. Tokens und Passwörter darin bleiben verschlüsselt; `HZ_SECRET_KEY` verlässt die Zentrale nie. Den Schlüssel getrennt aufbewahren, sonst nützt die Kopie nach einem Totalausfall nichts.
+
+**Erreichbarkeit des NAS** prüfst du mit den normalen Checks (Websites → Check hinzufügen, ausgeführt vom Agent im selben Netz): ein HTTP-Check auf die Adresse der UGOS-Weboberfläche, so wie du sie im Browser öffnest, und ein TCP-Check auf `<nas-ip>:445` (SMB). Die Freigabe nie ins Internet weiterleiten.
+
 ### Rechte des Containers
 
 Alles, was nicht gebraucht wird, ist weg (`cap_drop: ALL`, schreibgeschütztes Dateisystem, `no-new-privileges`). Warum der Rest nötig ist, steht als Kommentar in `deploy/docker-compose.agent.yml`. Kurz:

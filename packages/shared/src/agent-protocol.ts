@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { backupTargetRpcParams } from './agent-backup-target.js';
 import { opsRpcParams } from './agent-ops.js';
 import { automationRpcParams } from './agent-automation.js';
 
@@ -828,6 +829,8 @@ export function isAllowedWolBroadcast(ip: string): boolean {
 export const rpcParamsByAction = {
   /** Log search, vulnerability scan, fail2ban (agent-ops.ts). */
   ...opsRpcParams,
+  /** M13b: second copy of backups on a mounted NAS share (agent-backup-target.ts). */
+  ...backupTargetRpcParams,
   'container.start': containerIdParams,
   'container.stop': containerIdParams,
   'container.restart': containerIdParams,
@@ -1076,6 +1079,7 @@ export const streamingActions: readonly RpcAction[] = [
   'game.export',
   'game.import',
   'game.restore',
+  'backup.target.store',
 ];
 /** Actions that need HZ_AGENT_ALLOW_TERMINAL=1 on the agent and step-up in the core. */
 export const terminalActions: readonly RpcAction[] = [
