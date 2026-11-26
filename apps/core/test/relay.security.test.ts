@@ -95,7 +95,7 @@ describe('relay security (M15)', () => {
         { enabled: true, publicIp: null, portFrom: 25565, portTo: 25600 },
       ],
       [`/api/games/${x.gameId}/relay`, { ingressServerId: x.ing.serverId }],
-      ['/api/settings/dns', { provider: 'duckdns', token: 'abcdefghijklmnopqrstuvwxyz' }],
+      ['/api/settings/dns', { provider: 'duckdns', token: 'a'.repeat(26) }],
     ] as const) {
       const res = await gameRequest(x.s, 'PUT', url, payload);
       expect(res.statusCode, url).toBe(403);

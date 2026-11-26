@@ -3,3 +3,9 @@
 5f48a153ca3787d849fce66fa08e077875a0a264:apps/core/test/github-helpers.ts:github-pat:21
 # Fake RCON password in an M6 WIP test.
 d9cc83cdcd7febb382e19d26cceaa74d27e06018:apps/agent/test/games.security.test.ts:generic-api-key:37
+# Fake DNS tokens in M15 relay tests (replaced in the next commit).
+a1c5e7a70e7b225f650316702adb1ad53bce4262:apps/core/test/relay.security.test.ts:generic-api-key:98
+a1c5e7a70e7b225f650316702adb1ad53bce4262:apps/core/test/relay.test.ts:generic-api-key:550
+a1c5e7a70e7b225f650316702adb1ad53bce4262:apps/core/test/relay.test.ts:generic-api-key:619
+a1c5e7a70e7b225f650316702adb1ad53bce4262:apps/core/test/relay.test.ts:generic-api-key:624
+a1c5e7a70e7b225f650316702adb1ad53bce4262:apps/core/test/relay.test.ts:generic-api-key:630

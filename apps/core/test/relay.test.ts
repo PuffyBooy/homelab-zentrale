@@ -547,7 +547,7 @@ describe('DNS (M15)', () => {
     const r = await setup({ dnsFetch: dns.fetch });
     await gameRequest(r.s, 'PUT', '/api/settings/dns', {
       provider: 'cloudflare',
-      token: 'abcdefghijklmnopqrstuvwxyz',
+      token: 'a'.repeat(26),
       zoneId: 'c'.repeat(32),
     });
     await enableAndAssign(r, 'mc.example.org');
@@ -616,18 +616,18 @@ describe('DNS (M15)', () => {
     const r = await setup();
     const noZone = await gameRequest(r.s, 'PUT', '/api/settings/dns', {
       provider: 'cloudflare',
-      token: 'abcdefghijklmnopqrstuvwxyz',
+      token: 'a'.repeat(26),
     });
     expect(noZone.statusCode).toBe(400);
     const badZone = await gameRequest(r.s, 'PUT', '/api/settings/dns', {
       provider: 'cloudflare',
-      token: 'abcdefghijklmnopqrstuvwxyz',
+      token: 'a'.repeat(26),
       zoneId: '../../evil',
     });
     expect(badZone.statusCode).toBe(400);
     await gameRequest(r.s, 'PUT', '/api/settings/dns', {
       provider: 'duckdns',
-      token: 'abcdefghijklmnopqrstuvwxyz',
+      token: 'a'.repeat(26),
     });
     const none = await gameRequest(r.s, 'PUT', '/api/settings/dns', { provider: 'none' });
     expect(dnsSettingsSchema.parse(none.json())).toMatchObject({
