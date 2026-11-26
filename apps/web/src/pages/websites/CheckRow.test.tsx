@@ -48,5 +48,6 @@ describe('CheckRow', () => {
     expect(out).toContain('>SSL —<');
     expect(out).not.toContain('hz-spark');
     expect(out).not.toContain('<button');
+    expect(out).not.toContain('hz-row-sub');
   });
 });

@@ -9,6 +9,7 @@ const MAX = 3;
 const OK_MS = 8_000;
 
 function target(a: AlertData): string {
+  if (a.source === 'check') return '/websites';
   return a.serverId ? `/servers/${a.serverId}` : '/alerts';
 }
 

@@ -951,3 +951,28 @@ body,
     grid-template-columns: minmax(0, 1fr);
   }
 }
+.app-kv a {
+  color: var(--ink);
+}
+/* Phones: WebCheckRow keeps the name on the first line, the numbers move below it. */
+@media (max-width: 699px) {
+  .app-main .hz-web {
+    flex-wrap: wrap;
+    row-gap: var(--space-1);
+  }
+  .app-main .hz-web > .hz-row-main {
+    flex: 1 1 calc(100% - 56px - var(--space-3));
+  }
+  .app-main .hz-web > .hz-web-code {
+    margin-left: calc(56px + var(--space-3));
+  }
+  .app-main .hz-web > .hz-web-code,
+  .app-main .hz-web > .hz-web-ms,
+  .app-main .hz-web > .hz-web-ssl {
+    width: auto;
+    text-align: left;
+  }
+  .app-main .hz-web > .hz-row-actions {
+    margin-left: auto;
+  }
+}

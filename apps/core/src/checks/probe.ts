@@ -139,7 +139,9 @@ function requestOnce(url: URL, wantBody: boolean, signal: AbortSignal): Promise<
       res.on('error', (err) => (done ? undefined : reject(err)));
       res.on('close', finish);
     };
-    const req = isHttps ? https.request(url, options, onResponse) : http.request(url, options, onResponse);
+    const req = isHttps
+      ? https.request(url, options, onResponse)
+      : http.request(url, options, onResponse);
     req.on('error', reject);
     req.end();
   });
@@ -165,16 +167,34 @@ export async function httpProbe(input: HttpProbeInput): Promise<ProbeResult> {
       const tls = tlsExpiresAt !== undefined ? { tlsExpiresAt } : {};
       if (res.status >= 300 && res.status < 400 && res.location !== undefined) {
         if (hop >= MAX_REDIRECTS) {
-          return { ok: false, code: res.status, ms: null, error: 'Zu viele Weiterleitungen', ...tls };
+          return {
+            ok: false,
+            code: res.status,
+            ms: null,
+            error: 'Zu viele Weiterleitungen',
+            ...tls,
+          };
         }
         let next: URL;
         try {
           next = new URL(res.location, url);
         } catch {
-          return { ok: false, code: res.status, ms: null, error: 'Ungültige Weiterleitung', ...tls };
+          return {
+            ok: false,
+            code: res.status,
+            ms: null,
+            error: 'Ungültige Weiterleitung',
+            ...tls,
+          };
         }
         if (next.protocol !== 'http:' && next.protocol !== 'https:') {
-          return { ok: false, code: res.status, ms: null, error: 'Ungültige Weiterleitung', ...tls };
+          return {
+            ok: false,
+            code: res.status,
+            ms: null,
+            error: 'Ungültige Weiterleitung',
+            ...tls,
+          };
         }
         url = next;
         continue;

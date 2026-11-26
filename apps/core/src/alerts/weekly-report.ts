@@ -26,11 +26,10 @@ export function weeklyReportText(i: WeeklyReportInput): { title: string; body: s
         ? '1 offene Meldung.'
         : `${i.openAlerts} offene Meldungen.`,
   );
-  const measured = i.checks.filter(
-    (c): c is { name: string; uptime: number } => c.uptime !== null,
-  );
+  const measured = i.checks.filter((c): c is { name: string; uptime: number } => c.uptime !== null);
   if (measured.length > 0) {
-    const avg = Math.floor((measured.reduce((s, c) => s + c.uptime, 0) / measured.length) * 100) / 100;
+    const avg =
+      Math.floor((measured.reduce((s, c) => s + c.uptime, 0) / measured.length) * 100) / 100;
     const worst = [...measured].sort((a, b) => a.uptime - b.uptime)[0];
     let line = `Websites und Ports in 7 Tagen: ${formatPercent(avg)} erreichbar (${measured.length} ${measured.length === 1 ? 'Check' : 'Checks'}).`;
     if (worst && worst.uptime < 100 && measured.length > 1) {

@@ -57,7 +57,10 @@ export function registrableDomain(hostname: string): string | null {
   const host = hostname.toLowerCase().replace(/\.$/, '');
   if (host === '' || isIP(host.replace(/^\[|\]$/g, '')) !== 0) return null;
   if (!host.includes('.')) return null;
-  if (host === 'localhost' || PRIVATE_SUFFIXES.some((s) => host.endsWith(s) || host === s.slice(1))) {
+  if (
+    host === 'localhost' ||
+    PRIVATE_SUFFIXES.some((s) => host.endsWith(s) || host === s.slice(1))
+  ) {
     return null;
   }
   if (!/^[a-z0-9.-]+$/.test(host)) return null;

@@ -2,7 +2,7 @@ import {
   notifySettingsSchema,
   okResponseSchema,
   pushDeviceListResponseSchema,
-  pushDeviceSchema,
+  pushDeviceResponseSchema,
   pushSubscriptionSchema,
   pushTestResponseSchema,
   vapidResponseSchema,
@@ -31,31 +31,17 @@ export async function fetchPushDevices(signal?: AbortSignal) {
   return res.devices;
 }
 
-/**
- * POST /api/push/subscriptions. The schemas leave the answer open; the id is taken
- * from `{ device: {...} }` or `{ id }` if present, otherwise it stays unknown.
- */
-const subscribeAnswer: Schema<{ id: string | null }> = {
-  parse(data: unknown) {
-    if (data && typeof data === 'object') {
-      const d = data as Record<string, unknown>;
-      const dev = pushDeviceSchema.safeParse(d.device);
-      if (dev.success) return { id: dev.data.id };
-      if (typeof d.id === 'string') return { id: d.id };
-    }
-    return { id: null };
-  },
-};
-
-export function postSubscription(
+/** POST /api/push/subscriptions -> { device }. */
+export async function postSubscription(
   subscription: PushSubscriptionJson,
   label: string,
-): Promise<{ id: string | null }> {
-  return api('/api/push/subscriptions', {
+): Promise<{ id: string }> {
+  const res = await api('/api/push/subscriptions', {
     method: 'POST',
     body: { subscription, label },
-    schema: subscribeAnswer,
+    schema: pushDeviceResponseSchema,
   });
+  return { id: res.device.id };
 }
 
 export async function deletePushDevice(id: string): Promise<void> {
@@ -74,16 +60,8 @@ export async function sendTestPush(): Promise<number> {
   return res.sent;
 }
 
-/** Accepts the settings bare or as `{ settings: {...} }`. */
-export const notifyAnswer: Schema<NotifySettings> = {
-  parse(data: unknown) {
-    const inner =
-      data && typeof data === 'object' && 'settings' in data
-        ? (data as { settings: unknown }).settings
-        : data;
-    return notifySettingsSchema.parse(inner);
-  },
-};
+/** GET/PATCH /api/settings/notify answer with the settings object itself. */
+export const notifyAnswer: Schema<NotifySettings> = notifySettingsSchema;
 
 export function fetchNotifySettings(signal?: AbortSignal): Promise<NotifySettings> {
   return api('/api/settings/notify', { schema: notifyAnswer, signal });
@@ -192,7 +170,7 @@ export async function enablePushOnThisDevice(publicKey: string | null, label: st
   const parsed = pushSubscriptionSchema.safeParse(sub.toJSON());
   if (!parsed.success) throw new PushSetupError('bad_subscription');
   const res = await postSubscription(parsed.data, label);
-  if (res.id) rememberDevice(res.id);
+  rememberDevice(res.id);
   return res;
 }
 

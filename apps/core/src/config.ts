@@ -44,21 +44,17 @@ export const configSchema = z.object({
   // `npx web-push generate-vapid-keys`). Without it the core generates one on
   // first start and stores it encrypted in the database.
   HZ_VAPID_PUBLIC: optionalEnv(
-    z
-    .string()
-    .regex(/^[A-Za-z0-9_-]{80,100}$/, 'HZ_VAPID_PUBLIC: ungültiger Schlüssel'),
+    z.string().regex(/^[A-Za-z0-9_-]{80,100}$/, 'HZ_VAPID_PUBLIC: ungültiger Schlüssel'),
   ),
   HZ_VAPID_PRIVATE: optionalEnv(
-    z
-    .string()
-    .regex(/^[A-Za-z0-9_-]{40,50}$/, 'HZ_VAPID_PRIVATE: ungültiger Schlüssel'),
+    z.string().regex(/^[A-Za-z0-9_-]{40,50}$/, 'HZ_VAPID_PRIVATE: ungültiger Schlüssel'),
   ),
   // Contact for push services (VAPID "sub"): mailto: or https URL.
   HZ_VAPID_SUBJECT: optionalEnv(
     z
-    .string()
-    .max(200)
-    .regex(/^(mailto:[^\s@]+@[^\s@]+|https:\/\/\S+)$/, 'HZ_VAPID_SUBJECT: mailto: oder https://'),
+      .string()
+      .max(200)
+      .regex(/^(mailto:[^\s@]+@[^\s@]+|https:\/\/\S+)$/, 'HZ_VAPID_SUBJECT: mailto: oder https://'),
   ),
   NODE_ENV: z.enum(['development', 'production', 'test']).default('production'),
 });

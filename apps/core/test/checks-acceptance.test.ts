@@ -116,7 +116,9 @@ describe('M4 acceptance: unreachable URL -> crit + push, recovery -> OK + resolv
       .find((a) => a.level === 'ok');
     expect(ok).toMatchObject({ title: 'shop ist wieder erreichbar', state: 'resolved' });
     expect(mock.hits).toHaveLength(2);
-    const okPayload = pushPayloadSchema.parse(device.decrypt(mock.hits[1]?.body ?? Buffer.alloc(0)));
+    const okPayload = pushPayloadSchema.parse(
+      device.decrypt(mock.hits[1]?.body ?? Buffer.alloc(0)),
+    );
     expect(okPayload).toMatchObject({ level: 'ok', title: 'shop ist wieder erreichbar' });
 
     // History has all four results, uptime reflects one success out of four.

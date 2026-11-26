@@ -228,6 +228,7 @@ function NotifyFormBody({ settings }: { settings: NotifySettings }): ReactElemen
           value={form.quietStart}
           onChange={(e) => set('quietStart', e.target.value)}
           placeholder="23:00"
+          hint="Dann nur CRIT als Push, Wiener Zeit."
           error={errors.quietStart}
         />
         <Field
@@ -240,9 +241,6 @@ function NotifyFormBody({ settings }: { settings: NotifySettings }): ReactElemen
           error={errors.quietEnd}
         />
       </div>
-      <p className="hz-field-hint">
-        In der Ruhezeit kommt nur CRIT als Push. Zeiten in Wiener Zeit.
-      </p>
       <Field
         label="WARN sammeln, höchstens eine Push alle … Min"
         mono

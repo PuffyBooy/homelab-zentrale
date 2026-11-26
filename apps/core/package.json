@@ -8,7 +8,9 @@
     "dev": "NODE_ENV=development tsx watch --conditions=@hz/source --env-file-if-exists=../../.env src/index.ts",
     "start": "node dist/index.js",
     "typecheck": "tsc -p tsconfig.json",
-    "build": "tsc -p tsconfig.build.json"
+    "build": "tsc -p tsconfig.build.json",
+    "test": "vitest run --root ../.. --project core",
+    "vapid": "node -e \"import('web-push').then((m) => { const k = m.generateVAPIDKeys(); console.log('HZ_VAPID_PUBLIC=' + k.publicKey + '\\nHZ_VAPID_PRIVATE=' + k.privateKey); })\""
   },
   "dependencies": {
     "@fastify/cookie": "^11.1.5",

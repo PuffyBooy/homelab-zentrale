@@ -722,7 +722,9 @@ export class CheckService {
     }
     // Longer ranges: one point per bucket (1 h for 7 d, 6 h for 30 d).
     const bucket = range === '7d' ? HOUR : 6 * HOUR;
-    const b = sql<number>`(${checkResults.ts} / ${bucket})`;
+    // Integer literal, not a bound parameter: bound numbers are REAL in SQLite,
+    // which would turn this into a float division.
+    const b = sql<number>`(${checkResults.ts} / ${sql.raw(String(bucket))})`;
     return this.deps.db
       .select({
         b,

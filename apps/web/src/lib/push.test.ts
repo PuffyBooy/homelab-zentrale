@@ -41,9 +41,8 @@ describe('notify settings form', () => {
     weeklyReport: true,
   };
 
-  it('accepts the settings bare or wrapped', () => {
+  it('validates the settings answer', () => {
     expect(notifyAnswer.parse(settings)).toEqual(settings);
-    expect(notifyAnswer.parse({ settings })).toEqual(settings);
     expect(() => notifyAnswer.parse({ quietStart: '25:00' })).toThrow();
   });
 

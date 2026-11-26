@@ -24,7 +24,13 @@ import {
 } from '../../lib/checks.js';
 import { useChecks, useServers } from '../../lib/data.js';
 import { errorText } from '../../lib/errors.js';
-import { formatAgo, formatDateTime, formatNumber, formatWhen } from '../../lib/format.js';
+import {
+  formatAgo,
+  formatDateTime,
+  formatNumber,
+  formatTime,
+  formatWhen,
+} from '../../lib/format.js';
 import { useLiveTopic } from '../../lib/live.js';
 import { useNow } from '../../lib/useNow.js';
 import { CheckDialog } from './CheckDialog.js';
@@ -141,11 +147,7 @@ function Detail({ check: c }: { check: CheckSummary }): ReactElement {
               : 'noch nicht geprüft'}
           </dd>
           <dt>Ergebnis</dt>
-          <dd>
-            {c.def.kind === 'http' && c.lastCode != null ? `HTTP ${c.lastCode} · ` : ''}
-            {formatMs(c.lastMs)}
-            {c.reason ? ` · ${c.reason}` : ''}
-          </dd>
+          <dd>{resultText(c)}</dd>
           {c.def.kind === 'http' && c.def.certCheck ? (
             <>
               <dt>SSL</dt>
@@ -221,7 +223,7 @@ function Detail({ check: c }: { check: CheckSummary }): ReactElement {
                   <StatusDot status="crit" pulse={false} />
                   <span>
                     {formatWhen(new Date(o.from), now)}
-                    {o.to !== o.from ? `–${formatWhen(new Date(o.to), now)}` : ''}
+                    {o.to !== o.from ? `–${untilText(o.from, o.to, now)}` : ''}
                   </span>
                   <span className="app-outage-meta">
                     {o.code != null ? `HTTP ${o.code} · ` : ''}
@@ -242,6 +244,22 @@ function Detail({ check: c }: { check: CheckSummary }): ReactElement {
       <DeleteDialog check={c} open={deleting} onClose={() => setDeleting(false)} />
     </div>
   );
+}
+
+/** "HTTP 503 · 312 ms", the reason only when it adds something. */
+function resultText(c: CheckSummary): string {
+  const code = c.def.kind === 'http' && c.lastCode != null ? `HTTP ${c.lastCode}` : null;
+  const parts = [code, c.lastMs != null ? formatMs(c.lastMs) : null];
+  if (c.reason && c.reason !== code) parts.push(c.reason);
+  const text = parts.filter(Boolean).join(' · ');
+  return text || '—';
+}
+
+/** End of an outage: only the time when it is the same day as the start. */
+function untilText(from: string, to: string, now: Date): string {
+  const a = new Date(from);
+  const b = new Date(to);
+  return a.toDateString() === b.toDateString() ? formatTime(b) : formatWhen(b, now);
 }
 
 /** "99,95 %" -> value "99,95", unit "%"; "—" stays without unit. */

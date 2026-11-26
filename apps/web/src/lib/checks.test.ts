@@ -208,6 +208,8 @@ describe('check form', () => {
       expectStatusMax: '200',
     });
     expect(!range.ok && range.errors.expectStatusMax).toBeTruthy();
+    const creds = formToDef({ ...emptyCheckForm('http'), url: 'https://alex:geheim@a.at/' });
+    expect(!creds.ok && creds.errors.url).toBe('URL ohne Benutzer und Passwort eintragen.');
   });
 
   it('needs an agent for ping', () => {

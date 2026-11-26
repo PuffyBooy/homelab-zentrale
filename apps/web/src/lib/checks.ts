@@ -355,6 +355,15 @@ const FIELD_TEXT: Partial<Record<CheckFormField, string>> = {
 
 export type FormResult = { ok: true; def: CheckDef } | { ok: false; errors: CheckFormErrors };
 
+function hasUserinfo(url: string): boolean {
+  try {
+    const u = new URL(url);
+    return u.username !== '' || u.password !== '';
+  } catch {
+    return false;
+  }
+}
+
 /** Builds the request body for POST/PUT and validates it with checkDefSchema. */
 export function formToDef(f: CheckForm): FormResult {
   const base = {
@@ -379,6 +388,10 @@ export function formToDef(f: CheckForm): FormResult {
     raw = { kind: 'tcp', ...base, host: f.host.trim(), port: num(f.port) };
   } else {
     raw = { kind: 'ping', ...base, host: f.host.trim() };
+  }
+  if (f.kind === 'http' && hasUserinfo(f.url.trim())) {
+    // Credentials in the URL would end up in the DB and in logs; the core rejects them.
+    return { ok: false, errors: { url: 'URL ohne Benutzer und Passwort eintragen.' } };
   }
   const parsed = checkDefSchema.safeParse(raw);
   const errors: CheckFormErrors = {};
