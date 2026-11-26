@@ -573,6 +573,25 @@ const ptySize = { cols: z.number().int().min(10).max(500), rows: z.number().int(
  * The allowlist. Each entry maps an action to its params schema.
  * Anything not listed here is rejected by the agent and logged.
  */
+/** M14 Wake-on-LAN: normalised MAC (upper case, ":"), unicast (I/G bit clear), not all zero. */
+export const wolMacSchema = z
+  .string()
+  .regex(/^[0-9A-F]{2}(?::[0-9A-F]{2}){5}$/)
+  .refine((m) => m !== '00:00:00:00:00:00' && (Number.parseInt(m.slice(0, 2), 16) & 1) === 0, {
+    message: 'invalid mac',
+  });
+
+const WOL_IPV4 =
+  /^(?:(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)\.){3}(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)$/;
+
+/** Broadcast target of a magic packet: 255.255.255.255 or an address in a private IPv4 range. */
+export function isAllowedWolBroadcast(ip: string): boolean {
+  if (!WOL_IPV4.test(ip)) return false;
+  if (ip === '255.255.255.255') return true;
+  const [a, b] = ip.split('.').map(Number) as [number, number];
+  return a === 10 || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168);
+}
+
 export const rpcParamsByAction = {
   'container.start': containerIdParams,
   'container.stop': containerIdParams,
@@ -684,6 +703,19 @@ export const rpcParamsByAction = {
   'system.cleanupPreview': z.strictObject({}),
   'system.cleanup': z.strictObject({}),
   'system.reboot': z.strictObject({ confirmName: agentNameSchema }),
+  /**
+   * M14: sends one Wake-on-LAN magic packet (6 x 0xFF + 16 x MAC, 102 bytes) as
+   * UDP broadcast to broadcast:port from the agent (host network). Nothing else:
+   * no other payload, no other port. At most 6 per minute on the agent.
+   */
+  'wol.send': z.strictObject({
+    mac: wolMacSchema,
+    broadcast: z
+      .string()
+      .max(15)
+      .refine(isAllowedWolBroadcast, { message: 'broadcast not allowed' }),
+    port: z.union([z.literal(7), z.literal(9)]),
+  }),
   'check.http': httpCheckParamsSchema,
   'check.tcp': tcpCheckParamsSchema,
   'check.ping': pingCheckParamsSchema,
