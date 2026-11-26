@@ -85,6 +85,8 @@ import { throttleRoutes } from './throttle/routes.js';
 import { ThrottleService } from './throttle/service.js';
 import { moduleRoutes } from './modules/routes.js';
 import { installModuleGate, ModuleService } from './modules/service.js';
+import { BackupTargetService } from './storage/backup-target.js';
+import { backupTargetRoutes } from './storage/backup-target-routes.js';
 import { storageRoutes } from './storage/routes.js';
 import { seedDemoRelay } from './demo/relay.js';
 import { relayRoutes } from './relay/routes.js';
@@ -187,6 +189,8 @@ export interface CoreServices {
   integrations: Integrations;
   notify: NotifyService;
   wol: WolService;
+  /** M13b NAS als Backup-Ziel. */
+  backupTarget: BackupTargetService;
   db: DbHandle;
 }
 
@@ -685,6 +689,17 @@ export async function buildApp(config: Config, deps: AppDeps = {}): Promise<Fast
     log: app.log.child({ mod: 'storage' }),
   });
   storage.setEnabled(modules.enabled('storage'));
+  // ---- M13b: NAS als Backup-Ziel (module storage) ------------------------------
+  const backupTarget = new BackupTargetService({
+    db: db.db,
+    sqlite: db.sqlite,
+    hub,
+    alerts,
+    now,
+    dataDir: config.dataDir,
+    log: app.log.child({ mod: 'backup-target' }),
+  });
+  backupTarget.setEnabled(modules.enabled('storage'));
   servers.onInventoryStored((id, inv) => {
     try {
       storage.onInventory(id, inv.storage);
@@ -771,6 +786,7 @@ export async function buildApp(config: Config, deps: AppDeps = {}): Promise<Fast
   });
 
   app.decorate('hzCore', {
+    backupTarget,
     scheduler,
     tokens,
     hub,
@@ -813,6 +829,7 @@ export async function buildApp(config: Config, deps: AppDeps = {}): Promise<Fast
   scheduler.every('live.sessions', 5_000, () => live.checkSessions());
   scheduler.every('console.limits', 5_000, () => consoles.check());
   scheduler.every('agents.heartbeat', 30_000, () => hub.heartbeat());
+  scheduler.every('backupTarget.tick', 60_000, () => backupTarget.tick());
   scheduler.every('metrics.rollup5m', 5 * 60_000, () => void metrics.rollup5m(), { align: true });
   scheduler.every('metrics.rollup1h', HOUR, () => void metrics.rollup1h(), { align: true });
   scheduler.every('metrics.prune', HOUR, () => void metrics.prune());
@@ -843,8 +860,10 @@ export async function buildApp(config: Config, deps: AppDeps = {}): Promise<Fast
     if (m === 'github') github.setEnabled(on);
     else if (m === 'games') games.setEnabled(on);
     else if (m === 'homeassistant') ha.setEnabled(on);
-    else if (m === 'storage') storage.setEnabled(on);
-    else if (m === 'discordbot') discordBot.setEnabled(on);
+    else if (m === 'storage') {
+      storage.setEnabled(on);
+      backupTarget.setEnabled(on);
+    } else if (m === 'discordbot') discordBot.setEnabled(on);
     else if (m === 'voice') voice.setEnabled(on);
     // cloud: switched in cloud/index.ts (ticks and Azure calls stop, machines stay).
     else if (m !== 'cloud') integrations.setModule(m, on);
@@ -965,6 +984,7 @@ export async function buildApp(config: Config, deps: AppDeps = {}): Promise<Fast
   await app.register(portRoutes, { prefix: '/api', db: db.db, now, servers, ports });
   await app.register(moduleRoutes, { prefix: '/api', db: db.db, now, modules });
   await app.register(storageRoutes, { prefix: '/api', storage });
+  await app.register(backupTargetRoutes, { prefix: '/api', backupTarget, now });
   await app.register(alertRoutes, { prefix: '/api', db: db.db, now, alerts });
   await app.register(containerRoutes, {
     prefix: '/api',

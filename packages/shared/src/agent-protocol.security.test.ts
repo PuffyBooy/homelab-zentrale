@@ -69,6 +69,9 @@ describe('agent protocol allowlist', () => {
         'image.scan',
         'fail2ban.status',
         'fail2ban.unban',
+        'backup.target.status',
+        'backup.target.sync',
+        'backup.target.store',
         'wol.send',
       ].sort(),
     );
