@@ -1,5 +1,10 @@
 import type {
   Alert,
+  DomainsResponse,
+  InstalledApp,
+  SelfhealResponse,
+  SpeedtestResponse,
+  TasksResponse,
   CheckSummary,
   ContainerSummary,
   GameSummary,
@@ -8,6 +13,11 @@ import type {
   RepoSummary,
   ServerSummary,
 } from '@hz/shared';
+import { appsSentence } from '../lib/apps.js';
+import { domainsSentence } from '../lib/domains.js';
+import { selfhealSentence } from '../lib/selfheal.js';
+import { speedtestSentence } from '../lib/speedtest.js';
+import { tasksSentence } from '../lib/tasks.js';
 import { checkMatchesServer, checkSentence, checksSentence, KIND_LABEL } from '../lib/checks.js';
 import { containerSentence, containerStateText } from '../lib/containers.js';
 import { formatTime, plural } from '../lib/format.js';
@@ -15,7 +25,7 @@ import { gameSentence, gamesSentence, isGameRunning, playersOnline } from '../li
 import { STATUS_TEXT, groupByRoom, haSentence } from '../lib/ha.js';
 import { githubSentence, repoOnServer, repoSentence } from '../lib/github.js';
 import type { LiveState } from '../lib/live.js';
-import { isModuleOn, MODULE_LABEL, MODULE_PAGE, moduleOfPath } from '../lib/modules.js';
+import { anyModuleOn, MODULE_LABEL, MODULE_PAGE, modulesOfPath } from '../lib/modules.js';
 import {
   ALL_SERVERS,
   serverSentence,
@@ -48,6 +58,12 @@ export interface PageData {
   /** Server filter from the ServerSwitch, or the id of the detail page. */
   filter?: string | undefined;
   live?: LiveState | undefined;
+  /** Only read on /automation, /internet and /apps (M20/M21). */
+  tasks?: TasksResponse | undefined;
+  selfheal?: SelfhealResponse | undefined;
+  speedtest?: SpeedtestResponse | undefined;
+  domains?: DomainsResponse | undefined;
+  apps?: InstalledApp[] | undefined;
   /** Optional modules; pages of switched-off ones get a fixed title. */
   modules?: Modules | undefined;
   /** Time of the last live message, for "aktualisiert 23:04". */
@@ -100,6 +116,14 @@ export function needsGames(pathname: string): boolean {
   return pathname === '/games' || pathname === '/games/new' || gameDetailId(pathname) !== null;
 }
 
+/** M20/M21 pages whose Statussatz needs their module data in the shell header. */
+export function needsModuleData(pathname: string): 'automation' | 'internet' | 'apps' | null {
+  if (pathname === '/automation') return 'automation';
+  if (pathname === '/internet') return 'internet';
+  if (pathname === '/apps') return 'apps';
+  return null;
+}
+
 /** Pages that read the Home Assistant state in the shell header. */
 export function needsHa(pathname: string): boolean {
   return pathname === '/home';
@@ -127,11 +151,21 @@ export function pageMeta(pathname: string, data: PageData = {}): PageMeta {
       ? servers.find((s) => s.id === data.filter)
       : undefined;
 
-  const mod = moduleOfPath(pathname);
-  if (mod && !isModuleOn(data.modules, mod)) {
+  const mods = modulesOfPath(pathname);
+  const mod = mods?.[0];
+  if (mods && mod && !anyModuleOn(data.modules, mods)) {
+    const page = MODULE_PAGE[mod];
+    if (mods.length > 1) {
+      // "Internet ist ausgeschaltet" would read as if the line were down.
+      return {
+        title: plain(`${page}: Module ausgeschaltet.`),
+        sub: `${page} · ${mods.map((m) => MODULE_LABEL[m]).join(' oder ')} einschalten unter Einstellungen → Module`,
+        serverSwitch: false,
+      };
+    }
     return {
       title: plain(`${MODULE_LABEL[mod]} ist ausgeschaltet.`),
-      sub: `${MODULE_PAGE[mod]} · Modul einschalten unter Einstellungen → Module`,
+      sub: `${page} · Modul einschalten unter Einstellungen → Module`,
       serverSwitch: false,
     };
   }
@@ -278,6 +312,46 @@ export function pageMeta(pathname: string, data: PageData = {}): PageMeta {
     if (data.ha.status === 'connected')
       parts.push(`live · ${formatTime(new Date(data.ha.updatedAt))}`);
     return { title: haSentence(data.ha), sub: parts.join(' · '), serverSwitch: false };
+  }
+
+  if (pathname === '/automation') {
+    const on = (m: 'tasks' | 'selfheal'): boolean => data.modules?.[m] ?? true;
+    const ts = on('tasks') && data.tasks ? tasksSentence(data.tasks.tasks) : null;
+    const sh = on('selfheal') && data.selfheal ? selfhealSentence(data.selfheal) : null;
+    if (!ts && !sh) return { title: plain('Automatik'), sub: 'lädt …', serverSwitch: false };
+    const parts = ['Automatik'];
+    if (data.tasks && on('tasks'))
+      parts.push(plural(data.tasks.tasks.length, 'Aufgabe', 'Aufgaben'));
+    parts.push(on('selfheal') ? 'Selbstheilung an' : 'Selbstheilung aus');
+    const title = sh?.em ? sh : ts?.em ? ts : (ts ?? sh ?? plain('Automatik'));
+    return { title, sub: parts.join(' · '), serverSwitch: false };
+  }
+  if (pathname === '/internet') {
+    const on = (m: 'speedtest' | 'domains'): boolean => data.modules?.[m] ?? true;
+    const now = data.updatedAt ?? new Date();
+    const dn = on('domains') && data.domains ? domainsSentence(data.domains, now) : null;
+    const sp = on('speedtest') && data.speedtest ? speedtestSentence(data.speedtest) : null;
+    if (!dn && !sp) return { title: plain('Internet'), sub: 'lädt …', serverSwitch: false };
+    const parts = ['Internet'];
+    if (data.speedtest && on('speedtest')) {
+      parts.push(plural(data.speedtest.summary.count, 'Messung', 'Messungen') + ' in 7 Tagen');
+    }
+    if (data.domains && on('domains')) {
+      parts.push(plural(data.domains.records.length, 'DNS-Eintrag', 'DNS-Einträge'));
+      parts.push(plural(data.domains.certificates.length, 'Zertifikat', 'Zertifikate'));
+    }
+    const title = dn?.em ? dn : sp?.em ? sp : (sp ?? dn ?? plain('Internet'));
+    return { title, sub: parts.join(' · '), serverSwitch: false };
+  }
+  if (pathname === '/apps') {
+    if (data.apps === undefined)
+      return { title: plain('Apps'), sub: 'lädt …', serverSwitch: false };
+    const servers = new Set(data.apps.map((a) => a.serverId)).size;
+    return {
+      title: appsSentence(data.apps),
+      sub: `Apps · ${plural(data.apps.length, 'App', 'Apps')} auf ${plural(servers, 'Server', 'Servern')}`,
+      serverSwitch: false,
+    };
   }
 
   if (pathname === settingsItem.href) {

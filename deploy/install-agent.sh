@@ -3,12 +3,16 @@
 #
 #   sudo HZ_AGENT_TOKEN=<token> ./deploy/install-agent.sh \
 #     --url wss://heimserver.<tailnet>.ts.net/agent --name oracle-a1 \
-#     [--image <image> | --build-local] [--allow-terminal] [--smart]
+#     [--image <image> | --build-local] [--allow-terminal] [--tasks] [--smart]
 #
 # Image: by default the multi-arch image ghcr.io/puffybooy/homelab-agent:latest
 # (amd64 + arm64) is pulled. Pin a build with --image ghcr.io/puffybooy/homelab-agent:sha-<short>
 # or :v<version>. --build-local (or HZ_BUILD_LOCAL=1) builds the image from this checkout
 # instead, as homelab-zentrale/agent:local.
+#
+# --tasks allows scheduled shell commands from the core (M20, task.exec): sets
+# HZ_AGENT_ALLOW_TASKS=1 in agent.env. Like --allow-terminal it is a root shell on
+# the host, started by the core; leave it off unless you need "Befehl ausführen".
 #
 # --smart lets the agent read SMART values of the disks (NAS, M13): it adds
 # deploy/docker-compose.agent.smart.yml (read access to the disks, CAP_SYS_RAWIO).
@@ -37,6 +41,7 @@ url=""
 name=""
 image=""
 allow_terminal=0
+tasks=0
 smart=0
 build_local=0
 if [[ "${HZ_BUILD_LOCAL:-0}" == 1 ]]; then build_local=1; fi
@@ -48,7 +53,7 @@ die() {
 }
 
 usage() {
-  sed -n '2,22p' "$0" | sed 's/^# \{0,1\}//'
+  sed -n '2,26p' "$0" | sed 's/^# \{0,1\}//'
   exit "${1:-0}"
 }
 
@@ -59,6 +64,7 @@ while [[ $# -gt 0 ]]; do
     --image) image="${2:-}"; shift 2 ;;
     --build-local) build_local=1; shift ;;
     --allow-terminal) allow_terminal=1; shift ;;
+    --tasks) tasks=1; shift ;;
     --smart) smart=1; shift ;;
     --token-stdin) token_stdin=1; shift ;;
     --token|--token=*) die "das Token nie als Argument übergeben, sondern über HZ_AGENT_TOKEN oder --token-stdin" ;;
@@ -124,9 +130,22 @@ if [[ -n "$token" || ! -f "$CONF_DIR/agent.env" ]]; then
     printf 'HZ_AGENT_NAME=%s\n' "$name"
     printf 'HZ_AGENT_TOKEN=%s\n' "$token"
     printf 'HZ_AGENT_ALLOW_TERMINAL=%s\n' "$allow_terminal"
+    printf 'HZ_AGENT_ALLOW_TASKS=%s\n' "$tasks"
   } >"$tmp"
   chmod 0600 "$tmp"
   mv -f "$tmp" "$CONF_DIR/agent.env"
+else
+  # Existing configuration without a new token: --allow-terminal / --tasks switch the
+  # flag on in place (everything else, including the agent token, stays as it is).
+  for flag in HZ_AGENT_ALLOW_TERMINAL:"$allow_terminal" HZ_AGENT_ALLOW_TASKS:"$tasks"; do
+    key="${flag%%:*}"
+    [[ "${flag#*:}" == 1 ]] || continue
+    tmp="$(mktemp "$CONF_DIR/.agent.env.XXXXXX")"
+    { grep -v "^${key}=" "$CONF_DIR/agent.env" || true; printf '%s=1\n' "$key"; } >"$tmp"
+    chmod 0600 "$tmp"
+    mv -f "$tmp" "$CONF_DIR/agent.env"
+    echo "$key=1 in $CONF_DIR/agent.env gesetzt."
+  done
 fi
 umask "$old_umask"
 unset token HZ_AGENT_TOKEN

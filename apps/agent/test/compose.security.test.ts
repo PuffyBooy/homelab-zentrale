@@ -342,6 +342,8 @@ describe('compose target (project name, override and extra files)', () => {
     await writeFile(path.join(dir, 'compose.override.yml'), 'services: {}\n');
     expect(await composeTarget(dir, `${root}/`, docker(null))).toEqual({
       files: [path.join(dir, 'compose.yml'), path.join(dir, 'compose.override.yml')],
+      // a new stack gets the checked, derived project name explicitly
+      project: 'ovr',
     });
   });
 

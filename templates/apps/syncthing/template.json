@@ -1,0 +1,36 @@
+{
+  "id": "syncthing",
+  "name": "Syncthing",
+  "description": "Synchronisiert Ordner direkt zwischen Geräten, ohne Cloud dazwischen. Verschlüsselt, Open Source.",
+  "category": "dateien",
+  "version": "2.1.7",
+  "website": "https://syncthing.net",
+  "arch": [
+    "amd64",
+    "arm64"
+  ],
+  "minRamMb": 128,
+  "params": [
+    {
+      "type": "port",
+      "key": "WEB_PORT",
+      "label": "Web-Oberfläche (Port)",
+      "default": 8384,
+      "protocol": "tcp",
+      "web": true
+    },
+    {
+      "type": "port",
+      "key": "SYNC_PORT",
+      "label": "Sync-Port (TCP)",
+      "default": 22000,
+      "protocol": "tcp",
+      "web": false
+    }
+  ],
+  "hints": [
+    "Die Weboberfläche hat anfangs kein Passwort: unter Aktionen → Einstellungen → GUI sofort Benutzer und Passwort setzen.",
+    "Synchronisierte Ordner liegen unter /opt/homelab/apps/<App>/data/syncthing (im Container /var/syncthing).",
+    "Weicht der Sync-Port von 22000 ab, auf den anderen Geräten die Adresse tcp://<server>:<port> eintragen."
+  ]
+}

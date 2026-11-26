@@ -1,0 +1,5 @@
+services:
+  app:
+    image: busybox:1.36
+    ports:
+      - '${BIND}:${WEB_PORT}:80'

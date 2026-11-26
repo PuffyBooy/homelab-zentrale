@@ -1,0 +1,27 @@
+{
+  "id": "uptime-kuma",
+  "name": "Uptime Kuma",
+  "description": "Überwacht Websites, Ports und Dienste mit Statusseiten und vielen Benachrichtigungswegen.",
+  "category": "netzwerk",
+  "version": "2.5.12",
+  "website": "https://uptime.kuma.pet",
+  "arch": [
+    "amd64",
+    "arm64"
+  ],
+  "minRamMb": 256,
+  "params": [
+    {
+      "type": "port",
+      "key": "WEB_PORT",
+      "label": "Web-Oberfläche (Port)",
+      "default": 3001,
+      "protocol": "tcp",
+      "web": true
+    }
+  ],
+  "hints": [
+    "Beim ersten Aufruf die Datenbank wählen (SQLite reicht) und das Admin-Konto anlegen.",
+    "Die Zentrale prüft Websites selbst; Uptime Kuma lohnt sich für öffentliche Statusseiten oder als zweite Meinung."
+  ]
+}

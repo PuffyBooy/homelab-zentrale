@@ -10,6 +10,8 @@ import {
   type RpcResult,
 } from '@hz/shared';
 import { resolveHomelabPath } from '../paths.js';
+import { appRemove } from './app-remove.js';
+import { certRemove, certWrite } from './certs.js';
 import { checkHttp, checkPing, checkTcp } from './checks.js';
 import { composeDown, composePull, composeUp, composeWrite } from './compose.js';
 import { containerRestart, containerStart, containerStop } from './container.js';
@@ -29,7 +31,9 @@ import { gameRemove } from './game-remove.js';
 import { gameRcon, gameStatus } from './games.js';
 import { ptyClose, ptyInput, ptyOpen, ptyResize } from './pty.js';
 import { cleanup, cleanupPreview } from './system-cleanup.js';
+import { speedtestRun } from './speedtest.js';
 import { systemReboot } from './system-reboot.js';
+import { taskExec } from './task-exec.js';
 import {
   ActionError,
   type ActionContext,
@@ -77,6 +81,11 @@ export const handlers: ActionHandlers = {
   'game.mods.install': gameModsInstall,
   'game.mods.remove': gameModsRemove,
   'game.restore': (p, ctx, id) => gameRestore(p, ctx, id),
+  'task.exec': taskExec,
+  'speedtest.run': speedtestRun,
+  'cert.write': certWrite,
+  'cert.remove': certRemove,
+  'app.remove': appRemove,
 };
 
 export function hasGitSegment(p: unknown): boolean {

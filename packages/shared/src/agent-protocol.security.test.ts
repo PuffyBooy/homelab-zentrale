@@ -64,6 +64,12 @@ describe('agent protocol allowlist', () => {
         'system.cleanup',
         'system.cleanupPreview',
         'system.reboot',
+        // M20/M21 (agent-automation.ts)
+        'task.exec',
+        'speedtest.run',
+        'cert.write',
+        'cert.remove',
+        'app.remove',
       ].sort(),
     );
   });

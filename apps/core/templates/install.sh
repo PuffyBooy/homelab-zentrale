@@ -1,7 +1,7 @@
 #!/bin/sh
 # Homelab-Zentrale: adds this server to the hub in one step.
 #
-#   curl -fsSL @@HZ_HUB_ORIGIN@@/install.sh | sudo sh -s -- <code> [--smart]
+#   curl -fsSL @@HZ_HUB_ORIGIN@@/install.sh | sudo sh -s -- <code> [--smart] [--tasks]
 #
 # --smart lets the agent read SMART values of the disks (M13: read access to the
 # disk block devices and CAP_SYS_RAWIO). On a UGREEN NAS it is switched on
@@ -37,14 +37,20 @@ die() {
   exit 1
 }
 
-usage="Aufruf: curl -fsSL $HUB/install.sh | sudo sh -s -- <code> [--smart]"
+usage="Aufruf: curl -fsSL $HUB/install.sh | sudo sh -s -- <code> [--smart] [--tasks]"
 smart=0
-case "$#" in
-  1) ;;
-  2) [ "$2" = '--smart' ] || die "$usage"; smart=1 ;;
-  *) die "$usage" ;;
-esac
+tasks=0
+[ "$#" -ge 1 ] && [ "$#" -le 3 ] || die "$usage"
 code=$1
+shift
+for opt in "$@"; do
+  case "$opt" in
+    --smart) smart=1 ;;
+    # M20: lets scheduled tasks run shell commands on this host (task.exec).
+    --tasks) tasks=1 ;;
+    *) die "$usage" ;;
+  esac
+done
 # Whole-argument check first: grep below matches per line, so a multi-line
 # argument with a valid first line must never get that far.
 case "$code" in
@@ -126,6 +132,7 @@ tmp=$(mktemp "$CONF_DIR/.agent.env.XXXXXX")
   printf 'HZ_AGENT_NAME=%s\n' "$name"
   printf 'HZ_AGENT_TOKEN=%s\n' "$token"
   printf 'HZ_AGENT_ALLOW_TERMINAL=0\n'
+  printf 'HZ_AGENT_ALLOW_TASKS=%s\n' "$tasks"
 } >"$tmp"
 unset token
 chmod 0600 "$tmp"

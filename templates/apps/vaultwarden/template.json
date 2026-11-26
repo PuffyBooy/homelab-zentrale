@@ -1,0 +1,48 @@
+{
+  "id": "vaultwarden",
+  "name": "Vaultwarden",
+  "description": "Schlanker, Bitwarden-kompatibler Passwort-Server. Funktioniert mit den offiziellen Bitwarden-Apps und Browser-Erweiterungen.",
+  "category": "sicherheit",
+  "version": "1.37.5",
+  "website": "https://github.com/dani-garcia/vaultwarden",
+  "arch": [
+    "amd64",
+    "arm64"
+  ],
+  "minRamMb": 128,
+  "params": [
+    {
+      "type": "port",
+      "key": "WEB_PORT",
+      "label": "Web-Oberfläche (Port)",
+      "default": 8222,
+      "protocol": "tcp",
+      "web": true
+    },
+    {
+      "type": "string",
+      "key": "DOMAIN",
+      "label": "Adresse mit https:// (z. B. https://vault.<tailnet>.ts.net)",
+      "required": true,
+      "pattern": "^https://[A-Za-z0-9.-]+(:[0-9]{1,5})?(/[A-Za-z0-9._~-]+)*/?$"
+    },
+    {
+      "type": "bool",
+      "key": "SIGNUPS_ALLOWED",
+      "label": "Neue Konten erlauben",
+      "default": true
+    },
+    {
+      "type": "password",
+      "key": "ADMIN_TOKEN",
+      "label": "Admin-Token (für /admin)",
+      "generate": true,
+      "minLength": 24
+    }
+  ],
+  "hints": [
+    "Braucht HTTPS: Browser und Bitwarden-Apps arbeiten nur über eine https-Adresse. Freigabe per tailscale serve oder Reverse-Proxy; DOMAIN muss genau diese Adresse sein.",
+    "Nach dem Anlegen der eigenen Konten „Neue Konten erlauben“ ausschalten und die App aktualisieren.",
+    "Die Admin-Seite liegt unter /admin, das Token steht bei den Geheimnissen der App."
+  ]
+}

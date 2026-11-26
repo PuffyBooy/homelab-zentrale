@@ -55,6 +55,14 @@ import { PushService } from './push/service.js';
 import { readNotifySettings } from './push/settings.js';
 import { loadVapidKeys } from './push/vapid.js';
 import { healthRoutes } from './routes/health.js';
+import {
+  featuresIdle,
+  registerFeatureRoutes,
+  setupFeatures,
+  stopFeatures,
+  type FeatureDeps,
+  type Features,
+} from './features.js';
 import { Scheduler } from './scheduler.js';
 import { serverRoutes } from './servers/routes.js';
 import { installScriptRoutes, onboardingRoutes } from './servers/onboarding-routes.js';
@@ -113,6 +121,8 @@ export interface AppDeps {
   consoleOptions?: ConsoleOptions;
   /** M12: HTTP for Discord webhooks and the Modrinth API (tests: a fake). */
   gameFetch?: FetchLike;
+  /** M20/M21 modules: fake HTTP, short timers, template dirs (tests). */
+  features?: FeatureDeps;
 }
 
 /** Core services, decorated on the app as `hzCore` (routes, tests). */
@@ -144,6 +154,8 @@ export interface CoreServices {
   throttle: ThrottleService;
   onboarding: OnboardingService;
   ports: PortAuditService;
+  /** M20/M21: tasks, selfheal, speedtest, domains, apps (features.ts). */
+  features: Features;
   db: DbHandle;
 }
 
@@ -628,6 +640,27 @@ export async function buildApp(config: Config, deps: AppDeps = {}): Promise<Fast
       );
     }
   });
+  // ---- M20/M21: tasks, selfheal, speedtest, domains, apps (features.ts) -------------
+  const features = setupFeatures(
+    {
+      config,
+      db: db.db,
+      box,
+      now,
+      log: app.log,
+      scheduler,
+      hub,
+      alerts,
+      servers,
+      containers,
+      checks,
+      games,
+      throttle,
+      ports,
+      modules,
+    },
+    deps.features,
+  );
 
   app.decorate('hzCore', {
     scheduler,
@@ -657,6 +690,7 @@ export async function buildApp(config: Config, deps: AppDeps = {}): Promise<Fast
     throttle,
     onboarding,
     ports,
+    features,
     db,
   });
 
@@ -693,7 +727,8 @@ export async function buildApp(config: Config, deps: AppDeps = {}): Promise<Fast
     if (m === 'github') github.setEnabled(on);
     else if (m === 'games') games.setEnabled(on);
     else if (m === 'homeassistant') ha.setEnabled(on);
-    else storage.setEnabled(on);
+    else if (m === 'storage') storage.setEnabled(on);
+    // M20/M21 modules switch themselves (features.ts).
     app.log.info({ module: m, on }, 'module switched');
   });
   checks.start();
@@ -735,10 +770,18 @@ export async function buildApp(config: Config, deps: AppDeps = {}): Promise<Fast
     scheduler.stop();
     // Let running checks and pushes finish before the database closes (bounded).
     await Promise.race([
-      Promise.all([checks.idle(), push.idle(), github.idle(), games.idle(), gameNotifier.idle()]),
+      Promise.all([
+        checks.idle(),
+        push.idle(),
+        github.idle(),
+        games.idle(),
+        gameNotifier.idle(),
+        featuresIdle(features),
+      ]),
       new Promise((r) => setTimeout(r, 3_000).unref()),
     ]);
     ha.stop();
+    stopFeatures(features);
     github.deployer.shutdown();
     consoles.closeAll();
     hub.shutdown();
@@ -785,6 +828,7 @@ export async function buildApp(config: Config, deps: AppDeps = {}): Promise<Fast
   await app.register(portRoutes, { prefix: '/api', db: db.db, now, servers, ports });
   await app.register(moduleRoutes, { prefix: '/api', db: db.db, now, modules });
   await app.register(storageRoutes, { prefix: '/api', storage });
+  await registerFeatureRoutes(app, features);
   await app.register(alertRoutes, { prefix: '/api', db: db.db, now, alerts });
   await app.register(containerRoutes, {
     prefix: '/api',

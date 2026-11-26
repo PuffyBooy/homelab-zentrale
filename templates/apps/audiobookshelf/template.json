@@ -1,0 +1,27 @@
+{
+  "id": "audiobookshelf",
+  "name": "Audiobookshelf",
+  "description": "Server für Hörbücher und Podcasts mit Fortschritt pro Hörer, Apps für Android und iOS.",
+  "category": "medien",
+  "version": "2.38.0",
+  "website": "https://www.audiobookshelf.org",
+  "arch": [
+    "amd64",
+    "arm64"
+  ],
+  "minRamMb": 256,
+  "params": [
+    {
+      "type": "port",
+      "key": "WEB_PORT",
+      "label": "Web-Oberfläche (Port)",
+      "default": 13378,
+      "protocol": "tcp",
+      "web": true
+    }
+  ],
+  "hints": [
+    "Hörbücher nach /opt/homelab/apps/<App>/data/audiobooks legen, Podcasts landen in data/podcasts.",
+    "Beim ersten Aufruf das Root-Konto anlegen."
+  ]
+}

@@ -17,6 +17,7 @@ import { makeHostExec, runFile, spawnFile } from './exec.js';
 import { normalizeArch, type HostContext } from './host.js';
 import { createLogger } from './log.js';
 import { PtyManager } from './actions/pty.js';
+import { TaskManager } from './actions/task-exec.js';
 import { StreamManager } from './streams.js';
 
 async function agentVersion(): Promise<string> {
@@ -73,6 +74,16 @@ async function main(): Promise<void> {
         log,
       })
     : undefined;
+  // Only constructed with HZ_AGENT_ALLOW_TASKS=1 (task.exec).
+  const tasks = config.allowTasks
+    ? new TaskManager({
+        allowTasks: true,
+        hostExec: config.hostExec,
+        host,
+        homelabRoot: config.homelabRoot,
+        log,
+      })
+    : undefined;
   // Wake listeners of sleeping games (game.wake.arm); the event goes out on the
   // agent connection like every other event.
   const wake = new WakeManager({
@@ -105,6 +116,8 @@ async function main(): Promise<void> {
       spawn: spawnFile,
       dataDir: config.dataDir,
       ...(pty ? { pty } : {}),
+      allowTasks: config.allowTasks,
+      ...(tasks ? { tasks } : {}),
       wake,
     },
     (event) => conn.send(event),
@@ -116,6 +129,7 @@ async function main(): Promise<void> {
     dataDir: config.dataDir,
     envToken: config.token,
     allowTerminal: config.allowTerminal,
+    allowTasks: config.allowTasks,
     docker: docker !== null,
     version: await agentVersion(),
     arch: normalizeArch(os.arch()),
@@ -154,6 +168,7 @@ async function main(): Promise<void> {
     hostExec: config.hostExec,
     docker: docker !== null,
     terminal: config.allowTerminal,
+    tasks: config.allowTasks,
   });
   // Temp archives of backups that died with a previous agent process (no backup runs yet).
   const stale = await cleanupPartialBackups(config.homelabRoot);
@@ -173,6 +188,7 @@ async function main(): Promise<void> {
     inventorySoon.cancel();
     streams.cancelAll();
     pty?.closeAll();
+    tasks?.killAll();
     conn.stop();
     for (const t of timers) clearTimeout(t);
     // Free the game ports before exiting (bounded: exit closes them anyway).

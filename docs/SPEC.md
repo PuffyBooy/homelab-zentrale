@@ -243,3 +243,22 @@ Konto (Passwort, TOTP, aktive Sessions), Server (Schwellen, Konsole erlaubt, ent
 ## 15. Ideen für später (nicht in den Meilensteinen)
 
 Backups mit restic zwischen den Servern, Spiel-Statistiken, Steuerung eigener Apps, Morgen-Briefing (Wetter, Öffi-Abfahrten, Termine), Paket-Tracking, Pi-hole-Statistiken, Wake-on-LAN, KI-Befehle („Starte den Minecraft-Server“).
+
+## 18. Automatik, Netzwerk und Apps (M20, M21)
+
+Alle Teile sind optionale Module (Einstellungen → Module), Standard aus. Die Zentrale bleibt nur über Tailscale erreichbar; Domains und Zertifikate sind für die öffentlichen Dinge des Admins (Game-Relay, Apps auf einem VPS, Heimserver mit wechselnder IP).
+
+### 18.1 Geplante Aufgaben (`tasks`)
+Pro Server wiederkehrende Aktionen: Container neu starten, starten oder stoppen, Stack aktualisieren (pull + up), Docker aufräumen, wöchentlich an Tagen zu Uhrzeiten oder alle N Minuten (ab 5 Min). „Befehl ausführen“ (eine Zeile Shell auf dem Host) gibt es nur, wenn der Agent mit `HZ_AGENT_ALLOW_TASKS=1` läuft (`install-agent.sh --tasks`); Anlegen, Ändern und Starten verlangen Step-up, der Befehl wird verschlüsselt gespeichert und erscheint in keinem Log und keiner Meldung. Die letzten 50 Läufe bleiben mit Ausgabe sichtbar; ein fehlgeschlagener Lauf meldet sich (warn). Verpasste Läufe werden nicht nachgeholt, ein noch laufender Lauf wird nicht doppelt gestartet.
+
+### 18.2 Selbstheilung (`selfheal`)
+Hängende Container werden neu gestartet: Docker-Status `unhealthy` länger als die Schonfrist (Standard 2 Min), auf Wunsch auch ein Absturz, oder ein verknüpfter Website-Check ist DOWN. Schutz gegen Schleifen: höchstens 3 Neustarts in 30 Min und 2 Min Abstand (einstellbar); danach „aufgegeben“ mit CRIT-Meldung, bis der Container 10 Min gesund läuft oder der Admin zurücksetzt. Nie an der Zentrale oder dem Agent (`hz.role`), nie an Containern, die der Admin oder M10 gestoppt hat; abgestürzte `wichtig`-Container startet weiter M10.
+
+### 18.3 Speedtest-Verlauf (`speedtest`)
+Ein gewählter Server misst alle 1–24 Stunden Download, Upload, Ping und Jitter gegen `speed.cloudflare.com` (nur dieser Host). Datenmenge pro Messung einstellbar (Standard bis 100 MB je Richtung). Verlauf 7/30/90 Tage; mit Schwellen meldet sich „Internet langsam“ nach 3 langsamen Messungen in Folge.
+
+### 18.4 Domains und Zertifikate (`domains`)
+DNS-Anbieter Cloudflare (API-Token mit Zone:DNS:Edit) und DuckDNS. Einträge A/AAAA/CNAME mit Ziel „öffentliche IP von Server X“ (DynDNS, Abgleich jede Minute) oder einem festen Wert; die Zentrale ändert nur Einträge, die sie selbst angelegt hat. Zertifikate über ACME (Let's Encrypt, Staging zum Testen) mit DNS-01, auch Wildcards, Verlängerung 30 Tage vor Ablauf, Verteilung nach `/opt/homelab/certs/<name>/` auf gewählte Server. Das Game-Relay legt seine stabilen Namen über dieselbe Schnittstelle an (nur lesbar in der Oberfläche).
+
+### 18.5 App-Store und Stack-Vorlagen (`apps`)
+Katalog mit eingebauten Vorlagen (`templates/apps/`: Jellyfin, Nextcloud, Vaultwarden, Forgejo, Paperless-ngx, Syncthing, Audiobookshelf, Navidrome, FreshRSS, Uptime Kuma, Mealie) und eigenen Docker-Compose-Vorlagen mit Parametern. Installation mit einem Klick nach `/opt/homelab/apps/<name>/` auf einem gewählten Server, Ports standardmäßig nur auf der Tailscale-IP des Servers. Jede Vorlage geht durch eine Sicherheitsprüfung (kein `privileged`, kein Docker-Socket, keine Host-Pfade außerhalb des App-Ordners, kein Host-Netz …). Passwörter erzeugt die Zentrale und zeigt sie nur mit Step-up. Start, Stopp, Aktualisieren, Entfernen (Step-up, Name bestätigen, Daten optional löschen).

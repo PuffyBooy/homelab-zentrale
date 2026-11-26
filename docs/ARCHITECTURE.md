@@ -160,6 +160,10 @@ Die erste Nachricht muss innerhalb von 10 s ein gültiges `hello` sein. Danach a
 | `system.reboot` | `{confirmName}` |
 | `check.http` / `check.tcp` / `check.ping` | wie Check-Definition |
 | `pty.open` / `pty.input` / `pty.resize` / `pty.close` | nur wenn `HZ_AGENT_ALLOW_TERMINAL=1` |
+| `task.exec` | `{taskId, command, timeoutSec}` → `{exitCode, timedOut, durationMs, output, truncated}`: eine Zeile `/bin/sh -c` auf dem Host, nur wenn `HZ_AGENT_ALLOW_TASKS=1` (M20), feste Umgebung, Prozessgruppe nach dem Zeitlimit beendet, Befehl nie im Log |
+| `speedtest.run` | `{maxSeconds, maxBytes}` → Download, Upload, Ping, Jitter; nur gegen `speed.cloudflare.com` (M20) |
+| `cert.write` / `cert.remove` | `{name, fullchainPem, privkeyPem}` / `{name}`: nur `/opt/homelab/certs/<name>/`, Schlüssel 0600, keine Symlinks (M20) |
+| `app.remove` | `{appId, deleteData}`: `compose down` in `/opt/homelab/apps/<appId>/`, mit `deleteData` Ordner löschen (M21) |
 
 Pfade werden im Agent normalisiert und müssen mit `/opt/homelab/` beginnen. Kein `exec` beliebiger Strings: Jede Aktion ruft feste Programme mit Argument-Arrays auf (`execFile`, nie `shell: true`).
 

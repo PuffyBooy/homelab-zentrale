@@ -43,6 +43,11 @@ describe('optional modules', () => {
       homeassistant: false,
       games: true,
       storage: true,
+      tasks: false,
+      selfheal: false,
+      speedtest: false,
+      domains: false,
+      apps: false,
     });
     const state = await t.app.inject({
       method: 'GET',
@@ -109,11 +114,17 @@ describe('optional modules', () => {
     }
   });
 
-  it('enabling github or homeassistant needs step-up, games and switching off do not', async () => {
+  it('enabling github, homeassistant, tasks or domains needs step-up, games and switching off do not', async () => {
     t = await makeApp({ modules: 'fresh' });
     const { cookie, secret } = await completeSetup(t);
     t.clock.advance(16 * 60_000);
-    for (const body of [{ github: true }, { homeassistant: true }, { games: true, github: true }]) {
+    for (const body of [
+      { github: true },
+      { homeassistant: true },
+      { games: true, github: true },
+      { tasks: true },
+      { domains: true },
+    ]) {
       const res = await put(t, cookie, body);
       expect(res.statusCode, JSON.stringify(body)).toBe(403);
       expect(res.json()).toEqual({ ok: false, error: 'step_up_required' });
@@ -123,6 +134,11 @@ describe('optional modules', () => {
       homeassistant: false,
       games: true,
       storage: true,
+      tasks: false,
+      selfheal: false,
+      speedtest: false,
+      domains: false,
+      apps: false,
     });
     // Off and games on: no step-up.
     expect((await put(t, cookie, { games: false })).statusCode).toBe(200);
@@ -131,6 +147,11 @@ describe('optional modules', () => {
       homeassistant: false,
       games: true,
       storage: true,
+      tasks: false,
+      selfheal: false,
+      speedtest: false,
+      domains: false,
+      apps: false,
     });
     // Invalid input.
     for (const body of [{}, { shell: true }, { github: 'yes' }, []]) {

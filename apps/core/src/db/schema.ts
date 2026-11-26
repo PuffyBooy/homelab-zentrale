@@ -956,3 +956,227 @@ export const whitelistRequests = sqliteTable(
 export type GameScheduleRow = typeof gameSchedules.$inferSelect;
 export type GameNotifyRow = typeof gameNotify.$inferSelect;
 export type WhitelistRequestRow = typeof whitelistRequests.$inferSelect;
+
+// ---------------------------------------------------------------------------
+// M20/M21 (migration 17): scheduled tasks, self-healing, speed test, domains, apps
+
+export const scheduledTasks = sqliteTable(
+  'scheduled_tasks',
+  {
+    id: text('id').primaryKey(),
+    serverId: text('server_id')
+      .notNull()
+      .references(() => servers.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    /** TaskKind */
+    kind: text('kind').notNull(),
+    /** Action without the command text (taskActionPublicSchema minus commandHash). */
+    actionJson: text('action_json').notNull(),
+    /** Command of kind `command`, crypto.ts with AAD `scheduled_tasks.command`. */
+    commandEnc: text('command_enc'),
+    scheduleJson: text('schedule_json').notNull(),
+    enabled: integer('enabled', { mode: 'boolean' }).notNull().default(true),
+    notifyOnFailure: integer('notify_on_failure', { mode: 'boolean' }).notNull().default(true),
+    nextRunAt: integer('next_run_at'),
+    createdAt: integer('created_at').notNull(),
+    updatedAt: integer('updated_at').notNull(),
+  },
+  (t) => [
+    index('scheduled_tasks_server').on(t.serverId),
+    index('scheduled_tasks_next').on(t.nextRunAt),
+  ],
+);
+
+export const taskRuns = sqliteTable(
+  'task_runs',
+  {
+    id: text('id').primaryKey(),
+    taskId: text('task_id')
+      .notNull()
+      .references(() => scheduledTasks.id, { onDelete: 'cascade' }),
+    /** schedule | manual */
+    trigger: text('trigger').notNull(),
+    /** running | ok | failed | skipped */
+    state: text('state').notNull(),
+    startedAt: integer('started_at').notNull(),
+    finishedAt: integer('finished_at'),
+    exitCode: integer('exit_code'),
+    summary: text('summary').notNull().default(''),
+    output: text('output').notNull().default(''),
+  },
+  (t) => [index('task_runs_task').on(t.taskId, t.startedAt)],
+);
+
+export const selfhealRules = sqliteTable(
+  'selfheal_rules',
+  {
+    serverId: text('server_id')
+      .notNull()
+      .references(() => servers.id, { onDelete: 'cascade' }),
+    container: text('container').notNull(),
+    /** off | unhealthy | unhealthy_or_exited */
+    mode: text('mode').notNull(),
+    checkId: text('check_id'),
+    updatedAt: integer('updated_at').notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.serverId, t.container] })],
+);
+
+export const selfhealEvents = sqliteTable(
+  'selfheal_events',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    at: integer('at').notNull(),
+    serverId: text('server_id')
+      .notNull()
+      .references(() => servers.id, { onDelete: 'cascade' }),
+    container: text('container').notNull(),
+    reason: text('reason').notNull(),
+    action: text('action').notNull(),
+    attempt: integer('attempt').notNull().default(0),
+  },
+  (t) => [
+    index('selfheal_events_at').on(t.at),
+    index('selfheal_events_container').on(t.serverId, t.container, t.at),
+  ],
+);
+
+export const speedtestResults = sqliteTable(
+  'speedtest_results',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    at: integer('at').notNull(),
+    /** No foreign key: the history stays when the server is removed. */
+    serverId: text('server_id').notNull(),
+    trigger: text('trigger').notNull(),
+    ok: integer('ok', { mode: 'boolean' }).notNull(),
+    downloadMbps: real('download_mbps'),
+    uploadMbps: real('upload_mbps'),
+    latencyMs: real('latency_ms'),
+    jitterMs: real('jitter_ms'),
+    bytes: integer('bytes').notNull().default(0),
+    colo: text('colo'),
+    error: text('error'),
+  },
+  (t) => [index('speedtest_results_at').on(t.at)],
+);
+
+export const dnsProviders = sqliteTable('dns_providers', {
+  id: text('id').primaryKey(),
+  /** cloudflare | duckdns */
+  kind: text('kind').notNull(),
+  label: text('label').notNull(),
+  /** crypto.ts with AAD `dns_providers.token`. */
+  tokenEnc: text('token_enc').notNull(),
+  /** DuckDNS: { subdomains: string[] }. */
+  configJson: text('config_json').notNull().default('{}'),
+  zonesJson: text('zones_json').notNull().default('[]'),
+  lastOkAt: integer('last_ok_at'),
+  lastError: text('last_error'),
+  createdAt: integer('created_at').notNull(),
+  updatedAt: integer('updated_at').notNull(),
+});
+
+export const dnsRecords = sqliteTable(
+  'dns_records',
+  {
+    id: text('id').primaryKey(),
+    providerId: text('provider_id')
+      .notNull()
+      .references(() => dnsProviders.id, { onDelete: 'restrict' }),
+    name: text('name').notNull(),
+    type: text('type').notNull(),
+    targetJson: text('target_json').notNull(),
+    ttl: integer('ttl').notNull(),
+    proxied: integer('proxied', { mode: 'boolean' }).notNull().default(false),
+    /** admin | relay */
+    owner: text('owner').notNull().default('admin'),
+    /** relay: the game server id. */
+    ownerRef: text('owner_ref'),
+    providerRecordId: text('provider_record_id'),
+    value: text('value'),
+    status: text('status').notNull().default('pending'),
+    lastSyncAt: integer('last_sync_at'),
+    lastError: text('last_error'),
+    createdAt: integer('created_at').notNull(),
+    updatedAt: integer('updated_at').notNull(),
+  },
+  (t) => [
+    unique().on(t.providerId, t.name, t.type),
+    index('dns_records_owner').on(t.owner, t.ownerRef),
+  ],
+);
+
+export const certificates = sqliteTable('certificates', {
+  id: text('id').primaryKey(),
+  providerId: text('provider_id')
+    .notNull()
+    .references(() => dnsProviders.id, { onDelete: 'restrict' }),
+  namesJson: text('names_json').notNull(),
+  /** letsencrypt | letsencrypt-staging */
+  ca: text('ca').notNull(),
+  status: text('status').notNull().default('pending'),
+  /** PEM private key, crypto.ts with AAD `certificates.key`. */
+  keyEnc: text('key_enc'),
+  /** Full chain PEM (public). */
+  certPem: text('cert_pem'),
+  issuedAt: integer('issued_at'),
+  notAfter: integer('not_after'),
+  autoRenew: integer('auto_renew', { mode: 'boolean' }).notNull().default(true),
+  /** [{ serverId, name, deployedAt, lastError }] */
+  deployJson: text('deploy_json').notNull().default('[]'),
+  failures: integer('failures').notNull().default(0),
+  lastError: text('last_error'),
+  nextAttemptAt: integer('next_attempt_at'),
+  createdAt: integer('created_at').notNull(),
+  updatedAt: integer('updated_at').notNull(),
+});
+
+/** Own stack templates of the admin (built-in ones are files in templates/apps). */
+export const appTemplates = sqliteTable('app_templates', {
+  id: text('id').primaryKey(),
+  metaJson: text('meta_json').notNull(),
+  compose: text('compose').notNull(),
+  createdAt: integer('created_at').notNull(),
+  updatedAt: integer('updated_at').notNull(),
+});
+
+export const apps = sqliteTable(
+  'apps',
+  {
+    id: text('id').primaryKey(),
+    serverId: text('server_id')
+      .notNull()
+      .references(() => servers.id, { onDelete: 'cascade' }),
+    /** Folder name below /opt/homelab/apps/. */
+    appId: text('app_id').notNull(),
+    name: text('name').notNull(),
+    templateId: text('template_id').notNull(),
+    /** builtin | custom */
+    source: text('source').notNull(),
+    version: text('version').notNull(),
+    /** tailnet | localhost | all */
+    bind: text('bind').notNull(),
+    /** Non-secret parameter values. */
+    paramsJson: text('params_json').notNull().default('{}'),
+    /** JSON of password params, crypto.ts with AAD `apps.secrets`. */
+    secretsEnc: text('secrets_enc'),
+    portsJson: text('ports_json').notNull().default('[]'),
+    status: text('status').notNull(),
+    lastError: text('last_error'),
+    createdAt: integer('created_at').notNull(),
+    updatedAt: integer('updated_at').notNull(),
+  },
+  (t) => [unique().on(t.serverId, t.appId), index('apps_template').on(t.templateId)],
+);
+
+export type ScheduledTaskRow = typeof scheduledTasks.$inferSelect;
+export type TaskRunRow = typeof taskRuns.$inferSelect;
+export type SelfhealRuleRow = typeof selfhealRules.$inferSelect;
+export type SelfhealEventRow = typeof selfhealEvents.$inferSelect;
+export type SpeedtestResultRow = typeof speedtestResults.$inferSelect;
+export type DnsProviderRow = typeof dnsProviders.$inferSelect;
+export type DnsRecordRow = typeof dnsRecords.$inferSelect;
+export type CertificateRow = typeof certificates.$inferSelect;
+export type AppTemplateRow = typeof appTemplates.$inferSelect;
+export type AppRow = typeof apps.$inferSelect;

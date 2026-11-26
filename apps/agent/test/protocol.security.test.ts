@@ -145,7 +145,7 @@ describe('handshake and enrollment', () => {
       arch: 'amd64',
       os: 'Debian GNU/Linux 12',
       token: ENROLL_TOKEN,
-      capabilities: { terminal: false, docker: false },
+      capabilities: { terminal: false, docker: false, tasks: false },
     });
   });
 

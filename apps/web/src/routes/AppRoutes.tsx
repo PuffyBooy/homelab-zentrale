@@ -1,6 +1,7 @@
 import type { ModuleId } from '@hz/shared';
 import { lazy, Suspense, type ComponentType, type ReactElement } from 'react';
 import { Route, Routes } from 'react-router';
+import { navModules } from '../lib/modules.js';
 import { navItems } from '../nav.js';
 import { AlertsPage } from '../pages/alerts/AlertsPage.js';
 import { ContainerLogsPage } from '../pages/containers/ContainerLogsPage.js';
@@ -56,6 +57,18 @@ const GameDetailPage = page(
   () => import('../pages/games/GameDetailPage.js'),
   (m) => m.GameDetailPage,
 );
+const AutomationPage = page(
+  () => import('../pages/automation/AutomationPage.js'),
+  (m) => m.AutomationPage,
+);
+const InternetPage = page(
+  () => import('../pages/internet/InternetPage.js'),
+  (m) => m.InternetPage,
+);
+const AppsPage = page(
+  () => import('../pages/apps/AppsPage.js'),
+  (m) => m.AppsPage,
+);
 
 function Loading(): ReactElement {
   return (
@@ -73,14 +86,20 @@ function L({ c: C }: { c: ComponentType }): ReactElement {
   );
 }
 
-/** Lazy page of an optional module: "Modul ausgeschaltet" while it is off. */
-function G({ m, c }: { m: ModuleId; c: ComponentType }): ReactElement {
+/**
+ * Lazy page of an optional module: "Modul ausgeschaltet" while it is off. With a list
+ * the page shows while any of them is on (Automatik, Internet).
+ */
+function G({ m, c }: { m: ModuleId | readonly ModuleId[]; c: ComponentType }): ReactElement {
   return (
     <ModuleGate module={m}>
       <L c={c} />
     </ModuleGate>
   );
 }
+
+const AUTOMATION = navModules('automation') ?? [];
+const INTERNET = navModules('internet') ?? [];
 
 /** Dev-only component gallery. Dead code in production builds. */
 const DevUiPage = import.meta.env.DEV
@@ -98,6 +117,9 @@ const BUILT = new Set([
   '/home',
   '/alerts',
   '/console',
+  '/apps',
+  '/internet',
+  '/automation',
 ]);
 
 export function AppRoutes(): ReactElement {
@@ -167,6 +189,9 @@ export function AppRoutes(): ReactElement {
         />
         <Route path="alerts" element={<AlertsPage />} />
         <Route path="console" element={<L c={ConsolePage} />} />
+        <Route path="apps" element={<G m="apps" c={AppsPage} />} />
+        <Route path="internet" element={<G m={INTERNET} c={InternetPage} />} />
+        <Route path="automation" element={<G m={AUTOMATION} c={AutomationPage} />} />
         {navItems
           .filter((it) => it.href && !BUILT.has(it.href))
           .map((it) => (

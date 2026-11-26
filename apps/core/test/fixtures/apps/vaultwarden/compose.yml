@@ -1,0 +1,15 @@
+# Vaultwarden (test fixture)
+services:
+  vaultwarden:
+    image: vaultwarden/server:1.32.7
+    container_name: ${APP_ID}
+    restart: unless-stopped
+    environment:
+      TZ: ${TZ}
+      ADMIN_TOKEN: ${ADMIN_TOKEN}
+      SIGNUPS_ALLOWED: ${SIGNUPS_ALLOWED}
+      DOMAIN: ${DOMAIN}
+    volumes:
+      - ./data/vw:/data
+    ports:
+      - '${BIND}:${WEB_PORT}:80'

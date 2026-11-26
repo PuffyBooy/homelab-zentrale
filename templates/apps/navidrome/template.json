@@ -1,0 +1,27 @@
+{
+  "id": "navidrome",
+  "name": "Navidrome",
+  "description": "Musikserver für die eigene Sammlung, kompatibel mit Subsonic-Apps. Sehr sparsam, läuft gut auf dem Raspberry Pi.",
+  "category": "medien",
+  "version": "0.64.2",
+  "website": "https://www.navidrome.org",
+  "arch": [
+    "amd64",
+    "arm64"
+  ],
+  "minRamMb": 128,
+  "params": [
+    {
+      "type": "port",
+      "key": "WEB_PORT",
+      "label": "Web-Oberfläche (Port)",
+      "default": 4533,
+      "protocol": "tcp",
+      "web": true
+    }
+  ],
+  "hints": [
+    "Musik nach /opt/homelab/apps/<App>/data/music legen (im Container nur lesbar eingebunden).",
+    "Das erste angelegte Konto wird Admin: gleich nach der Installation öffnen und anlegen."
+  ]
+}

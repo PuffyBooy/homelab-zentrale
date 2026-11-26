@@ -1,0 +1,28 @@
+{
+  "id": "jellyfin",
+  "name": "Jellyfin",
+  "description": "Medienserver für Filme, Serien, Musik und Fotos. Streamt auf Browser, Handy, Tablet und Smart-TV.",
+  "category": "medien",
+  "version": "10.11.11",
+  "website": "https://jellyfin.org",
+  "arch": [
+    "amd64",
+    "arm64"
+  ],
+  "minRamMb": 1024,
+  "params": [
+    {
+      "type": "port",
+      "key": "WEB_PORT",
+      "label": "Web-Oberfläche (Port)",
+      "default": 8096,
+      "protocol": "tcp",
+      "web": true
+    }
+  ],
+  "hints": [
+    "Medien gehören nach /opt/homelab/apps/<App>/data/media (im Container /media). Andere Ordner des Servers sind aus Sicherheitsgründen nicht eingebunden.",
+    "Hardware-Transcoding ist nicht verfügbar (keine Geräte im Container); auf schwachen Servern Medien möglichst direkt abspielen.",
+    "Beim ersten Aufruf führt ein Assistent durch das Anlegen des Admin-Kontos."
+  ]
+}

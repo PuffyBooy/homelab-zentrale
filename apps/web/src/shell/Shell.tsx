@@ -14,13 +14,18 @@ import {
   useServerFilter,
   useServers,
 } from '../lib/data.js';
+import { useApps } from '../lib/apps.js';
+import { useDomains } from '../lib/domains.js';
 import { interceptLinks } from '../lib/links.js';
+import { useSelfheal } from '../lib/selfheal.js';
+import { useSpeedtest } from '../lib/speedtest.js';
+import { useTasks } from '../lib/tasks.js';
 import { visibleNavItems } from '../lib/modules.js';
 import { useModules } from '../lib/useModules.js';
 import { LiveClient, LiveProvider, useLiveState, useLiveTopic } from '../lib/live.js';
 import { ALL_SERVERS, sentenceText, switchEntries } from '../lib/servers.js';
 import { EnrollProvider } from '../pages/servers/enroll.js';
-import { activeNavId, navItems, settingsItem, shortcutAction } from '../nav.js';
+import { activeNavId, navItems, settingsItem, shortcutAction, withShortcutKeys } from '../nav.js';
 import { AlertToasts } from './AlertToasts.js';
 import { BottomBar } from './BottomBar.js';
 import { CommandPalette } from './CommandPalette.js';
@@ -29,6 +34,7 @@ import {
   needsContainers,
   needsGames,
   needsHa,
+  needsModuleData,
   needsRepos,
   pageMeta,
   serverDetailId,
@@ -73,6 +79,12 @@ function ShellBody(): ReactElement {
   const repos = useRepos(needsRepos(pathname) && modules.github);
   const games = useGames(needsGames(pathname) && modules.games);
   const ha = useHaState(needsHa(pathname) && modules.homeassistant);
+  const area = needsModuleData(pathname);
+  const tasks = useTasks(area === 'automation' && modules.tasks);
+  const selfheal = useSelfheal(area === 'automation' && modules.selfheal);
+  const speedtest = useSpeedtest(7, area === 'internet' && modules.speedtest);
+  const domains = useDomains(area === 'internet' && modules.domains);
+  const apps = useApps(area === 'apps' && modules.apps);
   const [filter, setFilter] = useServerFilter();
   const detailId = serverDetailId(pathname);
 
@@ -84,6 +96,11 @@ function ShellBody(): ReactElement {
     repos: repos.data,
     games: games.data,
     ha: ha.data,
+    tasks: tasks.data,
+    selfheal: selfheal.data,
+    speedtest: speedtest.data,
+    domains: domains.data,
+    apps: apps.data,
     filter: detailId ?? filter,
     live,
     modules,
@@ -93,7 +110,9 @@ function ShellBody(): ReactElement {
 
   const items = useMemo(() => {
     const open = openCount(alerts.data ?? []);
-    return visible.map((it) => (it.id === 'alerts' && open ? { ...it, count: open } : it));
+    return withShortcutKeys(visible).map((it) =>
+      it.id === 'alerts' && open ? { ...it, count: open } : it,
+    );
   }, [alerts.data, visible]);
 
   const go = useCallback((to: string) => void navigate(to), [navigate]);

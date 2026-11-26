@@ -1,0 +1,12 @@
+{
+  "id": "bigram",
+  "name": "Viel RAM",
+  "description": "Braucht 20 GB RAM (Test).",
+  "category": "medien",
+  "version": "2.0",
+  "arch": ["amd64", "arm64"],
+  "minRamMb": 20000,
+  "params": [
+    { "type": "port", "key": "WEB_PORT", "label": "Web-Port", "default": 9200, "web": true }
+  ]
+}

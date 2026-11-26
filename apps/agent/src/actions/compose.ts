@@ -1,5 +1,12 @@
 import { randomBytes } from 'node:crypto';
 import { lstat, mkdir, open, realpath, rename, unlink } from 'node:fs/promises';
+import {
+  assertNoPlantedSymlinks,
+  assertProjectNameFree,
+  containersOfDir,
+  derivedProjectName,
+  isStackFolder,
+} from './compose-guard.js';
 import { assertProjectNotProtected, type ProtectDocker } from './protected.js';
 import path from 'node:path';
 import { composeFileNameSchema, type RpcParams } from '@hz/shared';
@@ -80,7 +87,6 @@ const OVERRIDE_NAMES: Record<string, string> = {
   'docker-compose.yaml': 'docker-compose.override.yaml',
 };
 const PROJECT_NAME = /^[a-z0-9][a-z0-9_-]{0,62}$/;
-const LABEL_DIR = 'com.docker.compose.project.working_dir';
 const LABEL_PROJECT = 'com.docker.compose.project';
 const LABEL_FILES = 'com.docker.compose.project.config_files';
 
@@ -108,6 +114,11 @@ interface ListDocker {
  * The compose files and project name to use for `dir`. If containers of the project
  * exist, their labels win (project name from `-p`, every `-f` file incl. overrides);
  * otherwise the default file plus its override file. Every file is checked again.
+ *
+ * With docker (always in production) the project name is guarded (compose-guard.ts):
+ * a project with an hz.role container is refused, and a new stack (no container with
+ * this working_dir yet) gets its derived name passed as `-p` only if no other
+ * container already carries that project name (otherwise not_allowed).
  */
 export async function composeTarget(
   dir: string,
@@ -115,13 +126,14 @@ export async function composeTarget(
   docker: ListDocker | null,
 ): Promise<ComposeTarget> {
   const main = await findComposeFile(dir, root);
+  let isNew = false;
   if (docker) {
-    const list = (await docker
-      .listContainers({ all: true, filters: JSON.stringify({ label: [`${LABEL_DIR}=${dir}`] }) })
-      .catch(() => [])) as { Labels?: Record<string, string> | null }[];
+    const list = await containersOfDir(docker, dir);
+    isNew = list.length === 0;
     const labels = list.find((c) => c.Labels?.[LABEL_PROJECT])?.Labels;
     const project = labels?.[LABEL_PROJECT];
     if (labels && project && PROJECT_NAME.test(project)) {
+      await assertProjectNameFree(docker, project, dir, false);
       const raw = (labels[LABEL_FILES] ?? '').split(',').filter((f) => f.length > 0);
       if (raw.length > 8) throw new ActionError('bad_path', 'too many compose files');
       const files =
@@ -135,6 +147,12 @@ export async function composeTarget(
     const candidate = path.join(dir, override);
     if (await lstat(candidate).catch(() => null))
       files.push(await checkComposeFile(candidate, root));
+  }
+  if (docker) {
+    const project = await derivedProjectName(dir, main);
+    await assertProjectNameFree(docker, project, dir, isNew);
+    // Only for a new stack: compose must use exactly the name that was checked.
+    if (isNew) return { files, project };
   }
   return { files };
 }
@@ -185,8 +203,11 @@ async function composeOp(
 ): Promise<{ output: string }> {
   return withDirLock(params.dir, async () => {
     const docker = ctx.host.docker as unknown as (ProtectDocker & ListDocker) | null;
-    const target = await composeTarget(params.dir, ctx.homelabRoot, docker);
     if (docker) await assertProjectNotProtected(docker, params.dir);
+    const target = await composeTarget(params.dir, ctx.homelabRoot, docker);
+    if (op === 'up' && (await isStackFolder(params.dir, ctx.homelabRoot))) {
+      await assertNoPlantedSymlinks(params.dir, target.files);
+    }
     const args = composeArgs(op, params.dir, target.files, target.project);
     const r: RunResult = await ctx.run('docker', args, {
       timeoutMs: COMPOSE_TIMEOUTS[op],
@@ -216,13 +237,16 @@ export function fileMode(name: string): number {
   return name === ENV_FILE_NAME ? 0o600 : 0o640;
 }
 
-/** Same rule as gameNameSchema in packages/shared (game-common.ts GAME_NAME). */
-const GAME_DIR_NAME = /^[a-z0-9](?:[a-z0-9-]{0,30}[a-z0-9])$/;
+/** Same rule as gameNameSchema / appIdSchema in packages/shared (game-common.ts GAME_NAME). */
+const STACK_DIR_NAME = /^[a-z0-9](?:[a-z0-9-]{0,30}[a-z0-9])$/;
+/** Folders below the homelab root whose stacks may get a `.env`. */
+const ENV_PARENTS = ['games', 'apps'] as const;
 
 /**
- * `.env` may only be written into a game folder: exactly <root>/games/<name> after
- * realpath (`resolved` is the already resolved dir). Elsewhere a `.env` would be picked
- * up by Compose for interpolation of a foreign project, so it is refused.
+ * `.env` may only be written into a game or app folder: exactly <root>/games/<name> or
+ * <root>/apps/<appId> after realpath (`resolved` is the already resolved dir). Elsewhere
+ * a `.env` would be picked up by Compose for interpolation of a foreign project, so it
+ * is refused. It is always written with mode 0600.
  */
 export async function assertEnvAllowed(resolved: string, homelabRoot: string): Promise<void> {
   let root: string;
@@ -231,11 +255,12 @@ export async function assertEnvAllowed(resolved: string, homelabRoot: string): P
   } catch {
     throw new ActionError('bad_path', 'homelab root missing');
   }
-  if (
-    path.dirname(resolved) !== path.join(root, 'games') ||
-    !GAME_DIR_NAME.test(path.basename(resolved))
-  ) {
-    throw new ActionError('bad_path', '.env only in /opt/homelab/games/<name>');
+  const parentOk = ENV_PARENTS.some((p) => path.dirname(resolved) === path.join(root, p));
+  if (!parentOk || !STACK_DIR_NAME.test(path.basename(resolved))) {
+    throw new ActionError(
+      'bad_path',
+      '.env only in /opt/homelab/games/<name> or /opt/homelab/apps/<appId>',
+    );
   }
 }
 

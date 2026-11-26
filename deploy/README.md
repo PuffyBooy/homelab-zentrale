@@ -56,6 +56,7 @@ sudo HZ_AGENT_TOKEN=<token> ./deploy/install-agent.sh \
 #           --image ghcr.io/puffybooy/homelab-agent:sha-<kurz>   fester Stand statt :latest
 #           --build-local (oder HZ_BUILD_LOCAL=1)                 Image aus dem Checkout bauen
 #           --smart       SMART-Werte der Platten lesen (NAS, auf UGREEN automatisch)
+#           --tasks       geplante Befehle aus der Zentrale erlauben (HZ_AGENT_ALLOW_TASKS=1)
 ```
 
 Standardmäßig lädt das Skript `ghcr.io/puffybooy/homelab-agent:latest` (passend zur Architektur des Servers) und startet es. `--image` und `--build-local` schließen sich aus. Ein erneuter Aufruf ohne `--image` setzt das Image wieder auf `:latest` und zieht es neu (Update).
@@ -70,6 +71,7 @@ Beim ersten Verbinden tauscht der Agent das Einmal-Token gegen ein dauerhaftes A
 | `HZ_AGENT_TOKEN` | Enrollment-Token (erster Start) oder Agent-Token. |
 | `HZ_AGENT_NAME` | Name des Servers, `a-z0-9-`. Muss bei „Neu starten“ zur Bestätigung eingegeben werden. |
 | `HZ_AGENT_ALLOW_TERMINAL` | `1` erlaubt die Web-Konsole (PTY). Standard `0`: alle `pty.*` werden abgelehnt. |
+| `HZ_AGENT_ALLOW_TASKS` | `1` erlaubt geplante Befehle (M20, „Befehl ausführen“, `task.exec`): `/bin/sh -c` auf dem Host, ohne TTY, mit Zeitlimit und minimaler Umgebung. Standard `0`: jedes `task.exec` wird abgelehnt. Setzen mit `install-agent.sh --tasks` oder in `agent.env`, dann den Agent neu starten. |
 | `HZ_AGENT_SMART` | `1` liest SMART der Platten (M13). Setzt das Override `docker-compose.agent.smart.yml`, nicht von Hand: es bringt auch die nötigen Rechte. |
 | `HZ_AGENT_DATA` | Datenordner (`/data`). |
 | `HZ_AGENT_HOST_EXEC` | `nsenter` (Image-Standard), `direct` (Agent direkt auf dem Host, Entwicklung), `none`. |

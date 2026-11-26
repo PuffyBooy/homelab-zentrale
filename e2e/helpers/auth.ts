@@ -167,10 +167,21 @@ export function enrollServer(
 }
 
 export type ModuleSwitches = Partial<
-  Record<'github' | 'homeassistant' | 'games' | 'storage', boolean>
+  Record<
+    | 'github'
+    | 'homeassistant'
+    | 'games'
+    | 'storage'
+    | 'tasks'
+    | 'selfheal'
+    | 'speedtest'
+    | 'domains'
+    | 'apps',
+    boolean
+  >
 >;
 
-/** PUT /api/settings/modules (step-up when GitHub or Home Assistant is switched on). */
+/** PUT /api/settings/modules (step-up when GitHub, Home Assistant, tasks or domains is switched on). */
 export async function setModules(page: Page, totp: Totp, modules: ModuleSwitches): Promise<void> {
   const res = await stepUpCall(page, totp, 'PUT', '/api/settings/modules', modules);
   expect(res.status).toBe(200);

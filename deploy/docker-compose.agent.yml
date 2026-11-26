@@ -2,7 +2,7 @@
 #   docker compose -f deploy/docker-compose.agent.yml up -d
 # Local build instead of the GHCR image:
 #   docker compose -f deploy/docker-compose.agent.yml -f deploy/docker-compose.agent.build.yml up -d --build
-# Config (HZ_CORE_URL, HZ_AGENT_TOKEN, HZ_AGENT_NAME, HZ_AGENT_ALLOW_TERMINAL) comes from
+# Config (HZ_CORE_URL, HZ_AGENT_TOKEN, HZ_AGENT_NAME, HZ_AGENT_ALLOW_TERMINAL, HZ_AGENT_ALLOW_TASKS) comes from
 # /etc/homelab-agent/agent.env (mode 0600, outside /opt/homelab so no action can rewrite it).
 #
 # The agent opens no port. It dials out to wss://<core>.ts.net/agent (docs/NETWORK.md).
@@ -40,6 +40,13 @@
 # ones above. The shell runs as root but inherits this container's capability bounding set and
 # no-new-privileges (no CAP_KILL, NET_ADMIN, SYS_MODULE, SYS_BOOT ...; setuid binaries do not
 # gain rights). For full root work use SSH; the agent's rights are not widened for the console.
+#
+# Scheduled commands (HZ_AGENT_ALLOW_TASKS, default 0 = every task.exec is refused, M20): set
+# HZ_AGENT_ALLOW_TASKS=1 in agent.env (install-agent.sh --tasks), not here, for the same
+# reason. A task runs `/bin/sh -c <command>` on the host with the same nsenter as the console,
+# without a TTY, with a time limit and a minimal environment (PATH, HOME, LANG); it needs no
+# extra right either. Leave it at 0 unless you use "Befehl ausführen" in the core.
+#   HZ_AGENT_ALLOW_TASKS=0
 name: homelab-agent
 
 services:

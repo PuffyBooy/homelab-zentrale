@@ -10,6 +10,10 @@ export const navItems: NavItem[] = [
   { id: 'websites', label: 'Websites', icon: 'globe', href: '/websites' },
   { id: 'home', label: 'Wohnung', icon: 'home', href: '/home' },
   { id: 'alerts', label: 'Meldungen', icon: 'bell', href: '/alerts' },
+  // Optional modules of M20/M21 (off by default). After Meldungen, so 1–8 keep their pages.
+  { id: 'apps', label: 'Apps', icon: 'cloud', href: '/apps' },
+  { id: 'internet', label: 'Internet', icon: 'wifi', href: '/internet' },
+  { id: 'automation', label: 'Automatik', icon: 'refresh', href: '/automation' },
   { id: 'console', label: 'Konsole', icon: 'terminal', href: '/console', key: '`' },
 ];
 
@@ -39,13 +43,22 @@ export function activeNavId(pathname: string): string {
   return match?.id ?? 'overview';
 }
 
-/** Label shown on the key cap, as NavRail renders it. */
+/** Digits 1–9 address the first nine visible items. */
+const MAX_DIGIT_SHORTCUTS = 9;
+
+/** Label shown on the key cap, as NavRail renders it. Empty past the ninth item. */
 export function shortcutLabel(item: NavItem, index: number): string {
-  return item.key || String(index + 1);
+  if (item.key) return item.key;
+  return index < MAX_DIGIT_SHORTCUTS ? String(index + 1) : '';
+}
+
+/** Items with their key cap set, so NavRail shows no "10" that no key reaches. */
+export function withShortcutKeys<T extends NavItem>(items: readonly T[]): T[] {
+  return items.map((it, i) => ({ ...it, key: shortcutLabel(it, i) }));
 }
 
 /**
- * Target path for a global shortcut key: 1–8 by position, 9 and ` for the console.
+ * Target path for a global shortcut key: 1–9 by position, ` for the console.
  * `items` are the visible nav items (switched-off modules left out), so the digits
  * match the key caps in the NavRail. Returns undefined for any other key.
  */
@@ -53,7 +66,7 @@ export function shortcutTarget(
   key: string,
   items: readonly NavItem[] = navItems,
 ): string | undefined {
-  const byLabel = items.find((it, i) => shortcutLabel(it, i) === key);
+  const byLabel = key ? items.find((it, i) => shortcutLabel(it, i) === key) : undefined;
   if (byLabel) return hrefOf(byLabel);
   if (/^[1-9]$/.test(key)) {
     const item = items[Number(key) - 1];

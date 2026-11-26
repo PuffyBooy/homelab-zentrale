@@ -5,6 +5,7 @@ import type { Logger } from '../log.js';
 import type { StreamManager } from '../streams.js';
 import type { WakeManager } from './game-wake.js';
 import type { PtyManager } from './pty.js';
+import type { TaskManager } from './task-exec.js';
 
 /** Thrown by actions; becomes rpc.result {ok:false, error:{code, message}}. */
 export class ActionError extends Error {
@@ -40,6 +41,10 @@ export interface ActionContext {
   dataDir: string;
   /** Web console sessions (actions/pty.ts); only set when HZ_AGENT_ALLOW_TERMINAL=1. */
   pty?: PtyManager;
+  /** HZ_AGENT_ALLOW_TASKS=1: task.exec may run host commands. Missing = off. */
+  allowTasks?: boolean;
+  /** Scheduled commands (actions/task-exec.ts); only set when HZ_AGENT_ALLOW_TASKS=1. */
+  tasks?: TaskManager;
   /** Wake listeners of sleeping games (game.wake.*); set by index.ts. */
   wake?: WakeManager;
 }

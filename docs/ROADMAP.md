@@ -141,6 +141,34 @@ Arbeite die Meilensteine **in dieser Reihenfolge** ab. Jeder Meilenstein bekommt
 
 ---
 
+## M20: Automatik und Netzwerk (Aufgaben, Selbstheilung, Speedtest, Domains)
+**Ziel:** Wiederkehrende Arbeit und kleine Ausfälle erledigt die Zentrale selbst; Internet-Geschwindigkeit, eigene Domains und Zertifikate sind an einem Ort. Vier optionale Module, alle Standard aus (`tasks` und `domains` mit Step-up beim Einschalten). M14 bis M19 gehören parallelen Threads (Anbindungen, Game-Relay, Server-Detail, Auto-Update, Ops-Zusatzmodule).
+
+- **WP Schema** (`packages/shared`): `agent-automation.ts` (Agent-Aktionen `task.exec`, `speedtest.run`, `cert.write`, `cert.remove`, `app.remove`, per `...automationRpcParams` in der Allowlist, Fähigkeit `capabilities.tasks`), `api/tasks.ts`, `api/selfheal.ts`, `api/speedtest.ts`, `api/domains.ts`, Module in `api/modules.ts`, Migration 17.
+- **WP Core ∥** (`apps/core/src/tasks|selfheal|speedtest|domains`, verdrahtet über `features.ts`):
+  - **Geplante Aufgaben pro Server:** Container neu starten/starten/stoppen, Stack aktualisieren (pull + up), Docker aufräumen, wöchentlich zu Uhrzeiten oder alle N Minuten (ab 5). `Befehl ausführen` nur, wenn der Agent mit `HZ_AGENT_ALLOW_TASKS=1` läuft, Anlegen/Ändern/Starten mit Step-up, Befehl verschlüsselt gespeichert, nie im Log. Letzte 50 Läufe mit Ausgabe, Meldung bei Fehler.
+  - **Selbstheilung:** `unhealthy` länger als die Schonfrist, Absturz (wenn gewählt) oder verknüpfter Website-Check DOWN → Neustart. Höchstens 3 Neustarts in 30 Min (einstellbar), dann „aufgegeben“ mit CRIT-Meldung, bis der Container 10 Min gesund ist oder der Admin zurücksetzt. Nie `hz.role`, nie vom Admin oder von M10 gestoppte Container, abgestürzte `wichtig`-Container bleiben bei M10.
+  - **Speedtest-Verlauf:** ein gewählter Server misst alle N Stunden gegen `speed.cloudflare.com` (Download, Upload, Ping, Jitter), 90 Tage Verlauf, Schwellen mit Meldung nach 3 langsamen Messungen in Folge.
+  - **Domains und Zertifikate:** DNS-Anbieter Cloudflare und DuckDNS (Token verschlüsselt), Einträge A/AAAA/CNAME mit Ziel „öffentliche IP von Server X“ (DynDNS) oder fest, ACME-Zertifikate (Let's Encrypt, DNS-01, auch Wildcards), Verlängerung 30 Tage vorher, Verteilung auf gewählte Server nach `/opt/homelab/certs/<name>/`. Schnittstelle `DomainService.ensureRecord/removeRecord` für das Game-Relay (M15).
+- **WP Agent ∥** (`apps/agent`, `deploy/`): `task.exec` (Host-Shell wie die Konsole, ohne TTY, Zeitlimit, Prozessgruppe beenden, Ausgabe gekürzt), `speedtest.run` (nur Cloudflare, Byte- und Zeitgrenzen), `cert.write`/`cert.remove`, `HZ_AGENT_ALLOW_TASKS` im Compose und im Installer (`--tasks`).
+- **WP Web ∥** (`apps/web`): Seite „Automatik“ (Aufgaben, Selbstheilung), Seite „Internet“ (Speedtest-Verlauf, Domains, Zertifikate), Schalter unter Einstellungen → Module.
+
+**Abnahme:** Eine Aufgabe startet einen Sim-Container zur eingestellten Minute neu; ein `unhealthy`-Container wird neu gestartet und nach 3 Versuchen aufgegeben (CRIT-Meldung); ein Speedtest landet im Verlauf; ein DuckDNS-Eintrag folgt der öffentlichen IP eines Sim-Servers; ein Zertifikat wird gegen einen ACME-Testserver ausgestellt und auf einen Server verteilt. Sicherheitstests: `task.exec` ohne `HZ_AGENT_ALLOW_TASKS` abgelehnt, Befehl-Aufgaben nur mit Step-up, Befehl in keiner Antwort/Log; keine Selbstheilung an `hz.role`; Speedtest nur gegen Cloudflare; DNS/ACME nur zu erlaubten Hosts ohne Weiterleitungen; Tokens und private Schlüssel in keiner Antwort, keinem Log; fremde DNS-Einträge werden nicht überschrieben.
+
+---
+
+## M21: App-Store und Stack-Vorlagen
+**Ziel:** Jellyfin, Nextcloud, Vaultwarden und Co. mit einem Klick auf einem gewählten Server installieren; eigene Docker-Compose-Vorlagen als Basis. Modul `apps`, Standard aus.
+
+- **WP Schema** (`packages/shared/src/api/apps.ts`): Vorlagen-Metadaten (Parameter: Text, Passwort, Port, Zahl, Auswahl, Ja/Nein), Installationen, Vorschau, Regeln `COMPOSE_FORBIDDEN`.
+- **WP Vorlagen ∥** (`templates/apps/<id>/template.json + compose.yml`): mindestens Jellyfin, Nextcloud, Vaultwarden, Forgejo, Paperless-ngx, Syncthing, Audiobookshelf, Navidrome, FreshRSS, Uptime Kuma, Mealie; Images auf Versionen gepinnt, Ports immer `${BIND}:…`, Daten unter `./data/`.
+- **WP Core ∥** (`apps/core/src/appstore`): Vorlagen laden und prüfen (eingebaut und eigene), Sicherheitsprüfung jeder Compose-Datei (kein privileged, kein Docker-Socket, keine Host-Pfade außerhalb des App-Ordners …), Installation über `compose.write` + `compose.up` nach `/opt/homelab/apps/<appId>/`, Passwörter erzeugt und verschlüsselt, Prüfung Architektur, RAM (M10-Reserve) und freie Ports, Start/Stopp/Neustart/Aktualisieren, Entfernen mit Step-up und Namensbestätigung (`app.remove`).
+- **WP Web ∥** (`apps/web`): Seite „Apps“ (Katalog nach Kategorien, Installieren-Dialog mit Server, Bind-Adresse, Parametern und Vorschau, installierte Apps mit Status und „Öffnen“), Editor für eigene Vorlagen.
+
+**Abnahme:** Vaultwarden wird auf einem Sim-Server installiert, läuft, wird aktualisiert und entfernt; eine eigene Vorlage mit `privileged: true` wird abgelehnt; ein belegter Port verhindert die Installation. Sicherheitstests: jede verbotene Compose-Option, Pfad-Ausbruch (`../`, absolute Pfade, Symlinks), Parameterwerte mit `$`/Zeilenumbruch, Passwörter nur mit Step-up lesbar, Entfernen nur mit Step-up, nie Container mit `hz.role`.
+
+---
+
 ## Definition of Done (für jeden PR)
 - Code, Tests und Doku sind aktuell (`docs/` mitpflegen, wenn sich etwas ändert)
 - Keine `any`, keine auskommentierten Blöcke, keine TODOs ohne Issue

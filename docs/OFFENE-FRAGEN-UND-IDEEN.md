@@ -23,6 +23,16 @@ Alles hier braucht deine Zugänge oder ist nicht rückgängig zu machen. Bis dah
 15. **Neue Server anbinden (ab M11):** Unter Server → „Server hinzufügen“ Name eingeben, TOTP bestätigen, den angezeigten Einzeiler am neuen Server als root ausführen (braucht Docker und Tailscale). Dafür muss `HZ_BASE_URL` auf deine `https://…ts.net`-Adresse gesetzt sein, sonst gibt es keinen Einzeiler.
 16. **UGREEN-NAS anbinden (ab M13):** In UGOS Pro unter Systemsteuerung → Terminal SSH einschalten, Docker aus dem App Center installieren und Tailscale aufs NAS bringen (Tailscale-App aus dem App Center bzw. als Docker-Container mit `network_mode: host`; der Einzeiler prüft `tailscale status`). Dann in der Zentrale „Server hinzufügen“ und den Einzeiler per SSH als root (`sudo -i`) am NAS ausführen. SMART schaltet sich auf UGREEN-Hardware selbst ein. Danach SSH in UGOS wieder ausschalten, wenn du es nicht brauchst.
 
+### Automatik, Domains und Apps (ab M20/M21)
+
+- **Module einschalten:** Einstellungen → Module: „Geplante Aufgaben“ und „Domains“ fragen nach dem TOTP-Code, „Selbstheilung“, „Speedtest“ und „Apps“ nicht. Alle sind anfangs aus.
+- **Befehl-Aufgaben (nur wo gewünscht):** Freie Shell-Befehle als geplante Aufgabe laufen nur auf Servern, deren Agent mit `--tasks` installiert ist (Einzeiler `… -- <code> --tasks` oder `deploy/install-agent.sh --tasks`, setzt `HZ_AGENT_ALLOW_TASKS=1`). Empfehlung wie bei der Konsole: nicht auf öffentlichen VPS.
+- **Speedtest:** Unter Internet → Speedtest den Server wählen, der misst (am besten der Heimserver). Eine Messung braucht bis zu 2 × die eingestellte Datenmenge (Standard 2 × 100 MB, alle 6 Stunden ≈ 24 GB im Monat); bei Volumentarif Datenmenge oder Intervall senken.
+- **Cloudflare:** Unter dash.cloudflare.com → Profil → API-Tokens einen Token mit *Zone → DNS → Bearbeiten* nur für deine Zone anlegen und unter Internet → Domains eintragen.
+- **DuckDNS:** Auf duckdns.org anmelden, Subdomain anlegen, Token kopieren und unter Internet → Domains eintragen.
+- **Zertifikate:** Zuerst mit „Let's Encrypt Staging“ testen, dann auf Produktion umstellen (Let's Encrypt begrenzt fehlgeschlagene Versuche pro Stunde). Die Dateien landen auf den gewählten Servern unter `/opt/homelab/certs/<name>/fullchain.pem` und `privkey.pem`; Dienste müssen sie selbst einbinden und nach einer Verlängerung neu laden.
+- **Apps:** Apps lauschen standardmäßig nur auf der Tailscale-IP des Servers. Vaultwarden braucht HTTPS (z. B. `tailscale serve` auf dem Server). Mealie-Standardlogin sofort ändern. Paperless-ngx, Forgejo und Mealie bitte einmal echt testen (Versionen konnte ich nicht in allen Quellen prüfen).
+
 **Noch von Hand abzunehmen** (braucht echte Zugänge): Push am Handy (M4); ein echter Deploy eines Test-Repos mit `compose.yml` auf den Heimserver-Agent (M5, automatisiert nur mit Fake-GitHub, Fake-Agent und echtem git gegen ein lokales Repo getestet). Der echte Türöffner (BTicino/Shelly) mit deiner HA (M8, im CI nur mit der HA-Demo getestet). Benutzerlink von außen über das Gateway auf oracle-a1 (M7, im CI nur lokal getestet). SMART auf dem echten UGREEN-NAS (M13, im CI nur mit simuliertem `smartctl` und einem nachgebauten `/sys` getestet).
 
 ## Entschieden (26.11.2026)
@@ -50,12 +60,21 @@ Alles hier braucht deine Zugänge oder ist nicht rückgängig zu machen. Bis dah
 
 - **NAS (M13):** Hast du ein UGREEN NASync (welches Modell, wie viele Platten, welches RAID)? Davon hängt ab, ob die Erkennung „UGREEN-NAS“ greift (DMI-Hersteller `UGREEN`). Soll das NAS auch Gameserver-Backups bekommen (M13b, nach dem Gameserver-Meilenstein)? Und sollen Gameserver selbst auf dem NAS laufen dürfen? Dann sollte `/opt/homelab` auf dem Datenvolume liegen (das Systemvolume von UGOS ist klein), z. B. per Bind-Mount von `/volume1/homelab`.
 
+- **Medienordner für Apps (M21):** Jellyfin, Navidrome und Audiobookshelf sehen aus Sicherheitsgründen nur ihren eigenen Ordner `/opt/homelab/apps/<name>/data/`. Sollen sie zusätzlich einen Medienordner (z. B. vom NAS) nur lesend einbinden dürfen? Vorschlag: pro App freigegebene Ordner mit Step-up, nur lesend.
+- **IPv6 für DynDNS (M20):** Der Agent meldet nur eine öffentliche IP. AAAA-Einträge funktionieren erst, wenn er auch die IPv6 meldet. Brauchst du IPv6-Einträge?
+
 ## Annahmen
 
 - **NAS ohne UGOS-Schnittstelle (M13):** UGOS Pro hat keine dokumentierte API. Der Agent liest deshalb den Linux-Unterbau selbst (`/proc/mdstat`, `/sys`, `smartctl`). Speicherpools mit SHR-ähnlichen Mischformen erscheinen als mehrere md-Arrays. Ein UGOS-Update kann Pfade ändern; dann fehlen Teile der Anzeige, nichts geht kaputt.
 - **SMART-Rechte:** SMART braucht `CAP_SYS_RAWIO` und Lesezugriff auf die Platten. Der Agent hat ohnehin Docker-Socket und `SYS_ADMIN` (gleichwertig zu root), das Override verschiebt die Grenze also kaum; es gibt bewusst kein Schreibrecht (`w`) auf Blockgeräte. Ohne Override zeigt die Zentrale Platten, RAID und Volumes, aber keine SMART-Werte, und sagt das.
 
 - **Trivy-Ausnahme (bis 15.01.2027):** Im Agent-Image steckt das offizielle `docker compose`-Binary mit einer HIGH-Lücke in `golang.org/x/net` (HTML-Parser, CVE-2026-78661). Compose parst kein fremdes HTML, und es gibt noch keine Version mit Fix. Die Ausnahme steht in `apps/agent/.trivyignore` und läuft am 15.01.2027 ab; dann schlägt CI wieder an.
+
+- **Geplante Aufgaben (M20):** Verpasste Läufe (Zentrale war aus) werden nicht nachgeholt. Gameserver-Container sind für Aufgaben gesperrt (dafür gibt es die Zeitpläne im Gameserver). Container müssen beim Anlegen im Inventar bekannt sein.
+- **Selbstheilung (M20):** „Absturz“ heißt Exit-Code ungleich 0 bei einem Container, den die Zentrale laufen gesehen hat. Ein einzelner Neustart erscheint im Verlauf und im Protokoll, aber nicht als Push; erst „aufgegeben“ meldet sich (CRIT).
+- **Zertifikate (M20):** Schlägt eine Verlängerung fehl, bleibt das alte Zertifikat gültig, die Zentrale versucht es nach 1 h, 6 h und 24 h erneut und meldet sich spätestens 14 Tage vor Ablauf. Für die DNS-Prüfung fragt die Zentrale 1.1.1.1 und 8.8.8.8, nicht den Heim-DNS (Split-DNS würde sonst täuschen). DuckDNS kennt nur einen TXT-Eintrag pro Subdomain, deshalb laufen die Bestätigungen nacheinander.
+- **Compose-Projektnamen (M21):** Ein neuer Stack bekommt seinen Projektnamen fest per `-p`; ist der Name schon von einem anderen Stack belegt (oder gehört dazu die Zentrale/der Agent), lehnt der Agent ab. Ein Repo, dessen `compose.yml` den Projektnamen aus einer Variable baut (`name: ${…}`), wird beim ersten Deploy abgelehnt; dann `name:` fest eintragen.
+- **App-Store (M21):** Compose-Dateien werden streng geprüft (nur bekannte Optionen; kein privileged, kein Docker-Socket, keine Host-Pfade, kein Host-Netz). Parameterwerte stehen in `.env` in einfachen Anführungszeichen, `'` und `\` sind darin nicht erlaubt. Eigene Vorlagen dürfen Muster (Regex) für Textfelder angeben; da nur der Admin Vorlagen anlegt, ist das kein Angriffsweg von außen.
 
 - Sicherheitstests liegen in Dateien mit `security` im Namen und laufen zusätzlich als eigener Job `security tests` in GitHub Actions.
 
@@ -125,4 +144,3 @@ Sortiert nach Bereich. Nichts davon ist in den Meilensteinen, alles wäre ein ei
 - Paket-Tracking (Post, DHL) als Kachel.
 - Pi-hole/AdGuard-Statistiken.
 - Tailscale-Geräteliste mit „zuletzt online“ und Ablauf der Schlüssel.
-- Zertifikats- und Domain-Übersicht für alle Domains an einem Ort.

@@ -75,6 +75,11 @@ const MODULE_PREFIXES: Record<ModuleId, readonly string[]> = {
     '/s',
   ],
   storage: ['/api/storage'],
+  tasks: ['/api/tasks'],
+  selfheal: ['/api/selfheal'],
+  speedtest: ['/api/speedtest'],
+  domains: ['/api/domains'],
+  apps: ['/api/apps'],
 };
 
 function under(path: string, prefix: string): boolean {

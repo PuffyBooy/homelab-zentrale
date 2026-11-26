@@ -1,0 +1,35 @@
+{
+  "id": "forgejo",
+  "name": "Forgejo",
+  "description": "Git-Server mit Weboberfläche, Issues, Pull-Requests und Paketregistry. Datenbank SQLite, kein Zusatzdienst nötig.",
+  "category": "entwicklung",
+  "version": "15.0.7",
+  "website": "https://forgejo.org",
+  "arch": [
+    "amd64",
+    "arm64"
+  ],
+  "minRamMb": 256,
+  "params": [
+    {
+      "type": "port",
+      "key": "WEB_PORT",
+      "label": "Web-Oberfläche (Port)",
+      "default": 3000,
+      "protocol": "tcp",
+      "web": true
+    },
+    {
+      "type": "port",
+      "key": "SSH_PORT",
+      "label": "SSH-Port für git",
+      "default": 2222,
+      "protocol": "tcp",
+      "web": false
+    }
+  ],
+  "hints": [
+    "Beim ersten Aufruf führt ein Assistent durch die Einrichtung. Die Basis-URL dort auf die Adresse setzen, unter der Forgejo erreichbar ist.",
+    "Klonen per SSH über den gewählten SSH-Port, z. B. ssh://git@<server>:2222/<benutzer>/<repo>.git."
+  ]
+}

@@ -1,6 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import { visibleNavItems } from './lib/modules.js';
-import { activeNavId, isTypingTarget, navItems, shortcutAction, shortcutTarget } from './nav.js';
+import {
+  activeNavId,
+  isTypingTarget,
+  navItems,
+  shortcutAction,
+  shortcutLabel,
+  shortcutTarget,
+  withShortcutKeys,
+} from './nav.js';
 
 const key = (k: string, extra: Partial<Parameters<typeof shortcutAction>[0]> = {}) => ({
   key: k,
@@ -22,6 +30,9 @@ describe('navigation', () => {
       'Websites',
       'Wohnung',
       'Meldungen',
+      'Apps',
+      'Internet',
+      'Automatik',
       'Konsole',
     ]);
   });
@@ -33,15 +44,18 @@ describe('navigation', () => {
     expect(activeNavId('/settings')).toBe('settings');
     expect(activeNavId('/homeassistant')).toBe('overview');
     expect(activeNavId('/unknown')).toBe('overview');
+    expect(activeNavId('/automation')).toBe('automation');
+    expect(activeNavId('/internet')).toBe('internet');
+    expect(activeNavId('/apps')).toBe('apps');
   });
 });
 
 describe('shortcuts', () => {
-  it('maps 1–8 by position and 9 / ` to the console', () => {
+  it('maps 1–9 by position and ` to the console', () => {
     expect(shortcutTarget('1')).toBe('/');
     expect(shortcutTarget('2')).toBe('/servers');
     expect(shortcutTarget('8')).toBe('/alerts');
-    expect(shortcutTarget('9')).toBe('/console');
+    expect(shortcutTarget('9')).toBe('/apps');
     expect(shortcutTarget('`')).toBe('/console');
     expect(shortcutTarget('0')).toBeUndefined();
     expect(shortcutTarget('a')).toBeUndefined();
@@ -73,6 +87,11 @@ describe('shortcuts', () => {
       homeassistant: false,
       games: true,
       storage: true,
+      tasks: false,
+      selfheal: false,
+      speedtest: false,
+      domains: false,
+      apps: false,
     });
     expect(items.map((i) => i.id)).toEqual([
       'overview',
@@ -86,5 +105,40 @@ describe('shortcuts', () => {
     expect(shortcutTarget('5', items)).toBe('/websites');
     expect(shortcutTarget('`', items)).toBe('/console');
     expect(shortcutAction(key('6'), items)).toEqual({ kind: 'navigate', to: '/alerts' });
+  });
+
+  it('fresh install: 9 still opens the console (new modules are off)', () => {
+    const items = visibleNavItems(navItems, {
+      github: true,
+      homeassistant: true,
+      games: true,
+      storage: true,
+      tasks: false,
+      selfheal: false,
+      speedtest: false,
+      domains: false,
+      apps: false,
+    });
+    expect(shortcutTarget('9', items)).toBe('/console');
+  });
+
+  it('gives items past the ninth an empty key cap and no digit', () => {
+    const keyed = withShortcutKeys(navItems);
+    expect(keyed.map((i) => i.key)).toEqual([
+      '1',
+      '2',
+      '3',
+      '4',
+      '5',
+      '6',
+      '7',
+      '8',
+      '9',
+      '',
+      '',
+      '`',
+    ]);
+    expect(shortcutLabel({ id: 'x', label: 'x', icon: 'cpu' }, 10)).toBe('');
+    expect(shortcutTarget('')).toBeUndefined();
   });
 });

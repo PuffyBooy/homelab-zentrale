@@ -1,0 +1,64 @@
+{
+  "id": "paperless-ngx",
+  "name": "Paperless-ngx",
+  "description": "Dokumentenarchiv mit Texterkennung: Scans und PDFs werden durchsuchbar, verschlagwortet und abgelegt. Mit PostgreSQL und Redis.",
+  "category": "dateien",
+  "version": "3.5.1",
+  "website": "https://docs.paperless-ngx.com",
+  "arch": [
+    "amd64",
+    "arm64"
+  ],
+  "minRamMb": 2048,
+  "params": [
+    {
+      "type": "port",
+      "key": "WEB_PORT",
+      "label": "Web-Oberfläche (Port)",
+      "default": 8010,
+      "protocol": "tcp",
+      "web": true
+    },
+    {
+      "type": "string",
+      "key": "ADMIN_USER",
+      "label": "Admin-Benutzername",
+      "default": "admin",
+      "required": true,
+      "pattern": "^[A-Za-z0-9._-]{1,64}$"
+    },
+    {
+      "type": "password",
+      "key": "ADMIN_PASSWORD",
+      "label": "Admin-Passwort",
+      "generate": true,
+      "minLength": 12
+    },
+    {
+      "type": "string",
+      "key": "OCR_LANGUAGE",
+      "label": "Sprachen der Texterkennung (z. B. deu+eng)",
+      "default": "deu+eng",
+      "required": true,
+      "pattern": "^(deu|eng|fra|ita|spa)(\\+(deu|eng|fra|ita|spa)){0,4}$"
+    },
+    {
+      "type": "password",
+      "key": "SECRET_KEY",
+      "label": "Geheimer Schlüssel (Sitzungen)",
+      "generate": true,
+      "minLength": 24
+    },
+    {
+      "type": "password",
+      "key": "DB_PASSWORD",
+      "label": "Datenbank-Passwort",
+      "generate": true,
+      "minLength": 16
+    }
+  ],
+  "hints": [
+    "Neue Dokumente in /opt/homelab/apps/<App>/data/consume legen, Paperless holt sie dort ab.",
+    "Die Texterkennung braucht viel CPU; auf einem Raspberry Pi dauert ein Dokument entsprechend länger."
+  ]
+}

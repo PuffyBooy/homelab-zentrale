@@ -28,4 +28,11 @@ describe('NavRail', () => {
     expect(out).toContain('<span class="hz-nav-key">`</span>');
     expect(out.match(/aria-current/g)).toHaveLength(1);
   });
+
+  it('leaves the key cap empty for an empty key', () => {
+    const empty = html(
+      <NavRail items={[{ id: 'apps', label: 'Apps', icon: 'cloud', href: '/apps', key: '' }]} />,
+    );
+    expect(empty).toContain('<span class="hz-nav-key" aria-hidden="true"></span><span>Apps</span>');
+  });
 });

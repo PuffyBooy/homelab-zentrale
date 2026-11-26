@@ -801,4 +801,157 @@ CREATE INDEX whitelist_requests_game ON whitelist_requests(game_id, created_at);
 CREATE INDEX whitelist_requests_share ON whitelist_requests(share_id, created_at);
 `,
   },
+  {
+    version: 16,
+    name: 'automation_domains_apps',
+    sql: `
+CREATE TABLE scheduled_tasks (
+  id TEXT PRIMARY KEY,
+  server_id TEXT NOT NULL REFERENCES servers(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  action_json TEXT NOT NULL,
+  command_enc TEXT,
+  schedule_json TEXT NOT NULL,
+  enabled INTEGER NOT NULL DEFAULT 1,
+  notify_on_failure INTEGER NOT NULL DEFAULT 1,
+  next_run_at INTEGER,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+CREATE INDEX scheduled_tasks_server ON scheduled_tasks(server_id);
+CREATE INDEX scheduled_tasks_next ON scheduled_tasks(next_run_at);
+
+CREATE TABLE task_runs (
+  id TEXT PRIMARY KEY,
+  task_id TEXT NOT NULL REFERENCES scheduled_tasks(id) ON DELETE CASCADE,
+  trigger TEXT NOT NULL,
+  state TEXT NOT NULL,
+  started_at INTEGER NOT NULL,
+  finished_at INTEGER,
+  exit_code INTEGER,
+  summary TEXT NOT NULL DEFAULT '',
+  output TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX task_runs_task ON task_runs(task_id, started_at);
+
+CREATE TABLE selfheal_rules (
+  server_id TEXT NOT NULL REFERENCES servers(id) ON DELETE CASCADE,
+  container TEXT NOT NULL,
+  mode TEXT NOT NULL,
+  check_id TEXT,
+  updated_at INTEGER NOT NULL,
+  PRIMARY KEY (server_id, container)
+);
+
+CREATE TABLE selfheal_events (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  at INTEGER NOT NULL,
+  server_id TEXT NOT NULL REFERENCES servers(id) ON DELETE CASCADE,
+  container TEXT NOT NULL,
+  reason TEXT NOT NULL,
+  action TEXT NOT NULL,
+  attempt INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX selfheal_events_at ON selfheal_events(at);
+CREATE INDEX selfheal_events_container ON selfheal_events(server_id, container, at);
+
+CREATE TABLE speedtest_results (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  at INTEGER NOT NULL,
+  server_id TEXT NOT NULL,
+  trigger TEXT NOT NULL,
+  ok INTEGER NOT NULL,
+  download_mbps REAL,
+  upload_mbps REAL,
+  latency_ms REAL,
+  jitter_ms REAL,
+  bytes INTEGER NOT NULL DEFAULT 0,
+  colo TEXT,
+  error TEXT
+);
+CREATE INDEX speedtest_results_at ON speedtest_results(at);
+
+CREATE TABLE dns_providers (
+  id TEXT PRIMARY KEY,
+  kind TEXT NOT NULL,
+  label TEXT NOT NULL,
+  token_enc TEXT NOT NULL,
+  config_json TEXT NOT NULL DEFAULT '{}',
+  zones_json TEXT NOT NULL DEFAULT '[]',
+  last_ok_at INTEGER,
+  last_error TEXT,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+
+CREATE TABLE dns_records (
+  id TEXT PRIMARY KEY,
+  provider_id TEXT NOT NULL REFERENCES dns_providers(id) ON DELETE RESTRICT,
+  name TEXT NOT NULL,
+  type TEXT NOT NULL,
+  target_json TEXT NOT NULL,
+  ttl INTEGER NOT NULL,
+  proxied INTEGER NOT NULL DEFAULT 0,
+  owner TEXT NOT NULL DEFAULT 'admin',
+  owner_ref TEXT,
+  provider_record_id TEXT,
+  value TEXT,
+  status TEXT NOT NULL DEFAULT 'pending',
+  last_sync_at INTEGER,
+  last_error TEXT,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  UNIQUE (provider_id, name, type)
+);
+CREATE INDEX dns_records_owner ON dns_records(owner, owner_ref);
+
+CREATE TABLE certificates (
+  id TEXT PRIMARY KEY,
+  provider_id TEXT NOT NULL REFERENCES dns_providers(id) ON DELETE RESTRICT,
+  names_json TEXT NOT NULL,
+  ca TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'pending',
+  key_enc TEXT,
+  cert_pem TEXT,
+  issued_at INTEGER,
+  not_after INTEGER,
+  auto_renew INTEGER NOT NULL DEFAULT 1,
+  deploy_json TEXT NOT NULL DEFAULT '[]',
+  failures INTEGER NOT NULL DEFAULT 0,
+  last_error TEXT,
+  next_attempt_at INTEGER,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+
+CREATE TABLE app_templates (
+  id TEXT PRIMARY KEY,
+  meta_json TEXT NOT NULL,
+  compose TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+
+CREATE TABLE apps (
+  id TEXT PRIMARY KEY,
+  server_id TEXT NOT NULL REFERENCES servers(id) ON DELETE CASCADE,
+  app_id TEXT NOT NULL,
+  name TEXT NOT NULL,
+  template_id TEXT NOT NULL,
+  source TEXT NOT NULL,
+  version TEXT NOT NULL,
+  bind TEXT NOT NULL,
+  params_json TEXT NOT NULL DEFAULT '{}',
+  secrets_enc TEXT,
+  ports_json TEXT NOT NULL DEFAULT '[]',
+  status TEXT NOT NULL,
+  last_error TEXT,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  UNIQUE (server_id, app_id)
+);
+CREATE INDEX apps_template ON apps(template_id);
+`,
+  },
 ];

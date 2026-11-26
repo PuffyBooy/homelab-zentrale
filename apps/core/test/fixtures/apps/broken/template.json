@@ -1,0 +1,10 @@
+{
+  "id": "broken",
+  "name": "Kaputt",
+  "description": "Unsichere Vorlage (Test).",
+  "category": "werkzeuge",
+  "version": "1.0",
+  "arch": ["amd64"],
+  "minRamMb": 64,
+  "params": []
+}

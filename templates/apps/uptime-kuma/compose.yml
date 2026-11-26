@@ -1,0 +1,11 @@
+# Uptime Kuma (templates/apps/README.md). Values come from .env.
+services:
+  uptime-kuma:
+    image: louislam/uptime-kuma:2.5.12
+    restart: unless-stopped
+    environment:
+      TZ: ${TZ}
+    ports:
+      - '${BIND}:${WEB_PORT}:3001'
+    volumes:
+      - ./data/uptime-kuma:/app/data

@@ -61,12 +61,14 @@ beforeAll(async () => {
   games = path.join(root, 'games');
   await mkdir(games, { recursive: true });
   await mkdir(path.join(root, 'apps', 'web'), { recursive: true });
+  await mkdir(path.join(root, 'stacks', 'web'), { recursive: true });
   await mkdir(path.join(games, 'mc', 'nested'), { recursive: true });
   await mkdir(outside, { recursive: true });
   await writeFile(path.join(outside, 'stolen.env'), `RCON_PASSWORD=${PASSWORD}\nPORT_RCON=1\n`);
   // game folder symlinks: to another homelab folder and out of the root
   await symlink(path.join(root, 'apps', 'web'), path.join(games, 'to-apps'));
   await symlink(outside, path.join(games, 'to-outside'));
+  await symlink(path.join(root, 'stacks', 'web'), path.join(games, 'to-stacks'));
 });
 afterAll(async () => {
   await rm(base, { recursive: true, force: true });
@@ -234,8 +236,11 @@ describe('compose.write .env', () => {
   });
 
   it.each([
-    ['a homelab folder outside games/', ['apps', 'web']],
-    ['a new folder outside games/', ['apps', 'new-app']],
+    ['a homelab folder outside games/ and apps/', ['stacks', 'web']],
+    ['a new folder outside games/ and apps/', ['other', 'new-app']],
+    ['apps/ itself', ['apps']],
+    ['a nested folder below an app', ['apps', 'web', 'data']],
+    ['an app folder with an invalid name', ['apps', 'Bad_Name']],
     ['games/ itself', ['games']],
     ['a nested folder below a game', ['games', 'mc', 'nested']],
     ['a game folder with an invalid name', ['games', 'Bad_Name']],
@@ -253,15 +258,28 @@ describe('compose.write .env', () => {
     expect(rec.logs.join('\n')).not.toContain(PASSWORD);
   });
 
-  it('refuses .env through a game folder symlink that points outside games/', async () => {
+  it('refuses .env through a game folder symlink that points outside games/ and apps/', async () => {
     const { ctx } = makeCtx(root);
-    // games/to-apps -> apps/web: the resolved dir is not below games/.
+    // games/to-stacks -> stacks/web: the resolved dir is neither games/<x> nor apps/<x>.
     await expect(
-      composeWrite({ dir: path.join(games, 'to-apps'), files: { '.env': 'X=1\n' } }, ctx),
+      composeWrite({ dir: path.join(games, 'to-stacks'), files: { '.env': 'X=1\n' } }, ctx),
     ).rejects.toMatchObject({ code: 'bad_path' });
-    await expect(stat(path.join(root, 'apps', 'web', '.env'))).rejects.toMatchObject({
+    await expect(stat(path.join(root, 'stacks', 'web', '.env'))).rejects.toMatchObject({
       code: 'ENOENT',
     });
+  });
+
+  it('allows .env directly in /opt/homelab/apps/<appId> with mode 0600 (M21 app store)', async () => {
+    const dir = path.join(root, 'apps', 'vault');
+    const { ctx, rec } = makeCtx(root);
+    await expect(
+      composeWrite(
+        { dir, files: { 'compose.yml': 'services: {}\n', '.env': `ADMIN_TOKEN=${PASSWORD}\n` } },
+        ctx,
+      ),
+    ).resolves.toEqual({ dir, files: ['compose.yml', '.env'] });
+    expect((await stat(path.join(dir, '.env'))).mode & 0o777).toBe(0o600);
+    expect(rec.logs.join('\n')).not.toContain(PASSWORD);
   });
 
   it('the dispatcher runs exactly this composeWrite for compose.write', () => {

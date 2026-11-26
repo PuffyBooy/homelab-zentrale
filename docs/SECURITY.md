@@ -24,6 +24,8 @@ Die Zentrale hat Root-ähnliche Macht über alle Server. Diese Regeln sind **nic
 - Programme werden mit `execFile` und Argument-Arrays aufgerufen, nie mit `shell: true` oder String-Verkettung.
 - Dateipfade werden normalisiert und müssen unter `/opt/homelab/` liegen (Schutz gegen `..` und Symlinks: `realpath` prüfen).
 - PTY nur bei `HZ_AGENT_ALLOW_TERMINAL=1` **und** einer Step-up-Session im Core.
+- Geplante Shell-Befehle (`task.exec`, M20) nur bei `HZ_AGENT_ALLOW_TASKS=1` am Agent; Anlegen, Ändern, manuelles Starten und Anzeigen des Befehls brauchen Step-up. Der Befehl liegt verschlüsselt in der DB und erscheint in keinem Log, keiner Meldung und keiner Antwort ohne Step-up. Das ist Root auf dem Host: wie die Konsole nur dort einschalten, wo es gebraucht wird.
+- App-Store (M21): Compose-Dateien laufen durch eine Allowlist-Prüfung (kein privileged, keine Capabilities, keine Geräte, kein Host-Netz/-PID, kein Docker-Socket, Bind-Mounts nur unter `./data/` des App-Ordners); Ports lauschen standardmäßig nur auf der Tailscale-IP.
 - Das Agent-Token ist pro Server eindeutig und widerrufbar. Bei Widerruf trennt der Core die Verbindung sofort.
 - Einrichtungscode-Tausch (Onboarding): 5 Versuche pro 15 Min pro IP, dazu eine globale Grenze von 30 Fehlversuchen pro 15 Min. Ist sie erreicht, lehnt der Core 15 Min lang jeden Tausch ab, auch mit gültigem Code. Ein Gerät im Tailnet kann das Onboarding damit absichtlich 15 Min blockieren; das nehmen wir bewusst in Kauf (ein Admin, eigenes Tailnet, die Zentrale ist nie öffentlich), weil es Raten über viele IPs hinweg verhindert.
 
