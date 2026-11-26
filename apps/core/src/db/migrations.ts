@@ -801,4 +801,30 @@ CREATE INDEX whitelist_requests_game ON whitelist_requests(game_id, created_at);
 CREATE INDEX whitelist_requests_share ON whitelist_requests(share_id, created_at);
 `,
   },
+  {
+    version: 16,
+    name: 'server_admin_updates',
+    // M16: failed systemd units of the latest inventory (JSON array, null = unknown).
+    // M17 Auto-Update: one row per update run (agent, core, os, reboot); the core keeps
+    // the 200 newest. from_text/to_text: version text before/after.
+    sql: `
+ALTER TABLE server_state ADD COLUMN failed_services_json TEXT;
+
+CREATE TABLE update_runs (
+  id TEXT PRIMARY KEY,
+  server_id TEXT NOT NULL REFERENCES servers(id) ON DELETE CASCADE,
+  server_name TEXT NOT NULL,
+  target TEXT NOT NULL,
+  trigger TEXT NOT NULL,
+  status TEXT NOT NULL,
+  started_at INTEGER NOT NULL,
+  finished_at INTEGER,
+  from_text TEXT,
+  to_text TEXT,
+  message TEXT
+);
+CREATE INDEX update_runs_started ON update_runs(started_at);
+CREATE INDEX update_runs_status ON update_runs(status);
+`,
+  },
 ];

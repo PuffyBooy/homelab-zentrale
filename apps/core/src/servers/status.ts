@@ -7,7 +7,8 @@ import { celsius, clockTimeRelative, percent } from '../format.js';
  * crit: agent silent for more than offlineAfterS (90 s) or its socket closed for
  *       at least 30 s, disk >= diskCrit, RAM >= ramCrit for ramCritMinutes
  * warn: CPU >= cpuWarn for cpuWarnMinutes, RAM >= ramWarn, disk >= diskWarn,
- *       temperature >= tempWarn, security updates, reboot required
+ *       temperature >= tempWarn, security updates, reboot required,
+ *       failed systemd units (M16)
  * ok:   otherwise
  */
 
@@ -46,6 +47,8 @@ export interface StatusInput {
   } | null;
   updates: { total: number; security: number } | null;
   rebootRequired: boolean | null;
+  /** M16: failed systemd units from the last inventory (absent: unknown). */
+  failedServices?: readonly string[];
 }
 
 export type ReasonCode = StatusReason['code'];
@@ -83,6 +86,9 @@ export function reasonCategory(code: ReasonCode): string {
       return 'updates';
     case 'reboot_required':
       return 'reboot';
+    case 'service_failed':
+      // One alert per unit (servers/service-alerts.ts), not per category.
+      return 'services';
   }
 }
 
@@ -213,6 +219,19 @@ export function evaluateStatus(input: StatusInput, t: Thresholds, now: number): 
   }
   if (input.rebootRequired) {
     reasons.push({ level: 'warn', code: 'reboot_required', text: 'Neustart nötig' });
+  }
+  const failed = input.failedServices ?? [];
+  const firstFailed = failed[0];
+  if (firstFailed !== undefined) {
+    reasons.push({
+      level: 'warn',
+      code: 'service_failed',
+      text:
+        failed.length === 1
+          ? `Dienst ${firstFailed} fehlgeschlagen`
+          : `${failed.length} Dienste fehlgeschlagen`,
+      value: failed.length,
+    });
   }
 
   reasons.sort((a, b) => ORDER[a.level] - ORDER[b.level]);

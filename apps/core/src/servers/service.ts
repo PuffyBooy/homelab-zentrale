@@ -33,6 +33,7 @@ import {
 } from '../db/schema.js';
 import { toRawRow, type MetricsStore } from '../metrics/store.js';
 import { syncServerAlerts } from './alert-texts.js';
+import { cleanFailedServices, syncServiceAlerts } from './service-alerts.js';
 import {
   evaluateStatus,
   publicReason,
@@ -68,6 +69,10 @@ export function serverNetworkOf(v: string | null): ServerNetwork | null {
   return p.success ? p.data : null;
 }
 
+/** M17: event update_result of an agent (validated by the hub). */
+export type UpdateResultEvent = Extract<AgentEvent['event'], { kind: 'update_result' }>;
+export type UpdateResultListener = (serverId: string, e: UpdateResultEvent) => void;
+
 /** serverId and whether it was deleted. */
 export type ServerListener = (serverId: string, deleted: boolean) => void;
 /** Called after an inventory was stored. */
@@ -77,6 +82,12 @@ const parse = <T>(json: string | null): T | null =>
   json === null ? null : (JSON.parse(json) as T);
 const round1 = (v: number): number => Math.round(v * 10) / 10;
 const pct = (used: number, total: number): number => (total > 0 ? (used / total) * 100 : 0);
+
+/** Failed units of the last inventory ([] while unknown). */
+function failedServicesOf(st: ServerStateRow | undefined): string[] {
+  const v = parse<unknown>(st?.failedServicesJson ?? null);
+  return Array.isArray(v) ? v.filter((u): u is string => typeof u === 'string') : [];
+}
 
 export function thresholdsOf(row: Pick<ServerRow, 'thresholdsJson'>): Thresholds {
   let partial: unknown;
@@ -114,6 +125,7 @@ export class ServerService implements AgentSink {
   private readonly inventoryListeners = new Set<InventoryListener>();
   private readonly wakeListeners = new Set<GameWakeListener>();
   private readonly connectListeners = new Set<(serverId: string) => void>();
+  private readonly updateResultListeners = new Set<UpdateResultListener>();
   /** Demo servers (HZ_DEMO=1) count as connected without a socket. */
   private readonly virtual = new Set<string>();
   private connections: ConnectionInfo = { isConnected: () => false, disconnectedAt: () => null };
@@ -159,6 +171,12 @@ export class ServerService implements AgentSink {
   onAgentConnected(fn: (serverId: string) => void): () => void {
     this.connectListeners.add(fn);
     return () => this.connectListeners.delete(fn);
+  }
+
+  /** M17: an agent reported the outcome of update.apply (the listener checks the runId). */
+  onUpdateResult(fn: UpdateResultListener): () => void {
+    this.updateResultListeners.add(fn);
+    return () => this.updateResultListeners.delete(fn);
   }
 
   onInventoryStored(fn: InventoryListener): () => void {
@@ -252,6 +270,9 @@ export class ServerService implements AgentSink {
     } else if (e.kind === 'game_wake') {
       this.deps.log.info({ serverId, gameId: e.gameId, protocol: e.protocol }, 'game wake event');
       for (const fn of this.wakeListeners) fn(serverId, e);
+    } else if (e.kind === 'update_result') {
+      this.deps.log.info({ serverId, target: e.target, outcome: e.outcome }, 'update result event');
+      for (const fn of this.updateResultListeners) fn(serverId, e);
     } else {
       this.deps.log.debug({ serverId, kind: e.kind }, 'agent event');
       if (this.containerSync?.onEvent(serverId, e)) this.refresh(serverId);
@@ -296,6 +317,8 @@ export class ServerService implements AgentSink {
   ingestInventory(serverId: string, inv: Omit<Inventory, 'type'>): void {
     const now = this.deps.now();
     const db = this.deps.db;
+    const failed =
+      inv.failedServices === undefined ? null : cleanFailedServices(inv.failedServices);
     db.transaction((tx) => {
       const values = {
         systemJson: JSON.stringify(inv.system),
@@ -305,6 +328,7 @@ export class ServerService implements AgentSink {
         fail2banBanned: inv.fail2banBanned,
         listeningPortsJson: JSON.stringify(inv.listeningPorts),
         inventoryAt: now,
+        failedServicesJson: failed === null ? null : JSON.stringify(failed),
       };
       tx.insert(serverState)
         .values({ serverId, ...values })
@@ -322,6 +346,11 @@ export class ServerService implements AgentSink {
         .run();
     });
     this.containerSync?.syncInventory(serverId, inv.containers);
+    // Agents without systemd or older agents send no list: their alerts stay as they are.
+    const name = failed === null ? undefined : this.row(serverId)?.name;
+    if (failed !== null && name !== undefined) {
+      syncServiceAlerts(db, this.deps.alerts, { serverId, name, now, failed });
+    }
     for (const fn of this.inventoryListeners) fn(serverId, inv);
     this.lastSeen.set(serverId, now);
     this.refresh(serverId, true);
@@ -352,6 +381,7 @@ export class ServerService implements AgentSink {
         : null,
       updates: parse<{ total: number; security: number }>(st?.updatesJson ?? null),
       rebootRequired: st?.rebootRequired ?? null,
+      failedServices: failedServicesOf(st),
     };
   }
 
@@ -436,6 +466,7 @@ export class ServerService implements AgentSink {
       sshFailed24h: st?.sshFailed24h ?? null,
       fail2banBanned: st?.fail2banBanned ?? null,
       listeningPorts: parse<ListeningPort[]>(st?.listeningPortsJson ?? null) ?? [],
+      failedServices: failedServicesOf(st),
     };
   }
 

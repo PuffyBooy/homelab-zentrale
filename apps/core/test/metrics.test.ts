@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
+import { historyResponseSchema } from '@hz/shared';
 import { openDatabase, type DbHandle } from '../src/db/index.js';
 import { servers } from '../src/db/schema.js';
 import { BUCKET_1H, BUCKET_5M, DAY, HOUR, MetricsStore, toRawRow } from '../src/metrics/store.js';
@@ -127,7 +128,47 @@ describe('history', () => {
       netIn: 1000,
       netOut: 500,
       temp: 45,
+      diskMax: 50,
     });
     expect(BUCKET_1H).toBe(HOUR);
+  });
+
+  it('M16: diskMax in every range (highest value of a bucket, null without disks)', () => {
+    const { m, clock } = store();
+    const GB = 1024 ** 3;
+    const at = (ts: number, diskPct: number | null): void => {
+      const msg = metricsMsg({ diskPct: diskPct ?? 0 });
+      m.insert(
+        toRawRow('srv-aaaaaaaa', ts, {
+          ...msg,
+          disks:
+            diskPct === null
+              ? []
+              : msg.disks.map((d) => ({ ...d, totalBytes: 100 * GB, usedBytes: diskPct * GB })),
+        }),
+      );
+    };
+    // First 5 min: 40 %, then one spike to 70 %, then 60 %; later a stretch without disks.
+    for (let i = 0; i < 30; i++) at(START + i * 10_000, 40);
+    at(START + 5 * 60_000, 70);
+    for (let i = 1; i < 30; i++) at(START + 5 * 60_000 + i * 10_000, 60);
+    for (let i = 0; i < 30; i++) at(START + HOUR + i * 10_000, null);
+    clock.t = START + 2 * HOUR;
+    m.rollup5m(DAY);
+    m.rollup1h(DAY);
+    const h1 = m.history('srv-aaaaaaaa', '1h').points;
+    expect(h1.every((p) => p.diskMax === null)).toBe(true);
+    const h24 = m.history('srv-aaaaaaaa', '24h').points;
+    expect(h24.map((p) => p.diskMax)).toEqual([40, 70, null]);
+    for (const range of ['7d', '30d'] as const) {
+      const pts = m.history('srv-aaaaaaaa', range).points;
+      expect(pts).toHaveLength(2);
+      expect(pts[0]?.diskMax).toBeGreaterThanOrEqual(40);
+      expect(pts[0]?.diskMax).toBeLessThanOrEqual(70);
+      expect(pts[1]?.diskMax).toBeNull();
+    }
+    for (const range of ['1h', '24h', '7d', '30d'] as const) {
+      expect(historyResponseSchema.safeParse(m.history('srv-aaaaaaaa', range)).success).toBe(true);
+    }
   });
 });
