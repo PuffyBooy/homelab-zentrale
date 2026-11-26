@@ -22,3 +22,4 @@ export * from './api/game-features.js';
 export * from './agent-ops.js';
 export * from './api/ops.js';
 export * from './api/integrations.js';
+export * from './api/cloud.js';
