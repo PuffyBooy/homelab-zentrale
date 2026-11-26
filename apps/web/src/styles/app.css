@@ -1558,6 +1558,16 @@ body,
 .app-consumers-col + .app-consumers-col {
   border-left: 1px solid var(--line);
 }
+/* A long meta ("CPU 88 % · gedrosselt (2 Kerne) · niedrig") wraps instead of
+   pushing the buttons under the RAM column. */
+.app-consumers .hz-row-meta {
+  min-width: 0;
+  white-space: normal;
+  text-align: right;
+}
+.app-consumers .hz-row-actions {
+  flex: none;
+}
 .app-consumers-head {
   margin: 0;
   padding: 0 var(--space-3) var(--space-1);
