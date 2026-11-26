@@ -11,6 +11,8 @@ import { ServerDetailPage } from '../pages/servers/ServerDetailPage.js';
 import { ServersPage } from '../pages/servers/ServersPage.js';
 import { SettingsPage } from '../pages/settings/SettingsPage.js';
 import { SetupPage } from '../pages/setup/SetupPage.js';
+import { CheckDetailPage } from '../pages/websites/CheckDetailPage.js';
+import { WebsitesPage } from '../pages/websites/WebsitesPage.js';
 import { Shell } from '../shell/Shell.js';
 import { AuthGate } from './AuthGate.js';
 
@@ -20,7 +22,7 @@ const DevUiPage = import.meta.env.DEV
   : null;
 
 /** Nav targets with their own page; the rest shows the empty placeholder. */
-const BUILT = new Set(['/', '/servers', '/containers', '/alerts']);
+const BUILT = new Set(['/', '/servers', '/containers', '/websites', '/alerts']);
 
 export function AppRoutes(): ReactElement {
   return (
@@ -63,6 +65,8 @@ export function AppRoutes(): ReactElement {
         <Route path="servers/:id" element={<ServerDetailPage />} />
         <Route path="containers" element={<ContainersPage />} />
         <Route path="containers/:id/logs" element={<ContainerLogsPage />} />
+        <Route path="websites" element={<WebsitesPage />} />
+        <Route path="websites/:id" element={<CheckDetailPage />} />
         <Route path="alerts" element={<AlertsPage />} />
         {navItems
           .filter((it) => it.href && !BUILT.has(it.href))

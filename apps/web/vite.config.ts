@@ -71,6 +71,8 @@ export default defineConfig({
         navigateFallbackDenylist: [/^\/api\//, /^\/live/, /^\/s\//],
         runtimeCaching: [],
         cleanupOutdatedCaches: true,
+        // Push and notification clicks (public/sw-push.js), next to the generated precache.
+        importScripts: ['/sw-push.js'],
       },
       devOptions: { enabled: false },
     }),

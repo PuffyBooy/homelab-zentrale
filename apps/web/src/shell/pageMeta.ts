@@ -1,4 +1,5 @@
-import type { Alert, ContainerSummary, ServerSummary } from '@hz/shared';
+import type { Alert, CheckSummary, ContainerSummary, ServerSummary } from '@hz/shared';
+import { checkMatchesServer, checkSentence, checksSentence, KIND_LABEL } from '../lib/checks.js';
 import { containerSentence, containerStateText } from '../lib/containers.js';
 import { formatTime, plural } from '../lib/format.js';
 import type { LiveState } from '../lib/live.js';
@@ -23,6 +24,8 @@ export interface PageData {
   alerts?: Alert[] | undefined;
   /** Only read on the container pages. */
   containers?: ContainerSummary[] | undefined;
+  /** Only read on the websites pages. */
+  checks?: CheckSummary[] | undefined;
   /** Server filter from the ServerSwitch, or the id of the detail page. */
   filter?: string | undefined;
   live?: LiveState | undefined;
@@ -33,9 +36,9 @@ export interface PageData {
 const plain = (rest: string): StatusSentence => ({ em: null, rest });
 
 /** Mono line under the Statussatz: live state first. */
-function liveSub(area: string, data: PageData): string {
+function liveSub(area: string, data: PageData, count?: string): string {
   const n = data.servers?.length ?? 0;
-  const parts = [area, plural(n, 'Server', 'Server')];
+  const parts = [area, count ?? plural(n, 'Server', 'Server')];
   if (data.live === 'open') {
     parts.push(data.updatedAt ? `live · ${formatTime(data.updatedAt)}` : 'live');
   } else if (data.live === 'connecting') {
@@ -54,6 +57,16 @@ export function serverDetailId(pathname: string): string | null {
 export function containerLogsId(pathname: string): string | null {
   const m = /^\/containers\/([A-Za-z0-9_-]{8,64})\/logs\/?$/.exec(pathname);
   return m?.[1] ?? null;
+}
+
+export function checkDetailId(pathname: string): string | null {
+  const m = /^\/websites\/([A-Za-z0-9_-]{8,64})\/?$/.exec(pathname);
+  return m?.[1] ?? null;
+}
+
+/** Pages that read the check list in the shell header. */
+export function needsChecks(pathname: string): boolean {
+  return pathname === '/websites' || checkDetailId(pathname) !== null;
 }
 
 /** Pages that read the container list in the shell header. */
@@ -112,17 +125,49 @@ export function pageMeta(pathname: string, data: PageData = {}): PageMeta {
     };
   }
 
+  if (pathname === '/websites') {
+    if (data.checks === undefined) {
+      return { title: plain('Websites'), sub: 'lädt …', serverSwitch: true };
+    }
+    const list = filtered
+      ? data.checks.filter((c) => checkMatchesServer(c, filtered.id))
+      : data.checks;
+    return {
+      title: checksSentence(list),
+      sub: liveSub('Websites', data, plural(list.length, 'Check', 'Checks')),
+      serverSwitch: true,
+    };
+  }
+
+  const checkId = checkDetailId(pathname);
+  if (checkId) {
+    const c = data.checks?.find((x) => x.id === checkId);
+    if (!c) return { title: plain('Website'), sub: 'lädt …', serverSwitch: false };
+    const where =
+      c.def.runFrom === 'core'
+        ? 'von der Zentrale'
+        : `von ${servers.find((s) => s.id === c.def.runFrom)?.name ?? 'Agent'}`;
+    return {
+      title: checkSentence(c),
+      sub: `Website · ${KIND_LABEL[c.def.kind]} · ${where}`,
+      serverSwitch: false,
+    };
+  }
+
   if (pathname === settingsItem.href) {
-    return { title: plain('Einstellungen'), sub: 'Konto und Sitzungen', serverSwitch: false };
+    return { title: plain('Einstellungen'), sub: 'Konto, Sitzungen und Push', serverSwitch: false };
   }
   if (pathname === '/alerts') {
-    const open = (data.alerts ?? []).filter((a) => a.state === 'open').length;
+    const open = (data.alerts ?? []).filter(
+      (a) => a.state === 'open' && (!filtered || a.serverId === filtered.id),
+    ).length;
+    const where = filtered ? ` auf ${filtered.name}` : '';
     return {
       title: open
-        ? { em: plural(open, 'offene Meldung', 'offene Meldungen'), rest: '' }
-        : plain('Keine offenen Meldungen.'),
-      sub: 'Meldungen',
-      serverSwitch: false,
+        ? { em: plural(open, 'offene Meldung', 'offene Meldungen') + where, rest: '' }
+        : plain(`Keine offenen Meldungen${where}.`),
+      sub: 'Meldungen · gleicher Text wie die Push am Handy',
+      serverSwitch: true,
     };
   }
   const item = navItems.find((it) => it.href === pathname);

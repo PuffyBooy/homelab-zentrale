@@ -1,7 +1,14 @@
-import type { Alert, ContainerSummary, ServerDetail, ServerSummary } from '@hz/shared';
+import type {
+  Alert,
+  CheckSummary,
+  ContainerSummary,
+  ServerDetail,
+  ServerSummary,
+} from '@hz/shared';
 import { QueryClient } from '@tanstack/react-query';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { alert, container, detail, server } from '../test-fixtures.js';
+import { alert, check, container, detail, server } from '../test-fixtures.js';
+import { checksKey } from './checks.js';
 import { alertsKey } from './alerts.js';
 import { containersKey } from './containers.js';
 import { containerLogsKey, type LogBuffer } from './logs.js';
@@ -146,6 +153,25 @@ describe('applyLiveMessage', () => {
     const list = qc.getQueryData<ContainerSummary[]>(containersKey);
     expect(list?.map((c) => [c.name, c.status])).toEqual([['lernplattform', 'off']]);
     expect(qc.getQueryState(containersKey)?.isInvalidated).toBe(true);
+  });
+
+  it('writes the checks snapshot and merges updates', () => {
+    const a = check();
+    const b = check();
+    applyLiveMessage(qc, { type: 'update', topic: 'checks', upsert: [a] });
+    expect(qc.getQueryData(checksKey)).toBeUndefined();
+    applyLiveMessage(qc, { type: 'snapshot', topic: 'checks', data: { checks: [a, b] } });
+    expect(qc.getQueryData<CheckSummary[]>(checksKey)?.length).toBe(2);
+    const down = { ...b, status: 'crit', reason: 'HTTP 503', consecutiveFailures: 2 };
+    applyLiveMessage(qc, {
+      type: 'update',
+      topic: 'checks',
+      upsert: [down, { id: 'bad' }],
+      remove: [a.id],
+    });
+    const list = qc.getQueryData<CheckSummary[]>(checksKey);
+    expect(list?.map((c) => [c.id, c.status])).toEqual([[b.id, 'crit']]);
+    expect(qc.getQueryState(checksKey)?.isInvalidated).toBe(true);
   });
 
   it('buffers container-logs:<id> lines', () => {

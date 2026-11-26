@@ -5,6 +5,10 @@ const boolFlag = z
   .default('0')
   .transform((v) => v === '1' || v === 'true');
 
+/** `.env.example` ships `HZ_VAPID_PUBLIC=` etc. empty: treat empty as unset. */
+const optionalEnv = <T extends z.ZodType>(schema: T) =>
+  z.preprocess((v) => (v === '' ? undefined : v), schema.optional());
+
 const base64 = /^[A-Za-z0-9+/]+={0,2}$/;
 
 const secretKey = z
@@ -36,6 +40,26 @@ export const configSchema = z.object({
     .string()
     .regex(/^[A-Za-z0-9_-]{22,128}$/, 'HZ_SETUP_TOKEN: 22-128 Zeichen [A-Za-z0-9_-]')
     .optional(),
+  // Optional fixed VAPID key pair for Web Push (base64url, as from
+  // `npx web-push generate-vapid-keys`). Without it the core generates one on
+  // first start and stores it encrypted in the database.
+  HZ_VAPID_PUBLIC: optionalEnv(
+    z
+    .string()
+    .regex(/^[A-Za-z0-9_-]{80,100}$/, 'HZ_VAPID_PUBLIC: ungültiger Schlüssel'),
+  ),
+  HZ_VAPID_PRIVATE: optionalEnv(
+    z
+    .string()
+    .regex(/^[A-Za-z0-9_-]{40,50}$/, 'HZ_VAPID_PRIVATE: ungültiger Schlüssel'),
+  ),
+  // Contact for push services (VAPID "sub"): mailto: or https URL.
+  HZ_VAPID_SUBJECT: optionalEnv(
+    z
+    .string()
+    .max(200)
+    .regex(/^(mailto:[^\s@]+@[^\s@]+|https:\/\/\S+)$/, 'HZ_VAPID_SUBJECT: mailto: oder https://'),
+  ),
   NODE_ENV: z.enum(['development', 'production', 'test']).default('production'),
 });
 
@@ -51,6 +75,9 @@ export interface Config {
   env: 'development' | 'production' | 'test';
   /** Only set with NODE_ENV=test. */
   setupToken: string | undefined;
+  /** Fixed VAPID keys from the environment (both or none). */
+  vapid: { publicKey: string; privateKey: string } | undefined;
+  vapidSubject: string | undefined;
 }
 
 export function isLoopback(host: string): boolean {
@@ -79,6 +106,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   if (c.HZ_SETUP_TOKEN !== undefined && c.NODE_ENV !== 'test') {
     throw new ConfigError(['HZ_SETUP_TOKEN: nur mit NODE_ENV=test erlaubt']);
   }
+  if ((c.HZ_VAPID_PUBLIC === undefined) !== (c.HZ_VAPID_PRIVATE === undefined)) {
+    throw new ConfigError(['HZ_VAPID_PUBLIC und HZ_VAPID_PRIVATE nur gemeinsam setzen']);
+  }
   return {
     secretKey: Buffer.from(c.HZ_SECRET_KEY, 'base64'),
     dataDir: c.HZ_DATA_DIR,
@@ -90,5 +120,10 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     agentImage: c.HZ_AGENT_IMAGE,
     env: c.NODE_ENV,
     setupToken: c.HZ_SETUP_TOKEN,
+    vapid:
+      c.HZ_VAPID_PUBLIC !== undefined && c.HZ_VAPID_PRIVATE !== undefined
+        ? { publicKey: c.HZ_VAPID_PUBLIC, privateKey: c.HZ_VAPID_PRIVATE }
+        : undefined,
+    vapidSubject: c.HZ_VAPID_SUBJECT,
   };
 }

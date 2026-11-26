@@ -234,4 +234,63 @@ CREATE TABLE containers (
 CREATE INDEX containers_server_docker ON containers(server_id, docker_id);
 `,
   },
+  {
+    version: 4,
+    name: 'checks_push',
+    // M4: website/port checks with 30 days of raw results, certificate and
+    // domain expiry per check, and Web Push subscriptions (endpoint and keys
+    // encrypted; the hash only dedupes a re-subscription of the same browser).
+    sql: `
+CREATE TABLE checks (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  def_json TEXT NOT NULL,
+  run_from TEXT NOT NULL,
+  server_id TEXT REFERENCES servers(id) ON DELETE SET NULL,
+  interval_s INTEGER NOT NULL,
+  enabled INTEGER NOT NULL DEFAULT 1,
+  status TEXT NOT NULL DEFAULT 'busy',
+  reason TEXT,
+  last_code INTEGER,
+  last_ms REAL,
+  last_checked_at INTEGER,
+  consecutive_failures INTEGER NOT NULL DEFAULT 0,
+  consecutive_slow INTEGER NOT NULL DEFAULT 0,
+  down_since INTEGER,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+
+CREATE TABLE check_results (
+  check_id TEXT NOT NULL REFERENCES checks(id) ON DELETE CASCADE,
+  ts INTEGER NOT NULL,
+  ok INTEGER NOT NULL,
+  code INTEGER,
+  ms REAL,
+  error TEXT
+);
+CREATE INDEX check_results_check_ts ON check_results(check_id, ts);
+CREATE INDEX check_results_ts ON check_results(ts);
+
+CREATE TABLE cert_status (
+  check_id TEXT PRIMARY KEY REFERENCES checks(id) ON DELETE CASCADE,
+  ssl_expires_at INTEGER,
+  domain_expires_at INTEGER,
+  checked_at INTEGER,
+  domain_checked_at INTEGER
+);
+
+CREATE TABLE push_subscriptions (
+  id TEXT PRIMARY KEY,
+  endpoint_hash TEXT NOT NULL UNIQUE,
+  endpoint_enc TEXT NOT NULL,
+  endpoint_host TEXT NOT NULL,
+  keys_enc TEXT NOT NULL,
+  label TEXT NOT NULL DEFAULT '',
+  created_at INTEGER NOT NULL,
+  last_ok_at INTEGER
+);
+`,
+  },
 ];

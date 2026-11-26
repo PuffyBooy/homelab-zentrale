@@ -12,8 +12,12 @@ import { agentRoutes } from './agents/routes.js';
 import { AgentTokens } from './agents/tokens.js';
 import { alertRoutes } from './alerts/routes.js';
 import { AlertService } from './alerts/service.js';
+import { nextWeeklyReport, weeklyReportText } from './alerts/weekly-report.js';
 import { setupAuth, type AuthService } from './auth/index.js';
 import { isApiPath, requestPath } from './auth/guard.js';
+import { checkRoutes } from './checks/routes.js';
+import { CheckService } from './checks/service.js';
+import type { FetchLike } from './checks/rdap.js';
 import { systemClock, type Clock } from './clock.js';
 import type { Config } from './config.js';
 import { ContainerLogs } from './containers/logs.js';
@@ -26,6 +30,12 @@ import { errorHandler, sendError } from './http/errors.js';
 import { LiveHub, type LiveOptions } from './live/hub.js';
 import { liveRoutes } from './live/routes.js';
 import { DAY, HOUR, MetricsStore } from './metrics/store.js';
+import { Notifier } from './push/notifier.js';
+import { pushRoutes } from './push/routes.js';
+import { fetchTransport, type PushTransport } from './push/sender.js';
+import { PushService } from './push/service.js';
+import { readNotifySettings } from './push/settings.js';
+import { loadVapidKeys } from './push/vapid.js';
 import { healthRoutes } from './routes/health.js';
 import { Scheduler } from './scheduler.js';
 import { serverRoutes } from './servers/routes.js';
@@ -47,6 +57,10 @@ export interface AppDeps {
   startScheduler?: boolean;
   agentOptions?: HubOptions;
   liveOptions?: LiveOptions;
+  /** Web Push transport (tests: a local mock push service). */
+  pushTransport?: PushTransport;
+  /** RDAP transport (tests: no network). */
+  rdapFetch?: FetchLike;
 }
 
 /** Core services, decorated on the app as `hzCore` (routes, tests). */
@@ -60,6 +74,9 @@ export interface CoreServices {
   containers: ContainerService;
   logs: ContainerLogs;
   live: LiveHub;
+  checks: CheckService;
+  push: PushService;
+  notifier: Notifier;
   db: DbHandle;
 }
 
@@ -94,6 +111,9 @@ const REDACT = [
     'secret',
     'setupToken',
     'agentToken',
+    'privateKey',
+    'subscription',
+    'keys',
   ].flatMap((k) => [k, `*.${k}`, `body.${k}`, `req.body.${k}`]),
 ];
 
@@ -106,6 +126,16 @@ function loggerOptions(config: Config, deps: AppDeps): NonNullable<FastifyServer
   if (deps.logStream) return { level: 'debug', stream: deps.logStream, redact: REDACT };
   if (config.env === 'test') return false;
   return { level, redact: REDACT };
+}
+
+/**
+ * VAPID "sub" claim: HZ_VAPID_SUBJECT, else the https base URL (the tailnet
+ * address), else a mailto placeholder. Push services use it only as contact.
+ */
+function vapidSubject(config: Config): string {
+  if (config.vapidSubject) return config.vapidSubject;
+  if (config.baseUrl?.startsWith('https://')) return config.baseUrl;
+  return 'mailto:admin@homelab-zentrale.invalid';
 }
 
 export async function buildApp(config: Config, deps: AppDeps = {}): Promise<FastifyInstance> {
@@ -152,10 +182,11 @@ export async function buildApp(config: Config, deps: AppDeps = {}): Promise<Fast
   });
   await app.register(fastifyCookie);
 
+  const box = createSecretBox(config.secretKey);
   // Auth first: it installs the global /api guard that every later route inherits.
   const auth = await setupAuth(app, {
     db: db.db,
-    box: createSecretBox(config.secretKey),
+    box,
     now,
     config,
   });
@@ -224,6 +255,42 @@ export async function buildApp(config: Config, deps: AppDeps = {}): Promise<Fast
   });
   logs.setPublisher(live);
   containers.onChange((id, deleted) => live.mark('containers', id, deleted ? 'remove' : 'upsert'));
+
+  // ---- M4: checks, push, notifications ----------------------------------------
+  const checks = new CheckService({
+    db: db.db,
+    now,
+    scheduler,
+    alerts,
+    hub,
+    log: app.log.child({ mod: 'checks' }),
+    ...(deps.rdapFetch ? { rdapFetch: deps.rdapFetch } : {}),
+  });
+  live.addProvider({
+    matches: (topic) => topic === 'checks',
+    snapshot: () => checks.list(),
+    item: (_topic, id) => checks.summary(id),
+  });
+  checks.onChange((id, deleted) => live.mark('checks', id, deleted ? 'remove' : 'upsert'));
+  const vapid = loadVapidKeys(db.db, box, now(), config.vapid);
+  app.log.info({ source: vapid.source }, 'web push keys ready');
+  const push = new PushService({
+    db: db.db,
+    box,
+    now,
+    log: app.log.child({ mod: 'push' }),
+    transport: deps.pushTransport ?? fetchTransport,
+    vapid: vapid.keys,
+    subject: vapidSubject(config),
+  });
+  const notifier = new Notifier({
+    alerts,
+    push,
+    now,
+    settings: () => readNotifySettings(db.db),
+    log: app.log.child({ mod: 'notify' }),
+  });
+
   app.decorate('hzCore', {
     scheduler,
     tokens,
@@ -234,6 +301,9 @@ export async function buildApp(config: Config, deps: AppDeps = {}): Promise<Fast
     containers,
     logs,
     live,
+    checks,
+    push,
+    notifier,
     db,
   });
 
@@ -243,6 +313,19 @@ export async function buildApp(config: Config, deps: AppDeps = {}): Promise<Fast
   scheduler.every('metrics.rollup5m', 5 * 60_000, () => void metrics.rollup5m(), { align: true });
   scheduler.every('metrics.rollup1h', HOUR, () => void metrics.rollup1h(), { align: true });
   scheduler.every('metrics.prune', HOUR, () => void metrics.prune());
+  checks.start();
+  scheduler.every('push.warnBundle', 60_000, () => notifier.flush());
+  scheduler.at('report.weekly', nextWeeklyReport, () => {
+    if (!readNotifySettings(db.db).weeklyReport) return;
+    const list = servers.list();
+    const { title, body } = weeklyReportText({
+      openAlerts: alerts.activeCount(),
+      checks: checks.uptimes(7 * DAY),
+      serversOffline: list.filter((s) => s.reasons.some((r) => r.code === 'offline')).length,
+      serversTotal: list.length,
+    });
+    alerts.log('report:weekly', 'info', title, body, null, 'system');
+  });
   if (config.demo) {
     seedDemo({ db: db.db, now, servers, metrics, scheduler, logs });
     app.log.warn('HZ_DEMO=1: demo servers with simulated metrics');
@@ -256,6 +339,11 @@ export async function buildApp(config: Config, deps: AppDeps = {}): Promise<Fast
   });
   app.addHook('preClose', async () => {
     scheduler.stop();
+    // Let running checks and pushes finish before the database closes (bounded).
+    await Promise.race([
+      Promise.all([checks.idle(), push.idle()]),
+      new Promise((r) => setTimeout(r, 3_000).unref()),
+    ]);
     hub.shutdown();
     live.closeAll();
     logs.closeAll();
@@ -279,6 +367,8 @@ export async function buildApp(config: Config, deps: AppDeps = {}): Promise<Fast
   });
   await app.register(alertRoutes, { prefix: '/api', db: db.db, now, alerts });
   await app.register(containerRoutes, { prefix: '/api', db: db.db, now, containers, servers, hub });
+  await app.register(checkRoutes, { prefix: '/api', db: db.db, now, checks });
+  await app.register(pushRoutes, { prefix: '/api', db: db.db, now, push });
 
   const webDir = resolve(config.webDir ?? defaultWebDir);
   const hasWeb = existsSync(resolve(webDir, 'index.html'));
