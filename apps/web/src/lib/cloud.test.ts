@@ -297,12 +297,12 @@ describe('Azure account form', () => {
     const r = buildAzurePatch(s, {
       ...f,
       clientSecret: 'abc~DEF.ghi-123',
-      tailscaleAuthKey: 'tskey-auth-kAbCdEf12345',
+      tailscaleAuthKey: 'tskey-auth-xxxxxxxxxx',
     });
     expect(r.errors).toEqual({});
     expect(r.patch).toEqual({
       clientSecret: 'abc~DEF.ghi-123',
-      tailscaleAuthKey: 'tskey-auth-kAbCdEf12345',
+      tailscaleAuthKey: 'tskey-auth-xxxxxxxxxx',
     });
     const bad = buildAzurePatch(s, { ...f, tenantId: 'nope', tailscaleAuthKey: 'x' });
     expect(Object.keys(bad.errors).sort()).toEqual(['tailscaleAuthKey', 'tenantId']);

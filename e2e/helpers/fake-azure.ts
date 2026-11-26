@@ -18,7 +18,7 @@ export const FAKE_AZURE_CLIENT = '66666666-7777-8888-9999-aaaaaaaaaaaa';
 export const FAKE_AZURE_SUBSCRIPTION = 'bbbbbbbb-cccc-dddd-eeee-ffffffffffff';
 export const FAKE_AZURE_GROUP = 'hz-cloud';
 export const FAKE_AZURE_SECRET = ['fake', 'azure', 'client', 'secret', 'e2e0123'].join('~');
-export const FAKE_TAILSCALE_KEY = ['tskey', 'auth', 'kFAKE0e2e0CNTRL0abcdefghijkl'].join('-');
+export const FAKE_TAILSCALE_KEY = ['tskey', 'auth', 'xxxxxxxxxxxxxxxx'].join('-');
 
 export interface FakeRequest {
   method: string;

@@ -12,7 +12,7 @@ import {
 import { MODULE_DEFAULTS, MODULES_ENABLE_STEP_UP } from './modules.js';
 
 // Fake key split so secret scanners do not flag it.
-const FAKE_TS_KEY = ['tskey', 'auth', 'kTEST1234CNTRL-abcdefghijk'].join('-');
+const FAKE_TS_KEY = ['tskey', 'auth', 'xxxxxxxxxxxx'].join('-');
 
 describe('cloud module', () => {
   it('is off by default and needs step-up to switch on', () => {
