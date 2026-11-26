@@ -242,3 +242,17 @@ describe('share link: world download (M12)', () => {
     expect((await gateway(s, 'GET', 'world', { token: link.token })).statusCode).toBe(401);
   });
 });
+
+describe('share API outer rate limit (M12)', () => {
+  it('caps one IP across all routes with a schema-shaped 429', async () => {
+    const s = await setup();
+    let last = await friend(s, 'GET', 'world', { ip: '100.64.9.9', token: 'x' });
+    for (let i = 0; i < 600 && last.statusCode !== 429; i++) {
+      last = await friend(s, 'GET', 'world', { ip: '100.64.9.9', token: 'x' });
+    }
+    expect(last.statusCode).toBe(429);
+    const body = last.json() as Record<string, unknown>;
+    expect(body.ok).toBe(false);
+    expect(body.error).toBe('rate_limited');
+  });
+});
