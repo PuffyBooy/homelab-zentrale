@@ -137,8 +137,52 @@ async function space(view: string): Promise<{ free: number | null; total: number
   return { free: s.bavail * s.bsize, total: s.blocks * s.bsize };
 }
 
+/**
+ * The share as found at the start of a run: its root and device. Someone with write
+ * access on the NAS could swap a folder for a symlink after a check (e.g.
+ * games/mc -> ../../backups/mc, which leaves the mount). So before every write,
+ * rename and unlink the folder chain is walked again with lstat (no symlink, every
+ * level a folder on the share's device) and a file to delete must be on that device.
+ * What remains is the gap of a single syscall; a symlink can then at most point the
+ * operation at another folder, where the device check of the next step stops the run.
+ */
+interface Share {
+  view: string;
+  dev: number;
+}
+
+async function shareOf(view: string): Promise<Share> {
+  const st = await lstat(view).catch(() => null);
+  if (!st?.isDirectory()) throw new ActionError('bad_path', 'backup target is not a folder');
+  return { view, dev: st.dev };
+}
+
+/** Every folder from the share root down to `dir` is a real folder on the share. */
+async function assertOnShare(share: Share, dir: string): Promise<void> {
+  const rel = path.relative(share.view, dir);
+  if (rel.startsWith('..') || path.isAbsolute(rel)) {
+    throw new ActionError('bad_path', 'outside the backup target');
+  }
+  let cur = share.view;
+  for (const part of ['', ...rel.split(path.sep).filter(Boolean)]) {
+    cur = part ? path.join(cur, part) : cur;
+    const st = await lstat(cur).catch(() => null);
+    if (!st?.isDirectory() || st.dev !== share.dev) {
+      throw new ActionError('bad_path', 'not a real folder on the backup target');
+    }
+  }
+}
+
+/** A regular file on the share's device (never a symlink, never through one). */
+async function isShareFile(share: Share, file: string): Promise<boolean> {
+  await assertOnShare(share, path.dirname(file));
+  const st = await lstat(file).catch(() => null);
+  return !!st?.isFile() && st.dev === share.dev;
+}
+
 /** Creates (if needed) `parent/name` and checks it is a real folder, never a symlink. */
-async function ensureDir(parent: string, name: string): Promise<string> {
+async function ensureDir(share: Share, parent: string, name: string): Promise<string> {
+  await assertOnShare(share, parent);
   const p = path.join(parent, name);
   let st = await lstat(p).catch(() => null);
   if (!st) {
@@ -151,8 +195,9 @@ async function ensureDir(parent: string, name: string): Promise<string> {
     }
     st = await lstat(p).catch(() => null);
   }
-  if (!st?.isDirectory())
+  if (!st?.isDirectory() || st.dev !== share.dev) {
     throw new ActionError('bad_path', 'not a real folder on the backup target');
+  }
   return p;
 }
 
@@ -168,12 +213,15 @@ async function matchingFiles(dir: string, re: RegExp): Promise<{ name: string; s
 }
 
 /** Deletes all but the newest `keep` (by name = time stamp) files matching `re`. */
-async function retention(dir: string, re: RegExp, keep: number): Promise<number> {
+async function retention(share: Share, dir: string, re: RegExp, keep: number): Promise<number> {
+  await assertOnShare(share, dir);
   const files = await matchingFiles(dir, re);
   let removed = 0;
   for (const f of files.slice(0, Math.max(0, files.length - keep))) {
-    // unlink never follows a symlink; matchingFiles only returned regular files.
-    await unlink(path.join(dir, f.name))
+    const file = path.join(dir, f.name);
+    // Checked again right before: the folder may have been swapped meanwhile.
+    if (!(await isShareFile(share, file))) continue;
+    await unlink(file)
       .then(() => (removed += 1))
       .catch(() => undefined);
   }
@@ -181,12 +229,13 @@ async function retention(dir: string, re: RegExp, keep: number): Promise<number>
 }
 
 /** Leftover `.partial` files of `re`-names (only one copy runs at a time, so all are stale). */
-async function removePartials(dir: string, re: RegExp): Promise<void> {
+async function removePartials(share: Share, dir: string, re: RegExp): Promise<void> {
+  await assertOnShare(share, dir);
   for (const name of await readdir(dir).catch(() => [] as string[])) {
     const m = PARTIAL_RE.exec(name);
     if (!m?.[1] || !re.test(m[1])) continue;
-    const st = await lstat(path.join(dir, name)).catch(() => null);
-    if (st?.isFile()) await unlink(path.join(dir, name)).catch(() => undefined);
+    const file = path.join(dir, name);
+    if (await isShareFile(share, file)) await unlink(file).catch(() => undefined);
   }
 }
 
@@ -218,10 +267,18 @@ async function verifyCopy(tmp: string, size: number, sha256: string): Promise<bo
 }
 
 /** Copies one open source file to dir/name via a verified .partial file. */
-async function copyInto(src: FileHandle, size: number, dir: string, name: string): Promise<void> {
+async function copyInto(
+  share: Share,
+  src: FileHandle,
+  size: number,
+  dir: string,
+  name: string,
+): Promise<void> {
+  await assertOnShare(share, dir);
   const tmp = path.join(dir, partialName(name));
   let out: FileHandle | null = await open(tmp, WRITE_FLAGS, 0o640);
   try {
+    if ((await out.stat()).dev !== share.dev) throw new Error('not on the share');
     const hash = createHash('sha256');
     const buf = Buffer.alloc(COPY_STEP);
     let pos = 0;
@@ -241,10 +298,11 @@ async function copyInto(src: FileHandle, size: number, dir: string, name: string
     await out.close();
     out = null;
     if (!(await verifyCopy(tmp, size, hash.digest('hex')))) throw new Error('copy differs');
+    if (!(await isShareFile(share, tmp))) throw new Error('not on the share');
     await rename(tmp, path.join(dir, name));
   } catch (err) {
     await out?.close().catch(() => undefined);
-    await unlink(tmp).catch(() => undefined);
+    if (await isShareFile(share, tmp).catch(() => false)) await unlink(tmp).catch(() => undefined);
     throw err;
   }
 }
@@ -255,7 +313,11 @@ async function copyInto(src: FileHandle, size: number, dir: string, name: string
 export interface TargetOptions {
   resolve?: (ctx: ActionContext) => Promise<Target>;
   idleTimeoutMs?: number;
+  /** store: time for sync, read-back and rename after transfer.end. */
+  finalTimeoutMs?: number;
 }
+
+const FINAL_TIMEOUT_MS = 10 * 60_000;
 
 export async function backupTargetStatus(
   _params: RpcParams<'backup.target.status'>,
@@ -303,7 +365,7 @@ type SyncGame = BackupTargetSyncData['games'][number];
 
 async function syncGame(
   ctx: ActionContext,
-  targetView: string,
+  share: Share,
   gameId: string,
   keep: number,
 ): Promise<SyncGame> {
@@ -317,22 +379,29 @@ async function syncGame(
   const want = (await matchingFiles(src, re)).slice(-keep);
   let dst: string;
   try {
-    dst = await ensureDir(await ensureDir(targetView, 'games'), gameId);
+    dst = await ensureDir(share, await ensureDir(share, share.view, 'games'), gameId);
   } catch (err) {
     return {
       ...r,
       error: err instanceof ActionError && err.code === 'bad_path' ? 'bad_path' : 'io',
     };
   }
-  await removePartials(dst, re);
+  try {
+    await removePartials(share, dst, re);
+  } catch {
+    return { ...r, error: 'bad_path' };
+  }
   for (const f of want) {
     let fh: FileHandle | null = null;
     try {
       fh = await open(path.join(src, f.name), READ_FLAGS);
       const st = await fh.stat();
       if (!st.isFile()) continue;
+      await assertOnShare(share, dst);
       const existing = await lstat(path.join(dst, f.name)).catch(() => null);
-      if (existing && !existing.isFile()) return { ...r, error: 'bad_path' };
+      if (existing && (!existing.isFile() || existing.dev !== share.dev)) {
+        return { ...r, error: 'bad_path' };
+      }
       if (existing && existing.size === st.size) {
         r.skipped += 1;
         continue;
@@ -341,16 +410,23 @@ async function syncGame(
       if (free !== null && free < st.size + BACKUP_TARGET_RESERVE_BYTES) {
         return { ...r, error: 'no_space' };
       }
-      await copyInto(fh, st.size, dst, f.name);
+      await copyInto(share, fh, st.size, dst, f.name);
       r.copied += 1;
       r.bytes += st.size;
-    } catch {
-      return { ...r, error: 'io' };
+    } catch (err) {
+      return {
+        ...r,
+        error: err instanceof ActionError && err.code === 'bad_path' ? 'bad_path' : 'io',
+      };
     } finally {
       await fh?.close().catch(() => undefined);
     }
   }
-  r.removed = await retention(dst, re, keep);
+  try {
+    r.removed = await retention(share, dst, re, keep);
+  } catch {
+    return { ...r, error: 'bad_path' };
+  }
   return r;
 }
 
@@ -361,13 +437,20 @@ export async function backupTargetSync(
 ): Promise<BackupTargetSyncData> {
   const release = acquire();
   try {
-    const t = await (opts.resolve ?? resolveTarget)(ctx);
+    const resolve = opts.resolve ?? resolveTarget;
+    const t = await resolve(ctx);
     if (t.state !== 'mounted') {
       return { state: t.state, games: [], freeBytes: null, totalBytes: null };
     }
+    const share = await shareOf(t.view);
     const games: SyncGame[] = [];
     for (const gameId of [...new Set(params.gameIds)]) {
-      games.push(await syncGame(ctx, t.view, gameId, params.keep));
+      // The share may drop during a long sync: never go on onto the server's own disk.
+      const now = await resolve(ctx);
+      if (now.state !== 'mounted') {
+        return { state: now.state, games, freeBytes: null, totalBytes: null };
+      }
+      games.push(await syncGame(ctx, share, gameId, params.keep));
     }
     const { free, total } = await space(t.view);
     return { state: 'mounted', games, freeBytes: free, totalBytes: total };
@@ -397,13 +480,29 @@ export async function backupTargetStore(
     if (free !== null && free < params.bytes + BACKUP_TARGET_RESERVE_BYTES) {
       throw new ActionError('failed', 'not enough space on the backup target', false);
     }
-    const dir = await ensureDir(t.view, 'core');
-    await removePartials(dir, CORE_DB_PATTERN);
+    const share = await shareOf(t.view);
+    const dir = await ensureDir(share, t.view, 'core');
+    await removePartials(share, dir, CORE_DB_PATTERN);
     const tmp = path.join(dir, partialName(params.fileName));
     const fh = await open(tmp, WRITE_FLAGS, 0o600);
-    const sink = ctx.streams.open(rpcId);
+    let sink: StreamSink;
+    try {
+      if ((await fh.stat()).dev !== share.dev) {
+        throw new ActionError('bad_path', 'not a real folder on the backup target');
+      }
+      sink = ctx.streams.open(rpcId);
+    } catch (err) {
+      await fh.close().catch(() => undefined);
+      await unlink(tmp).catch(() => undefined);
+      throw err;
+    }
     started = true;
-    void runStore({ params, dir, tmp, fh }, sink, opts.idleTimeoutMs ?? TRANSFER_IDLE_TIMEOUT_MS)
+    void runStore(
+      { params, share, dir, tmp, fh },
+      sink,
+      opts.idleTimeoutMs ?? TRANSFER_IDLE_TIMEOUT_MS,
+      opts.finalTimeoutMs ?? FINAL_TIMEOUT_MS,
+    )
       .catch((err: unknown) => ctx.log.error('backup target store failed', { error: err }))
       .finally(release);
     return { streamId: rpcId };
@@ -413,11 +512,18 @@ export async function backupTargetStore(
 }
 
 async function runStore(
-  job: { params: RpcParams<'backup.target.store'>; dir: string; tmp: string; fh: FileHandle },
+  job: {
+    params: RpcParams<'backup.target.store'>;
+    share: Share;
+    dir: string;
+    tmp: string;
+    fh: FileHandle;
+  },
   sink: StreamSink,
   idleMs: number,
+  finalMs: number,
 ): Promise<void> {
-  const { params, dir, tmp } = job;
+  const { params, share, dir, tmp } = job;
   const streamId = sink.id;
   let fh: FileHandle | null = job.fh;
   let next = 0;
@@ -507,29 +613,51 @@ async function runStore(
 
   let failed: TransferErrorCode | null = null;
   let result: BackupTargetStoreData | null = null;
+  let finalTimer: NodeJS.Timeout | null = null;
   try {
     const r = await done;
     if (r instanceof TransferFailure) throw r;
-    await writes;
-    await fh.sync();
-    await fh.close();
-    fh = null;
-    const sha256 = hash.digest('hex');
-    if (received !== params.bytes || sha256 !== params.sha256) {
-      throw new TransferFailure('checksum_mismatch', 'size or checksum differs');
-    }
-    if (!(await verifyCopy(tmp, params.bytes, params.sha256))) {
-      throw new TransferFailure('io', 'the copy on the backup target differs');
-    }
-    await rename(tmp, path.join(dir, params.fileName));
-    const removed = await retention(dir, CORE_DB_PATTERN, params.keep);
-    result = { fileName: params.fileName, bytes: received, sha256, removed };
+    // After transfer.end nothing comes from the core any more; a hanging share
+    // (hard NFS mount) must not hold the lock until the core gives up.
+    const finalize = async (): Promise<BackupTargetStoreData> => {
+      await writes;
+      const own = fh;
+      if (!own) throw new TransferFailure('io', 'file closed');
+      await own.sync();
+      await own.close();
+      fh = null;
+      const sha256 = hash.digest('hex');
+      if (received !== params.bytes || sha256 !== params.sha256) {
+        throw new TransferFailure('checksum_mismatch', 'size or checksum differs');
+      }
+      if (!(await verifyCopy(tmp, params.bytes, params.sha256))) {
+        throw new TransferFailure('io', 'the copy on the backup target differs');
+      }
+      if (!(await isShareFile(share, tmp))) {
+        throw new TransferFailure('io', 'not on the backup target');
+      }
+      await rename(tmp, path.join(dir, params.fileName));
+      const removed = await retention(share, dir, CORE_DB_PATTERN, params.keep);
+      return { fileName: params.fileName, bytes: received, sha256, removed };
+    };
+    result = await Promise.race([
+      finalize(),
+      new Promise<never>((_, reject) => {
+        finalTimer = setTimeout(
+          () => reject(new TransferFailure('timeout', 'backup target did not finish')),
+          finalMs,
+        );
+      }),
+    ]);
   } catch (err) {
     failed = err instanceof TransferFailure ? err.code : 'io';
   } finally {
     if (idle) clearTimeout(idle);
+    if (finalTimer) clearTimeout(finalTimer);
     await fh?.close().catch(() => undefined);
-    if (!result) await unlink(tmp).catch(() => undefined);
+    if (!result && (await isShareFile(share, tmp).catch(() => false))) {
+      await unlink(tmp).catch(() => undefined);
+    }
   }
   if (result) {
     sink.data('progress', `${STORE_RESULT_PREFIX}${JSON.stringify(result)}\n`);

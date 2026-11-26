@@ -210,6 +210,37 @@ describe('backup.target.sync', () => {
     expect(await readdir(w.outside)).toEqual([]);
   });
 
+  it('never deletes the local originals through a planted relative symlink', async () => {
+    const w = await world();
+    const files = [];
+    for (let i = 0; i < 4; i++) files.push(await backup(w.root, 'mc', `2026112${i}-030000`));
+    await mkdir(path.join(w.target, 'games'));
+    // A NAS user points games/mc back at the server's own backups folder.
+    await symlink('../../backups/mc', path.join(w.target, 'games', 'mc'));
+    const r = await backupTargetSync({ gameIds: ['mc'], keep: 1 }, w.ctx, w.opts);
+    expect(r.games[0]?.error).toBe('bad_path');
+    expect((await readdir(path.join(w.root, 'backups', 'mc'))).sort()).toEqual(
+      files.map((f) => f.name).sort(),
+    );
+  });
+
+  it('stops when the share drops during a sync and creates nothing more', async () => {
+    const w = await world();
+    await backup(w.root, 'aa', '20261120-030000');
+    await backup(w.root, 'bb', '20261120-030000');
+    let calls = 0;
+    const r = await backupTargetSync({ gameIds: ['aa', 'bb'], keep: 5 }, w.ctx, {
+      resolve: async () => ({
+        state: ++calls <= 2 ? 'mounted' : 'not_mounted',
+        fs: 'cifs',
+        view: w.target,
+      }),
+    });
+    expect(r.state).toBe('not_mounted');
+    expect(r.games.map((g) => g.gameId)).toEqual(['aa']);
+    expect(await readdir(path.join(w.target, 'games'))).toEqual(['aa']);
+  });
+
   it('skips symlinks among the source backups and a symlinked source folder', async () => {
     const w = await world();
     await writeFile(path.join(w.outside, 'secret'), 'secret');
@@ -408,6 +439,9 @@ describe('backup target allowlist', () => {
       expect(rpc('backup.target.store', { ...ok, fileName: f }).ok).toBe(false);
     }
     expect(rpc('backup.target.store', { ...ok, bytes: 5 * 1024 ** 3 }).ok).toBe(false);
+    // chunks must match bytes (48 KiB chunks)
+    expect(rpc('backup.target.store', { ...ok, chunks: 2 }).ok).toBe(false);
+    expect(rpc('backup.target.store', { ...ok, bytes: 49 * 1024, chunks: 2 }).ok).toBe(true);
     expect(rpc('backup.target.status', { dir: '/' }).ok).toBe(false);
   });
 });

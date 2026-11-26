@@ -90,7 +90,8 @@ export type BackupTargetResponse = z.infer<typeof backupTargetResponseSchema>;
 export const backupTargetRunStartedSchema = z.strictObject({ started: z.literal(true) });
 
 export const backupTargetAlertKey = (
-  part: { serverId: string; kind: 'mount' | 'sync' } | { kind: 'db' },
+  /** mount: not mounted / read only; space: NAS full; sync: copies failed; db: database copy. */
+  part: { serverId: string; kind: 'mount' | 'space' | 'sync' } | { kind: 'db' },
 ): string =>
   part.kind === 'db' ? 'backup-target:db' : `backup-target:${part.serverId}:${part.kind}`;
 export const BACKUP_TARGET_ALERT_PREFIX = 'backup-target:';

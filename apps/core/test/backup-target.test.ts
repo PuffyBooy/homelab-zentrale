@@ -120,6 +120,66 @@ describe('backup target settings', () => {
 });
 
 describe('backup target run', () => {
+  it('read only, full NAS and failed games warn and resolve with an OK entry', async () => {
+    const s = await setup();
+    await put(s.cookie, {
+      enabled: true,
+      serverIds: [s.serverId],
+      dbServerId: null,
+      keep: 7,
+      time: '05:00',
+    });
+    let mode: 'ro' | 'full' | 'failed' | 'ok' = 'ro';
+    const stop = answer(s.agent, (m) => {
+      if (m.type !== 'rpc') return;
+      if (m.action === 'backup.target.status') {
+        ok(s.agent, m.id, status(mode === 'ro' ? { state: 'read_only' } : {}));
+      } else if (m.action === 'backup.target.sync') {
+        const error = mode === 'full' ? 'no_space' : mode === 'failed' ? 'io' : null;
+        ok(s.agent, m.id, {
+          state: 'mounted',
+          games: [
+            { gameId: 'mc', copied: error ? 0 : 1, skipped: 0, removed: 0, bytes: 10, error },
+          ],
+          freeBytes: 1,
+          totalBytes: 2,
+        });
+      }
+    });
+    const core = T().app.hzCore;
+    const mount = backupTargetAlertKey({ serverId: s.serverId, kind: 'mount' });
+    const sync = backupTargetAlertKey({ serverId: s.serverId, kind: 'sync' });
+    const space = backupTargetAlertKey({ serverId: s.serverId, kind: 'space' });
+    const once = async () => {
+      expect((await run(s.cookie)).statusCode).toBe(202);
+      await until(() => !core.backupTarget.isRunning, 5000);
+    };
+    await once();
+    expect(core.alerts.active(mount)?.title).toMatch(/schreibgeschützt/);
+    expect((await get(s.cookie)).servers[0]?.lastRun?.error).toBe('read_only');
+
+    mode = 'full';
+    await once();
+    expect(core.alerts.active(mount)).toBeNull();
+    expect(core.alerts.active(space)?.title).toMatch(/ist voll/);
+    expect((await get(s.cookie)).servers[0]?.lastRun?.error).toBe('no_space');
+
+    mode = 'failed';
+    await once();
+    expect(core.alerts.active(space)).toBeNull();
+    expect(core.alerts.active(sync)?.title).toMatch(/nicht vollständig/);
+    expect((await get(s.cookie)).servers[0]?.lastRun?.error).toBe('failed');
+
+    mode = 'ok';
+    await once();
+    stop();
+    expect(core.alerts.active(sync)).toBeNull();
+    const okEntry = core.alerts
+      .list({ state: 'all', limit: 50 })
+      .find((a) => a.key === sync && a.level === 'ok');
+    expect(okEntry?.body).toBe('1 neue Kopie, 0 GB.');
+  });
+
   it('warns and writes nothing when the share is not mounted, resolves when it is back', async () => {
     const s = await setup();
     await put(s.cookie, {

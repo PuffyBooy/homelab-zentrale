@@ -60,13 +60,17 @@ export const backupTargetRpcParams = {
    * `busy` while a sync or store runs. Last progress line: `result {json}`
    * (backupTargetStoreDataSchema).
    */
-  'backup.target.store': z.strictObject({
-    fileName: coreDbFileNameSchema,
-    bytes: z.number().int().min(1).max(CORE_DB_MAX_BYTES),
-    sha256,
-    chunks: z.number().int().min(1).max(MAX_DB_CHUNKS),
-    keep: keep.default(14),
-  }),
+  'backup.target.store': z
+    .strictObject({
+      fileName: coreDbFileNameSchema,
+      bytes: z.number().int().min(1).max(CORE_DB_MAX_BYTES),
+      sha256,
+      chunks: z.number().int().min(1).max(MAX_DB_CHUNKS),
+      keep: keep.default(14),
+    })
+    .refine((p) => p.chunks === Math.ceil(p.bytes / (48 * 1024)), {
+      message: 'chunks does not match bytes',
+    }),
 } as const;
 
 // ---- result data ----------------------------------------------------------------

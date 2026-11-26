@@ -7,6 +7,7 @@ import { z } from 'zod';
 import {
   BACKUP_TARGET_ALERT_PREFIX,
   BACKUP_TARGET_DEFAULTS,
+  BACKUP_TARGET_RESERVE_BYTES,
   CORE_DB_MAX_BYTES,
   TRANSFER_CHUNK_BYTES,
   TRANSFER_WINDOW,
@@ -247,8 +248,10 @@ export class BackupTargetService {
 
   private resolveStale(s: BackupTargetSettings): void {
     for (const id of Object.keys(this.state().servers)) {
-      if (s.enabled && s.serverIds.includes(id)) continue;
+      // The database target keeps its mount alert even when it copies no game backups.
+      if (s.enabled && (s.serverIds.includes(id) || s.dbServerId === id)) continue;
       this.deps.alerts.resolve(backupTargetAlertKey({ serverId: id, kind: 'mount' }));
+      this.deps.alerts.resolve(backupTargetAlertKey({ serverId: id, kind: 'space' }));
       this.deps.alerts.resolve(backupTargetAlertKey({ serverId: id, kind: 'sync' }));
     }
     if (!s.enabled || !s.dbServerId) this.deps.alerts.resolve(backupTargetAlertKey({ kind: 'db' }));
@@ -258,13 +261,14 @@ export class BackupTargetService {
     const s = this.settings();
     if (!this.moduleOn || !s.enabled) return;
     for (const id of s.serverIds) {
+      if (!this.moduleOn) return;
       try {
         await this.runServer(id, s.keep);
       } catch (err) {
         this.logError(err, 'backup target run failed');
       }
     }
-    if (s.dbServerId) {
+    if (s.dbServerId && this.moduleOn) {
       try {
         await this.runDb(s.dbServerId, s.keep);
       } catch (err) {
@@ -299,7 +303,7 @@ export class BackupTargetService {
       return null;
     }
     const ro = status.state === 'read_only';
-    this.deps.alerts.raise(
+    this.warn(
       key,
       'warn',
       ro
@@ -352,28 +356,40 @@ export class BackupTargetService {
     const copied = data.games.reduce((a, g) => a + g.copied, 0);
     const bytes = data.games.reduce((a, g) => a + g.bytes, 0);
     const failed = data.games.filter((g) => g.error !== null);
-    const key = backupTargetAlertKey({ serverId: id, kind: 'sync' });
+    const full = failed.filter((g) => g.error === 'no_space');
+    const broken = failed.filter((g) => g.error !== 'no_space');
     const name = this.serverName(id);
-    if (failed.length > 0) {
-      const noSpace = failed.some((g) => g.error === 'no_space');
-      this.deps.alerts.raise(
-        key,
+    // Own keys: a full NAS and a broken copy are different problems with their own text.
+    const spaceKey = backupTargetAlertKey({ serverId: id, kind: 'space' });
+    const syncKey = backupTargetAlertKey({ serverId: id, kind: 'sync' });
+    if (full.length > 0) {
+      this.warn(
+        spaceKey,
         'warn',
-        noSpace
-          ? `Backup-Ziel auf ${name} ist voll`
-          : `Backups von ${name} nicht vollständig aufs NAS kopiert`,
-        `${failed.map((g) => g.gameId).join(', ')}: ${
-          noSpace
-            ? 'auf dem NAS ist zu wenig Platz. Alte Dateien auf der Freigabe löschen oder weniger Kopien behalten.'
-            : 'Kopieren fehlgeschlagen. Freigabe und Verbindung zum NAS prüfen; der nächste Lauf versucht es wieder.'
-        }`,
+        `Backup-Ziel auf ${name} ist voll`,
+        `${full.map((g) => g.gameId).join(', ')}: auf dem NAS ist zu wenig Platz. Alte Dateien auf der Freigabe löschen oder weniger Kopien behalten.`,
         id,
         'system',
       );
     } else {
-      this.deps.alerts.resolve(key, {
+      this.deps.alerts.resolve(spaceKey, {
+        title: `Backup-Ziel auf ${name} hat wieder Platz`,
+        body: 'Die Kopien passen wieder aufs NAS.',
+      });
+    }
+    if (broken.length > 0) {
+      this.warn(
+        syncKey,
+        'warn',
+        `Backups von ${name} nicht vollständig aufs NAS kopiert`,
+        `${broken.map((g) => g.gameId).join(', ')}: Kopieren fehlgeschlagen. Freigabe und Verbindung zum NAS prüfen; der nächste Lauf versucht es wieder.`,
+        id,
+        'system',
+      );
+    } else {
+      this.deps.alerts.resolve(syncKey, {
         title: `Backups von ${name} wieder aufs NAS kopiert`,
-        body: `${copied} neue Kopien, ${gigabytes(bytes)}.`,
+        body: `${copied === 1 ? '1 neue Kopie' : `${copied} neue Kopien`}, ${gigabytes(bytes)}.`,
       });
     }
     record({
@@ -398,7 +414,7 @@ export class BackupTargetService {
       this.saveDb({ at, ok: false, copied: 0, bytes: 0, error, fileName: null });
       if (error === 'offline') return;
       const name = this.serverName(id);
-      this.deps.alerts.raise(
+      this.warn(
         key,
         'warn',
         'Datenbank-Kopie aufs NAS fehlgeschlagen',
@@ -426,7 +442,9 @@ export class BackupTargetService {
       const bytes = (await fh.stat()).size;
       if (bytes < 1 || bytes > CORE_DB_MAX_BYTES) return fail('failed');
       const sha256 = await hashHandle(fh, bytes);
-      if (status.freeBytes !== null && status.freeBytes < bytes) return fail('no_space');
+      if (status.freeBytes !== null && status.freeBytes < bytes + BACKUP_TARGET_RESERVE_BYTES) {
+        return fail('no_space');
+      }
       const result = await this.send(id, fh, { fileName, bytes, sha256, keep });
       if (!result) return fail('failed');
       this.saveDb({ at, ok: true, copied: 1, bytes, error: null, fileName });
@@ -551,6 +569,19 @@ export class BackupTargetService {
     } finally {
       if (!stream.isEnded) stream.cancel();
     }
+  }
+
+  /** Raises a warning unless the module was switched off meanwhile (a run in flight). */
+  private warn(
+    key: string,
+    level: 'warn',
+    title: string,
+    body: string,
+    serverId: string,
+    source: 'system',
+  ): void {
+    if (!this.moduleOn) return;
+    this.deps.alerts.raise(key, level, title, body, serverId, source);
   }
 
   private logError(err: unknown, msg: string): void {
