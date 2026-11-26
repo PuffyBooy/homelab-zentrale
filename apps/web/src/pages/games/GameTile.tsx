@@ -1,8 +1,9 @@
 import type { GameSummary } from '@hz/shared';
 import { useEffect, useState, type ReactElement } from 'react';
-import { GameServer } from '@hz/ui';
+import { Badge, GameServer } from '@hz/ui';
 import { FormError } from '../../components/FormError.js';
 import { disabledTileActions, gameTileProps } from '../../lib/games.js';
+import { relayVia } from '../../lib/relay.js';
 import { ThrottleBadge } from '../throttle/ThrottleBadge.js';
 import { ShareCreateDialog } from './ShareCreateDialog.js';
 import { gameErrorText, useGameAction } from './useGameAction.js';
@@ -44,9 +45,10 @@ export function GameTile({ game, onConsole }: GameTileProps): ReactElement {
         onCopy={() => setCopied(true)}
         disabledActions={disabled}
       />
-      {game.throttled || game.autoStopped ? (
+      {game.throttled || game.autoStopped || game.relay ? (
         <div className="app-game-hint">
           <ThrottleBadge throttled={game.throttled} autoStopped={game.autoStopped} />
+          {game.relay ? <Badge icon="door">{relayVia(game.relay)}</Badge> : null}
         </div>
       ) : null}
       <span className="hz-sr" aria-live="polite">

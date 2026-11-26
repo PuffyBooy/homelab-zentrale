@@ -73,6 +73,9 @@ const MODULE_PREFIXES: Record<ModuleId, readonly string[]> = {
     '/api/settings/share-gateway',
     '/api/share-gateway',
     '/s',
+    // M15 game relay
+    '/api/relay',
+    '/api/settings/dns',
   ],
   proxmox: ['/api/proxmox'],
   dnsfilter: ['/api/dnsfilter'],
@@ -91,6 +94,12 @@ const MODULE_PREFIXES: Record<ModuleId, readonly string[]> = {
   apps: ['/api/apps'],
 };
 
+/** Module routes below another prefix (decoded path or route pattern). */
+const MODULE_PATTERNS: Partial<Record<ModuleId, readonly RegExp[]>> = {
+  // M15: PUT /api/servers/:id/ingress
+  games: [/^\/api\/servers\/[^/]+\/ingress\/?$/],
+};
+
 function under(path: string, prefix: string): boolean {
   return path === prefix || path.startsWith(`${prefix}/`);
 }
@@ -99,6 +108,7 @@ function under(path: string, prefix: string): boolean {
 export function moduleOfPath(path: string): ModuleId | null {
   for (const m of MODULES) {
     if (MODULE_PREFIXES[m].some((p) => under(path, p))) return m;
+    if (MODULE_PATTERNS[m]?.some((re) => re.test(path))) return m;
   }
   return null;
 }

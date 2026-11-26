@@ -171,6 +171,7 @@ describe('install.sh end to end (real curl + sh against the live app)', () => {
     expect(existsSync(sb.homelab)).toBe(true);
     const env = readEnv(envFile);
     expect(Object.keys(env).sort()).toEqual([
+      'HZ_AGENT_ALLOW_RELAY',
       'HZ_AGENT_ALLOW_TASKS',
       'HZ_AGENT_ALLOW_TERMINAL',
       'HZ_AGENT_NAME',
@@ -182,6 +183,8 @@ describe('install.sh end to end (real curl + sh against the live app)', () => {
       HZ_AGENT_NAME: 'pi',
       HZ_AGENT_ALLOW_TERMINAL: '0',
       HZ_AGENT_ALLOW_TASKS: '0',
+      // M15: no game relay unless --allow-relay is given.
+      HZ_AGENT_ALLOW_RELAY: '0',
     });
     const token = env.HZ_AGENT_TOKEN ?? '';
     expect(token).toMatch(/^[A-Za-z0-9_-]{22,128}$/);
@@ -241,6 +244,17 @@ describe('install.sh end to end (real curl + sh against the live app)', () => {
       state: 'connected',
       serverId,
     });
+  });
+
+  it('--allow-relay (M15) writes HZ_AGENT_ALLOW_RELAY=1 into agent.env', async () => {
+    const live = await liveApp();
+    t = live.t;
+    const o = await createOnboarding(t, live.cookie, 'edge');
+    const sb = sandbox();
+    const r = await runOneLiner(`${o.oneLiner} --allow-relay`, sb);
+    expect(r.code, r.stderr).toBe(0);
+    const env = readEnv(join(sb.conf, 'agent.env'));
+    expect(env).toMatchObject({ HZ_AGENT_ALLOW_RELAY: '1', HZ_AGENT_ALLOW_TERMINAL: '0' });
   });
 
   it('a multi-line argument with a valid first line is refused before anything runs', async () => {

@@ -304,6 +304,14 @@ export const topConsumerSchema = z.strictObject({
 });
 export type TopConsumer = z.infer<typeof topConsumerSchema>;
 
+// GET /api/overview/top-consumers?serverId= -> top 3 of that server (all servers without)
+export const topConsumersQuerySchema = z.strictObject({
+  serverId: z
+    .string()
+    .regex(/^[A-Za-z0-9_-]{8,64}$/)
+    .optional(),
+});
+
 export const topConsumersResponseSchema = z.strictObject({
   byCpu: z.array(topConsumerSchema).max(TOP_CONSUMERS_LIMIT),
   byRam: z.array(topConsumerSchema).max(TOP_CONSUMERS_LIMIT),

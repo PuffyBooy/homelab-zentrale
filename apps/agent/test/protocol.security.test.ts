@@ -145,7 +145,17 @@ describe('handshake and enrollment', () => {
       arch: 'amd64',
       os: 'Debian GNU/Linux 12',
       token: ENROLL_TOKEN,
-      capabilities: { terminal: false, docker: false, tasks: false },
+      capabilities: { terminal: false, docker: false, tasks: false, relay: false },
+    });
+  });
+
+  it('announces the relay capability only with HZ_AGENT_ALLOW_RELAY', async () => {
+    makeConn({ allowRelay: true });
+    await conn?.start();
+    await until(() => received[0]?.length === 1);
+    expect(received[0]?.[0]).toMatchObject({
+      type: 'hello',
+      capabilities: { terminal: false, docker: false, relay: true },
     });
   });
 

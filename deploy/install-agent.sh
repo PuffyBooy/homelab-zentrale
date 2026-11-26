@@ -3,7 +3,8 @@
 #
 #   sudo HZ_AGENT_TOKEN=<token> ./deploy/install-agent.sh \
 #     --url wss://heimserver.<tailnet>.ts.net/agent --name oracle-a1 \
-#     [--image <image> | --build-local] [--allow-terminal] [--tasks] [--smart]
+#     [--image <image> | --build-local] [--allow-terminal] [--tasks]
+#     [--allow-relay | --no-relay] [--smart]
 #
 # Image: by default the multi-arch image ghcr.io/puffybooy/homelab-agent:latest
 # (amd64 + arm64) is pulled. Pin a build with --image ghcr.io/puffybooy/homelab-agent:sha-<short>
@@ -13,6 +14,10 @@
 # --tasks allows scheduled shell commands from the core (M20, task.exec): sets
 # HZ_AGENT_ALLOW_TASKS=1 in agent.env. Like --allow-terminal it is a root shell on
 # the host, started by the core; leave it off unless you need "Befehl ausführen".
+# --allow-relay makes this server a game ingress (M15, HZ_AGENT_ALLOW_RELAY=1): the
+# agent then forwards the public game ports into the tailnet. Only on the server with
+# the public IPv4 whose firewall opens the game ports, never on the home server.
+# --no-relay switches it off again (also without a new token).
 #
 # --smart lets the agent read SMART values of the disks (NAS, M13): it adds
 # deploy/docker-compose.agent.smart.yml (read access to the disks, CAP_SYS_RAWIO).
@@ -42,6 +47,8 @@ name=""
 image=""
 allow_terminal=0
 tasks=0
+# Empty: keep what agent.env says (0 for a new one); 1/0 from --allow-relay/--no-relay.
+allow_relay=""
 smart=0
 build_local=0
 if [[ "${HZ_BUILD_LOCAL:-0}" == 1 ]]; then build_local=1; fi
@@ -53,7 +60,7 @@ die() {
 }
 
 usage() {
-  sed -n '2,26p' "$0" | sed 's/^# \{0,1\}//'
+  sed -n '2,35p' "$0" | sed 's/^# \{0,1\}//'
   exit "${1:-0}"
 }
 
@@ -65,6 +72,8 @@ while [[ $# -gt 0 ]]; do
     --build-local) build_local=1; shift ;;
     --allow-terminal) allow_terminal=1; shift ;;
     --tasks) tasks=1; shift ;;
+    --allow-relay) allow_relay=1; shift ;;
+    --no-relay) allow_relay=0; shift ;;
     --smart) smart=1; shift ;;
     --token-stdin) token_stdin=1; shift ;;
     --token|--token=*) die "das Token nie als Argument übergeben, sondern über HZ_AGENT_TOKEN oder --token-stdin" ;;
@@ -131,20 +140,27 @@ if [[ -n "$token" || ! -f "$CONF_DIR/agent.env" ]]; then
     printf 'HZ_AGENT_TOKEN=%s\n' "$token"
     printf 'HZ_AGENT_ALLOW_TERMINAL=%s\n' "$allow_terminal"
     printf 'HZ_AGENT_ALLOW_TASKS=%s\n' "$tasks"
+    printf 'HZ_AGENT_ALLOW_RELAY=%s\n' "${allow_relay:-0}"
   } >"$tmp"
   chmod 0600 "$tmp"
   mv -f "$tmp" "$CONF_DIR/agent.env"
 else
   # Existing configuration without a new token: --allow-terminal / --tasks switch the
-  # flag on in place (everything else, including the agent token, stays as it is).
-  for flag in HZ_AGENT_ALLOW_TERMINAL:"$allow_terminal" HZ_AGENT_ALLOW_TASKS:"$tasks"; do
-    key="${flag%%:*}"
-    [[ "${flag#*:}" == 1 ]] || continue
+  # flag on, --allow-relay / --no-relay switch the ingress, in place (everything else,
+  # including the agent token, is copied unchanged and never printed).
+  relay_flag=""
+  [[ -n "$allow_relay" ]] && relay_flag="HZ_AGENT_ALLOW_RELAY:$allow_relay:set"
+  for flag in HZ_AGENT_ALLOW_TERMINAL:"$allow_terminal":on HZ_AGENT_ALLOW_TASKS:"$tasks":on $relay_flag; do
+    IFS=: read -r key value mode <<<"$flag"
+    [[ "$mode" == set || "$value" == 1 ]] || continue
     tmp="$(mktemp "$CONF_DIR/.agent.env.XXXXXX")"
-    { grep -v "^${key}=" "$CONF_DIR/agent.env" || true; printf '%s=1\n' "$key"; } >"$tmp"
+    grep -v "^${key}=" "$CONF_DIR/agent.env" >"$tmp" || true
+    # A last line without newline would swallow the new entry.
+    if [[ -s "$tmp" && -n "$(tail -c 1 "$tmp")" ]]; then echo >>"$tmp"; fi
+    printf '%s=%s\n' "$key" "$value" >>"$tmp"
     chmod 0600 "$tmp"
     mv -f "$tmp" "$CONF_DIR/agent.env"
-    echo "$key=1 in $CONF_DIR/agent.env gesetzt."
+    echo "$key=$value in $CONF_DIR/agent.env gesetzt."
   done
 fi
 umask "$old_umask"

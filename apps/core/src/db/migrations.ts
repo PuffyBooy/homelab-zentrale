@@ -803,6 +803,39 @@ CREATE INDEX whitelist_requests_share ON whitelist_requests(share_id, created_at
   },
   {
     version: 16,
+    name: 'game_relay',
+    // M15 game relay (apps/core/src/relay): server_ingress marks a server with a public IPv4
+    // as ingress (port range opened in the provider firewall; public_ip NULL = the IP from
+    // the inventory). game_relays: the ingress of a game, its optional DNS name, dns_ip (the
+    // A record value set last), listen_ports_json (the public ports on the ingress per port
+    // name, fixed at assignment: friends keep address and port when the game moves or its
+    // host ports change) and the relay state per game (ok | pending | error). The DNS
+    // provider lives in settings key relay.dns (token via crypto.ts, AAD settings.relay.dns.token).
+    sql: `
+CREATE TABLE server_ingress (
+  server_id TEXT PRIMARY KEY REFERENCES servers(id) ON DELETE CASCADE,
+  enabled INTEGER NOT NULL DEFAULT 0,
+  public_ip TEXT,
+  port_from INTEGER NOT NULL,
+  port_to INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+
+CREATE TABLE game_relays (
+  game_id TEXT PRIMARY KEY REFERENCES game_servers(id) ON DELETE CASCADE,
+  ingress_server_id TEXT NOT NULL REFERENCES servers(id) ON DELETE CASCADE,
+  dns_name TEXT,
+  dns_ip TEXT,
+  listen_ports_json TEXT NOT NULL DEFAULT '[]',
+  state TEXT NOT NULL DEFAULT 'pending',
+  error TEXT,
+  updated_at INTEGER NOT NULL
+);
+CREATE INDEX game_relays_ingress ON game_relays(ingress_server_id, updated_at);
+`,
+  },
+  {
+    version: 17,
     name: 'automation_domains_apps',
     sql: `
 CREATE TABLE scheduled_tasks (

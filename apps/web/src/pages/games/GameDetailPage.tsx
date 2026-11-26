@@ -29,6 +29,7 @@ import { MigrateDialog } from './MigrateDialog.js';
 import { MigrationTile, useMigration } from './MigrationTile.js';
 import { GamePriorityTile } from '../throttle/PriorityTile.js';
 import { PortsTile } from './PortsTile.js';
+import { RelayTile } from './RelayTile.js';
 import { ModsTile } from './ModsTile.js';
 import { NotifyTile } from './NotifyTile.js';
 import { SchedulesTile } from './SchedulesTile.js';
@@ -136,7 +137,10 @@ function Detail({ game }: { game: GameSummary }): ReactElement {
             <Link to={`/servers/${game.serverId}`}>{game.serverName}</Link>
           </dd>
           <dt>Adresse</dt>
-          <dd className="app-break">{game.address}</dd>
+          <dd className="app-break">
+            {game.address}
+            {game.relay ? ` · über ${game.relay.ingressName}` : ''}
+          </dd>
           <dt>Ports</dt>
           <dd>{ports.map((p) => portLabel(p.port, p.protocol, p.count)).join(' · ')}</dd>
           <dt>Priorität</dt>
@@ -172,8 +176,9 @@ function Detail({ game }: { game: GameSummary }): ReactElement {
       <GamePriorityTile game={game} />
       <PortsTile game={game} tpl={tpl} />
       <Tile title="Von außen erreichbar" icon="globe" span={2}>
-        <ForwardHint ports={ports} server={server} />
+        <ForwardHint ports={ports} server={server} relay={game.relay} />
       </Tile>
+      <RelayTile game={game} />
       <Tile title="Umziehen" icon="server" span={2}>
         <p className="app-text">
           Zieht {game.name} mit Welt und Einstellungen auf einen anderen Server um. Am Ziel schlägt

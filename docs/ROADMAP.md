@@ -150,6 +150,15 @@ Wunsch des Admins vom 26.11.2026. Vier neue Module (alle standardmäßig aus, Ei
 
 ---
 
+## M15: Game-Relay (Eingänge) und feste Adressen
+- **Eingang pro Server:** Jeder Server mit öffentlicher IPv4 kann als Eingang markiert werden (Step-up, Portbereich, den man in der Firewall des Anbieters öffnet), auch mehrere. Der Agent dort braucht `HZ_AGENT_ALLOW_RELAY=1`.
+- **Relay pro Gameserver:** Ein Gameserver bekommt einen Eingang. Der Agent am Eingang nimmt die Spielports (gleiche Nummern) an und leitet TCP und UDP über Tailscale zum Server, auf dem das Spiel gerade läuft (`relay.set`). Kein Router-Portforwarding zu Hause nötig. Der Schlafmodus funktioniert durch das Relay (das Wecken kommt am Spielserver an).
+- **Umzug behält die Adresse:** Zieht ein Gameserver um (M11) oder ändern sich Ports, stellt die Zentrale die Relay-Ziele sofort um. Freunde behalten Adresse und Port.
+- **Feste DNS-Namen (optional):** pro Gameserver ein Name; die Zentrale setzt den A-Record auf die IP des Eingangs (Cloudflare oder DuckDNS, Token verschlüsselt). Wechselt der Eingang, zieht der DNS-Eintrag mit.
+- **Web:** Einstellungen → Eingänge (Liste, Portbereich, Firewall-Hinweis), im Gameserver-Detail „Erreichbar über“ mit Eingang, Name, Zustand; Benutzerlinks zeigen die Relay-Adresse.
+
+**Abnahme:** Zwei Sim-Server und ein Sim-Eingang: ein Gameserver ist über den Eingang erreichbar (TCP und UDP, echter Datenfluss im Test), zieht auf den zweiten Server um und ist danach über dieselbe Adresse erreichbar; ein DNS-Name wird bei einem Fake-Anbieter gesetzt und beim Eingangswechsel umgestellt. Sicherheitstests: Relay nur mit `HZ_AGENT_ALLOW_RELAY=1`, Ziele nur im Tailnet, keine Ports unter 1024 oder außerhalb des Bereichs, keine Überschneidungen, Grenzen für Verbindungen und Leerlauf, DNS-Token nie in Antwort oder Log, DNS-Anfragen nur an die festen Anbieter-Hosts, Step-up für Eingänge, Relays und DNS.
+
 ## M18: Zusatzmodule Log-Suche, Schwachstellen-Scan, Fail2ban, Discord-Bot, Sprachsteuerung
 **Ziel:** Fünf optionale Module (alle Standard aus, unter Einstellungen → Module). Discord-Bot und Sprachsteuerung steuern von außerhalb der Zentrale und brauchen zum Einschalten Step-up. Keine neue Migration (Einstellungen im `settings`-Speicher), damit parallele Meilensteine nicht kollidieren.
 

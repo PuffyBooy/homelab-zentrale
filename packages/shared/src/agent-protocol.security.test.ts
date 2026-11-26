@@ -57,6 +57,7 @@ describe('agent protocol allowlist', () => {
         'game.mods.install',
         'game.mods.remove',
         'game.restore',
+        'relay.set',
         'pty.close',
         'pty.input',
         'pty.open',

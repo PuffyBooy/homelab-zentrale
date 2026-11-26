@@ -6,6 +6,7 @@ import type { StreamManager } from '../streams.js';
 import type { WakeManager } from './game-wake.js';
 import type { PtyManager } from './pty.js';
 import type { TaskManager } from './task-exec.js';
+import type { RelayManager } from './relay.js';
 
 /** Thrown by actions; becomes rpc.result {ok:false, error:{code, message}}. */
 export class ActionError extends Error {
@@ -49,6 +50,8 @@ export interface ActionContext {
   tasks?: TaskManager;
   /** Wake listeners of sleeping games (game.wake.*); set by index.ts. */
   wake?: WakeManager;
+  /** Game relay routes (relay.set); only set when HZ_AGENT_ALLOW_RELAY=1. */
+  relay?: RelayManager;
 }
 
 export type ActionHandler<A extends RpcAction> = (
