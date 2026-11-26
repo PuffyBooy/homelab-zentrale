@@ -1,4 +1,5 @@
-import type { Alert, ServerSummary } from '@hz/shared';
+import type { Alert, ContainerSummary, ServerSummary } from '@hz/shared';
+import { containerSentence, containerStateText } from '../lib/containers.js';
 import { formatTime, plural } from '../lib/format.js';
 import type { LiveState } from '../lib/live.js';
 import {
@@ -20,6 +21,8 @@ export interface PageMeta {
 export interface PageData {
   servers?: ServerSummary[] | undefined;
   alerts?: Alert[] | undefined;
+  /** Only read on the container pages. */
+  containers?: ContainerSummary[] | undefined;
   /** Server filter from the ServerSwitch, or the id of the detail page. */
   filter?: string | undefined;
   live?: LiveState | undefined;
@@ -46,6 +49,16 @@ function liveSub(area: string, data: PageData): string {
 export function serverDetailId(pathname: string): string | null {
   const m = /^\/servers\/([A-Za-z0-9_-]{1,64})\/?$/.exec(pathname);
   return m?.[1] ?? null;
+}
+
+export function containerLogsId(pathname: string): string | null {
+  const m = /^\/containers\/([A-Za-z0-9_-]{8,64})\/logs\/?$/.exec(pathname);
+  return m?.[1] ?? null;
+}
+
+/** Pages that read the container list in the shell header. */
+export function needsContainers(pathname: string): boolean {
+  return pathname === '/containers' || containerLogsId(pathname) !== null;
 }
 
 export function pageMeta(pathname: string, data: PageData = {}): PageMeta {
@@ -76,6 +89,27 @@ export function pageMeta(pathname: string, data: PageData = {}): PageMeta {
     const s = servers.find((x) => x.id === detailId);
     if (!s) return { title: plain('Server'), sub: 'lädt …', serverSwitch: true };
     return { title: serverSentence(s), sub: liveSub('Server', data), serverSwitch: true };
+  }
+
+  if (pathname === '/containers') {
+    if (data.servers === undefined || data.containers === undefined) {
+      return { title: plain('Container'), sub: 'lädt …', serverSwitch: true };
+    }
+    const list = filtered
+      ? data.containers.filter((c) => c.serverId === filtered.id)
+      : data.containers;
+    return { title: containerSentence(list), sub: liveSub('Container', data), serverSwitch: true };
+  }
+
+  const logsId = containerLogsId(pathname);
+  if (logsId) {
+    const c = data.containers?.find((x) => x.id === logsId);
+    if (!c) return { title: plain('Logs'), sub: 'lädt …', serverSwitch: false };
+    return {
+      title: containerStateText(c),
+      sub: `Logs · ${c.serverName} · ${c.image}`,
+      serverSwitch: false,
+    };
   }
 
   if (pathname === settingsItem.href) {

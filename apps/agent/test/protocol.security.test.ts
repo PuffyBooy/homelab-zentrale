@@ -166,6 +166,9 @@ describe('handshake and enrollment', () => {
     expect(hello2).toMatchObject({ type: 'hello', token: AGENT_TOKEN });
 
     const file = path.join(dataDir, 'agent.json');
+    // The token is used right away; the atomic save (fsync + rename) may finish a
+    // moment after the reconnect on a slow runner.
+    await until(() => logLines.some((l) => l.includes('agent token saved')));
     expect((await stat(file)).mode & 0o777).toBe(0o600);
     expect(JSON.parse(await readFile(file, 'utf8'))).toMatchObject({
       agentToken: AGENT_TOKEN,

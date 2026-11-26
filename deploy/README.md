@@ -43,7 +43,7 @@ Beim ersten Verbinden tauscht der Agent das Einmal-Token gegen ein dauerhaftes A
 
 | Variable | Bedeutung |
 | --- | --- |
-| `HZ_CORE_URL` | `wss://…/agent`. `ws://` nur für Loopback und Tailnet-Adressen (100.64.0.0/10, MagicDNS, `*.ts.net`). |
+| `HZ_CORE_URL` | `wss://…/agent`. `ws://` nur für Loopback (`127.0.0.0/8`, `::1`, `localhost`), Tailscale-IPs (`100.64.0.0/10`, `fd7a:115c:a1e0::/48`), `*.ts.net` und **Hostnamen ohne Punkt** (MagicDNS-Kurznamen, z. B. `ws://heimserver/agent`). Jeder andere Hostname mit Punkt braucht `wss://`. Weil Kurznamen als MagicDNS gelten, darf die DNS-Suchdomain des Servers sie nicht auf Geräte außerhalb des Tailnets auflösen; im Zweifel `wss://heimserver.<tailnet>.ts.net/agent` verwenden. |
 | `HZ_AGENT_TOKEN` | Enrollment-Token (erster Start) oder Agent-Token. |
 | `HZ_AGENT_NAME` | Name des Servers, `a-z0-9-`. Muss bei „Neu starten“ zur Bestätigung eingegeben werden. |
 | `HZ_AGENT_ALLOW_TERMINAL` | `1` erlaubt die Web-Konsole (PTY). Standard `0`: alle `pty.*` werden abgelehnt. |
@@ -54,7 +54,7 @@ Beim ersten Verbinden tauscht der Agent das Einmal-Token gegen ein dauerhaftes A
 
 Alles, was nicht gebraucht wird, ist weg (`cap_drop: ALL`, schreibgeschütztes Dateisystem, `no-new-privileges`). Warum der Rest nötig ist, steht als Kommentar in `deploy/docker-compose.agent.yml`. Kurz:
 
-- **Docker-Socket**: Container auflisten, starten, stoppen. Wer den Socket hat, ist faktisch root auf dem Host. Deshalb führt der Agent nur die Aktionen aus der Allowlist aus (`packages/shared/src/agent-protocol.ts`), mit festen Programmen und Argument-Arrays.
+- **Docker-Socket**: Container auflisten, starten, stoppen, Logs, Events, Image-Update und `docker compose`. Wer den Socket hat, ist faktisch root auf dem Host. Deshalb führt der Agent nur die Aktionen aus der Allowlist aus (`packages/shared/src/agent-protocol.ts`), mit festen Programmen und Argument-Arrays.
 - **`pid: host`, `network_mode: host`, `/proc` und `/sys` lesend**: Messwerte, Ports und Netz des Hosts statt des Containers.
 - **`user: 0:0` mit `SYS_ADMIN`, `SYS_PTRACE`, `SYS_CHROOT`** und `apparmor=unconfined`: `nsenter` in die Namespaces von Host-PID 1 und Lesen von `/host/proc/1/root`. Das Image selbst läuft standardmäßig als `node`; dann gibt es nur Messwerte.
 - **`DAC_READ_SEARCH`**: `/var/log/auth.log` gehört `syslog:adm`.
@@ -97,9 +97,25 @@ Damit laufen die Binaries und Dateien des Hosts, nicht die des Images. Erlaubt s
 | `system.cleanup` | `apt-get clean`, `apt-get -y -q purge -- <alte Kernel-Pakete>` (nie der laufende Kernel, die Liste berechnet der Agent selbst), `journalctl --vacuum-size=200M`, Docker: ungenutzte Images und Build-Cache löschen |
 | `system.reboot` | `systemctl reboot`, 2 s nach der Antwort, nur wenn `confirmName` gleich `HZ_AGENT_NAME` ist |
 
+### Container (M3)
+
+Alles über die Docker-API am Socket, außer `compose.*`, das die Docker-CLI im Image ausführt.
+
+| Teil | Wie |
+| --- | --- |
+| Inventar | `listContainers` bei jedem Inventar (60 s und nach Docker-Events). `inspect` (Startzeit, Neustarts, Exit-Code, Health) nur für neue oder geänderte Container: Cache, den Docker-Events leeren, spätestens nach 10 Min neu. Compose-Gruppe aus den Labels `com.docker.compose.project`, `…service`, `…project.working_dir` (→ `composeDir`). |
+| CPU/RAM | One-Shot-Stats (`one-shot=true`, kein 2-s-Warten) höchstens alle ~60 s, 4 parallel, nur laufende Container. CPU % ist der Anteil am ganzen Host zwischen zwei Messungen (0–100, vergleichbar mit der Server-CPU; `docker stats` zeigt pro Kern). RAM wie `docker stats`: Nutzung minus `inactive_file`. Das erste Inventar hat noch keine CPU. |
+| Docker-Events | `GET /events` (nur `type=container`), Reconnect mit Backoff. `start`, `stop`, `die` (mit Exit-Code), `restart`, `health_status`, `oom` gehen sofort als `event` an den Core; jede Änderung (auch `create`, `destroy`, `kill`, `pause`, `rename`) löst ein neues `inventory` aus, entprellt (1 s nach dem letzten Event, spätestens nach 5 s). `exec_*` (Healthchecks) wird ignoriert. Nach einem Reconnect kommt ein frisches Inventar. |
+| `container.logs` | Stream (`stream.data`/`stream.end`, Stream-ID = RPC-ID). Zuerst kommt das `rpc.result`, dann die Daten. Docker-Multiplex (8-Byte-Header) wird in `stdout`/`stderr` getrennt, TTY-Container liefern rohe Bytes (`stdout`). UTF-8 wird über Frame-Grenzen korrekt dekodiert. Jeder Chunk besteht aus ganzen Zeilen (`zeile\n…`), höchstens 64 KiB (`MAX_CHUNK_CHARS`), Zeilen über 16 KiB werden geteilt, gebündelt für 50 ms. Bei `stream.cancel` oder Verbindungsverlust wird der Docker-Stream geschlossen. Ist der WebSocket-Puffer über 4 MiB, pausiert der Agent den Docker-Stream. Höchstens 16 Streams gleichzeitig. |
+| `container.update` | Nur Container **ohne** Compose-Label (sonst `invalid_params`: „compose.pull + compose.up“) und nur mit Image-Tag (nicht mit nackter Image-ID). Ablauf: `inspect` → `pull` (schlägt der Pull fehl, z. B. bei einem nur lokalen Tag, wird ein neueres lokales Image mit diesem Tag verwendet) → alten Container in `<name>-hz-old-<zeit>` umbenennen → neuen mit gleichem Namen und gleicher Konfiguration anlegen (HostConfig, Env, Labels, Ports, Netzwerke mit Aliasen; Werte, die nur aus dem alten Image kamen, werden weggelassen, damit die Vorgaben des neuen Images gelten; anonyme Volumes werden übernommen) → weitere Netzwerke verbinden → alten stoppen → neuen starten → nach 3 s prüfen, dass er läuft → alten entfernen (Volumes bleiben). Schlägt ein Schritt nach dem Umbenennen fehl, wird zurückgerollt: neuer Container weg, alter bekommt seinen Namen zurück und startet wieder. Solange das Update läuft, ist der alte Container im Inventar und in den Events ausgeblendet. Eine Aktion pro Container gleichzeitig (`busy`). |
+| `compose.pull` / `up` / `down` | `DOCKER_HOST=unix://<socket> docker compose --ansi never --project-directory <dir> -f <datei> pull --quiet` bzw. `up -d --remove-orphans` bzw. `down --remove-orphans` (Volumes bleiben). `<dir>` ist mit `realpath` geprüft und liegt unter `/opt/homelab/`; die Compose-Datei (`compose.yml`, `compose.yaml`, `docker-compose.yml`, `docker-compose.yaml`) wird ebenfalls mit `realpath` geprüft und muss eine normale Datei unter `/opt/homelab/` sein (ein Symlink nach draußen wird abgelehnt). Kindprozesse bekommen nur `PATH`, `LANG`, `LC_ALL`, `DEBIAN_FRONTEND`, `DOCKER_HOST` und `DOCKER_CONFIG=/tmp/.docker`. Zeitlimits: pull 15 Min, up 10 Min, down 5 Min. Eine Compose-Aktion pro Ordner gleichzeitig. |
+| `compose.write` | Dateinamen nach `fileNameSchema` (kein `/`, kein `..`, keine Punktdateien, max. 100 Zeichen, 1–20 Dateien, je max. 256 KiB). Der Ordner wird angelegt (0750) und danach noch einmal mit `realpath` geprüft. Jede Datei wird atomar geschrieben: exklusive Temp-Datei im selben Ordner (`O_EXCL`, folgt keinem Symlink), `fsync`, `rename`. Ein vorhandener Symlink am Ziel wird ersetzt, nicht beschrieben. Modus 0640. |
+
+**Docker-CLI im Image:** `docker` und das Compose-Plugin kommen als statische Binaries aus dem offiziellen Multi-Arch-Image `docker:29-cli` (per Digest gepinnt, `linux/amd64` und `linux/arm64`), ohne apt-Repository. `docker` steht in der Programm-Allowlist (`apps/agent/src/exec.ts`) und wird nur von `actions/compose.ts` mit festen Argumenten aufgerufen.
+
 ### Prüfen
 
 ```bash
 docker logs -f homelab-agent        # JSON-Zeilen, ohne Tokens
-pnpm exec tsx test/docker/agent-smoke.ts   # Core + Agent als Container, Enrollment, Offline-Meldung
+pnpm exec tsx test/docker/agent-smoke.ts   # Core + Agent als Container, Enrollment, Container, Offline-Meldung
 ```

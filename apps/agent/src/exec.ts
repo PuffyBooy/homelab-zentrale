@@ -23,8 +23,8 @@ export const PROGRAMS = new Set([
   'ss',
   'ping',
   'systemctl',
-  // Only used by tests to prove that arguments stay literal.
-  'printf',
+  // Docker CLI in the agent image, only for `docker compose` (actions/compose.ts).
+  'docker',
 ]);
 
 export const CHILD_ENV: Readonly<Record<string, string>> = Object.freeze({
@@ -34,11 +34,30 @@ export const CHILD_ENV: Readonly<Record<string, string>> = Object.freeze({
   DEBIAN_FRONTEND: 'noninteractive',
 });
 
+/** The only variables a caller may add to CHILD_ENV (never the agent token). */
+export const EXTRA_ENV_KEYS = ['DOCKER_HOST', 'DOCKER_CONFIG'] as const;
+export type ExtraEnv = Partial<Record<(typeof EXTRA_ENV_KEYS)[number], string>>;
+
 export interface RunOptions {
   /** Default 30 s. */
   timeoutMs?: number;
   /** Default 16 MiB per stream. */
   maxBuffer?: number;
+  /** Additional environment, restricted to EXTRA_ENV_KEYS. */
+  env?: ExtraEnv;
+}
+
+function childEnv(extra: ExtraEnv | undefined): Record<string, string> {
+  const env: Record<string, string> = { ...CHILD_ENV };
+  if (!extra) return env;
+  for (const [k, v] of Object.entries(extra)) {
+    if (!(EXTRA_ENV_KEYS as readonly string[]).includes(k)) {
+      throw new ExecPolicyError(`env not allowed: ${k.slice(0, 40)}`);
+    }
+    if (typeof v !== 'string' || v.includes('\0')) throw new ExecPolicyError('invalid env value');
+    env[k] = v;
+  }
+  return env;
 }
 
 export interface RunResult {
@@ -57,8 +76,12 @@ export class ExecPolicyError extends Error {
   }
 }
 
-function checkArgs(file: string, args: readonly string[]): void {
-  if (!PROGRAMS.has(file)) throw new ExecPolicyError(`program not allowed: ${file.slice(0, 40)}`);
+function checkArgs(
+  file: string,
+  args: readonly string[],
+  programs: ReadonlySet<string> = PROGRAMS,
+): void {
+  if (!programs.has(file)) throw new ExecPolicyError(`program not allowed: ${file.slice(0, 40)}`);
   for (const a of args) {
     if (typeof a !== 'string') throw new ExecPolicyError('arguments must be strings');
     if (a.includes('\0')) throw new ExecPolicyError('NUL in argument');
@@ -71,7 +94,28 @@ export function runFile(
   args: readonly string[],
   opts: RunOptions = {},
 ): Promise<RunResult> {
-  checkArgs(file, args);
+  return runChecked(PROGRAMS, file, args, opts);
+}
+
+/**
+ * A runner with its own program allowlist. Only tests use this (e.g. with
+ * `printf` to prove that arguments stay literal); production code always goes
+ * through runFile and PROGRAMS.
+ */
+export function makeRunner(programs: ReadonlySet<string>) {
+  const frozen = new Set(programs);
+  return (file: string, args: readonly string[], opts: RunOptions = {}): Promise<RunResult> =>
+    runChecked(frozen, file, args, opts);
+}
+
+function runChecked(
+  programs: ReadonlySet<string>,
+  file: string,
+  args: readonly string[],
+  opts: RunOptions,
+): Promise<RunResult> {
+  checkArgs(file, args, programs);
+  const env = childEnv(opts.env);
   const timeout = opts.timeoutMs ?? 30_000;
   const maxBuffer = opts.maxBuffer ?? 16 * 1024 * 1024;
   return new Promise((resolve) => {
@@ -86,7 +130,7 @@ export function runFile(
         maxBuffer,
         killSignal: 'SIGKILL',
         windowsHide: true,
-        env: { ...CHILD_ENV },
+        env,
         encoding: 'utf8',
       },
       (err, stdout, stderr) => {

@@ -1,5 +1,6 @@
 import {
   parseRpc,
+  streamingActions,
   terminalActions,
   type AgentEvent,
   type RpcAction,
@@ -10,7 +11,10 @@ import {
 } from '@hz/shared';
 import { resolveHomelabPath } from '../paths.js';
 import { checkHttp, checkPing, checkTcp } from './checks.js';
+import { composeDown, composePull, composeUp, composeWrite } from './compose.js';
 import { containerRestart, containerStart, containerStop } from './container.js';
+import { containerUpdate } from './container-update.js';
+import { containerLogs } from './logs.js';
 import { cleanup, cleanupPreview } from './system-cleanup.js';
 import { systemReboot } from './system-reboot.js';
 import {
@@ -35,12 +39,12 @@ export const handlers: ActionHandlers = {
   'container.start': containerStart,
   'container.stop': containerStop,
   'container.restart': containerRestart,
-  'container.update': notImplemented,
-  'container.logs': notImplemented,
-  'compose.up': notImplemented,
-  'compose.down': notImplemented,
-  'compose.pull': notImplemented,
-  'compose.write': notImplemented,
+  'container.update': containerUpdate,
+  'container.logs': containerLogs,
+  'compose.up': composeUp,
+  'compose.down': composeDown,
+  'compose.pull': composePull,
+  'compose.write': composeWrite,
   'game.rcon': notImplemented,
   'game.backup': notImplemented,
   'deploy.run': notImplemented,
@@ -94,6 +98,16 @@ export class Dispatcher {
     return this.fail(env.id, code, message);
   }
 
+  /**
+   * Call after the rpc.result went out (or failed to). Streams go live only after
+   * their result, so the core always sees rpc.result before stream.data.
+   */
+  resultSent(result: RpcResult, sent: boolean): void {
+    if (!this.ctx.streams.has(result.id)) return;
+    if (sent && result.ok) this.ctx.streams.activate(result.id);
+    else this.ctx.streams.discard(result.id);
+  }
+
   /** Validates (allowlist, params, terminal, paths) and runs one RPC. Never throws. */
   async handle(env: RpcEnvelope): Promise<RpcResult> {
     const parsed = parseRpc(env);
@@ -113,12 +127,16 @@ export class Dispatcher {
     }
 
     const handler = this.table[req.action] as ActionHandler<RpcAction>;
+    const streaming = streamingActions.includes(req.action);
     try {
       const data = await handler(params as RpcRequest['params'], this.ctx, req.id);
       return { type: 'rpc.result', id: req.id, ok: true, data: data ?? null };
     } catch (err) {
+      // A failed streaming action never sends stream.data/stream.end.
+      if (streaming) this.ctx.streams.discard(req.id);
       if (err instanceof ActionError) {
-        if (DENY_CODES.has(err.code)) return this.deny(env, err.code as DenyCode, err.message);
+        if (err.audit && DENY_CODES.has(err.code))
+          return this.deny(env, err.code as DenyCode, err.message);
         return this.fail(req.id, err.code, err.message);
       }
       this.ctx.log.error('rpc failed', { action: req.action, error: err });

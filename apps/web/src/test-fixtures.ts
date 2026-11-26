@@ -1,4 +1,4 @@
-import type { Alert, ServerDetail, ServerSummary } from '@hz/shared';
+import type { Alert, ContainerSummary, ServerDetail, ServerSummary } from '@hz/shared';
 
 /** Test data builders (unit tests only). */
 
@@ -72,6 +72,34 @@ export function alert(over: Partial<Alert> = {}): Alert {
     openedAt: '2026-11-25T22:02:00.000Z',
     ackedAt: null,
     resolvedAt: null,
+    ...over,
+  };
+}
+
+let c = 0;
+export function container(over: Partial<ContainerSummary> = {}): ContainerSummary {
+  c++;
+  return {
+    id: `ctr-${String(c).padStart(6, '0')}`,
+    serverId: 'srv-home0001',
+    serverName: 'heimserver',
+    dockerId: `${String(c).padStart(12, '0')}`,
+    name: `container-${c}`,
+    image: 'nginx:1.27',
+    composeProject: null,
+    composeService: null,
+    composeManaged: false,
+    state: 'running',
+    health: 'none',
+    status: 'ok',
+    statusText: 'Up 3 hours',
+    exitCode: null,
+    startedAt: '2026-11-25T19:04:00.000Z',
+    ports: [],
+    cpu: 1.2,
+    memBytes: 312 * 1024 ** 2,
+    restartCount: 0,
+    updatedAt: '2026-11-25T22:04:00.000Z',
     ...over,
   };
 }

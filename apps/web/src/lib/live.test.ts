@@ -1,8 +1,10 @@
-import type { Alert, ServerDetail, ServerSummary } from '@hz/shared';
+import type { Alert, ContainerSummary, ServerDetail, ServerSummary } from '@hz/shared';
 import { QueryClient } from '@tanstack/react-query';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { alert, detail, server } from '../test-fixtures.js';
+import { alert, container, detail, server } from '../test-fixtures.js';
 import { alertsKey } from './alerts.js';
+import { containersKey } from './containers.js';
+import { containerLogsKey, type LogBuffer } from './logs.js';
 import {
   applyLiveMessage,
   backoffMs,
@@ -125,6 +127,62 @@ describe('applyLiveMessage', () => {
     });
     expect(qc.getQueryData<Alert[]>(alertsKey)?.map((a) => a.id)).toEqual([fresh.id]);
     expect(res.newAlerts.map((a) => a.id)).toEqual([fresh.id]);
+  });
+
+  it('writes the containers snapshot and merges updates', () => {
+    const a = container({ name: 'homeassistant' });
+    const b = container({ name: 'lernplattform' });
+    applyLiveMessage(qc, { type: 'update', topic: 'containers', upsert: [a] });
+    // No list yet: an update alone never pretends to be the full list.
+    expect(qc.getQueryData(containersKey)).toBeUndefined();
+    applyLiveMessage(qc, { type: 'snapshot', topic: 'containers', data: { containers: [a, b] } });
+    const stopped = { ...b, state: 'exited', status: 'off', exitCode: 0 } as const;
+    applyLiveMessage(qc, {
+      type: 'update',
+      topic: 'containers',
+      upsert: [stopped, { id: 'bad' }],
+      remove: [a.id],
+    });
+    const list = qc.getQueryData<ContainerSummary[]>(containersKey);
+    expect(list?.map((c) => [c.name, c.status])).toEqual([['lernplattform', 'off']]);
+    expect(qc.getQueryState(containersKey)?.isInvalidated).toBe(true);
+  });
+
+  it('buffers container-logs:<id> lines', () => {
+    const id = 'ctr-000042';
+    const key = containerLogsKey(id);
+    const topic = `container-logs:${id}`;
+    applyLiveMessage(qc, {
+      type: 'snapshot',
+      topic,
+      data: {
+        lines: [
+          { seq: 0, stream: 'stdout', text: 'boot' },
+          { seq: 1, stream: 'stderr', text: 'warn' },
+        ],
+        ended: false,
+      },
+    });
+    applyLiveMessage(qc, {
+      type: 'update',
+      topic,
+      upsert: [{ seq: 2, stream: 'stdout', text: 'ready' }, { seq: 'x' }],
+    });
+    expect(qc.getQueryData<LogBuffer>(key)?.lines.map((l) => l.text)).toEqual([
+      'boot',
+      'warn',
+      'ready',
+    ]);
+    applyLiveMessage(qc, {
+      type: 'update',
+      topic,
+      upsert: [{ lines: [{ seq: 3, stream: 'stdout', text: 'bye' }], ended: true }],
+    });
+    expect(qc.getQueryData<LogBuffer>(key)?.ended).toBe(true);
+    expect(qc.getQueryData<LogBuffer>(key)?.lines).toHaveLength(4);
+    // A broken snapshot leaves the buffer alone.
+    applyLiveMessage(qc, { type: 'snapshot', topic, data: { lines: 'nope' } });
+    expect(qc.getQueryData<LogBuffer>(key)?.lines).toHaveLength(4);
   });
 
   it('ignores unknown topics', () => {

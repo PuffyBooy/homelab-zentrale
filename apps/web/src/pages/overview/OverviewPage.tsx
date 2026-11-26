@@ -2,21 +2,26 @@ import type { ReactElement } from 'react';
 import { Link, useNavigate } from 'react-router';
 import { Alert, Button } from '@hz/ui';
 import { openCrit } from '../../lib/alerts.js';
-import { useActiveAlerts, useServerFilter, useServers } from '../../lib/data.js';
+import { useActiveAlerts, useContainers, useServerFilter, useServers } from '../../lib/data.js';
 import { formatWhen } from '../../lib/format.js';
+import { useLiveTopic } from '../../lib/live.js';
 import { ALL_SERVERS } from '../../lib/servers.js';
+import { ContainersTile } from '../containers/ContainersTile.js';
 import { NoServers, ServerListTile } from '../servers/ServerListTile.js';
 
 const MAX_ALERTS = 3;
 
 /**
  * Overview after design/reference/previews/Dashboard.html: Statussatz (shell header),
- * open crit alerts, ServerList over the full width. Games, websites, GitHub and
- * containers follow with their milestones, once there is data for them.
+ * open crit alerts, ServerList over the full width, then the pairs. Containers sit in
+ * the right half of the GitHub/Container pair; games, websites and GitHub follow with
+ * their milestones.
  */
 export function OverviewPage(): ReactElement | null {
   const servers = useServers();
   const alerts = useActiveAlerts();
+  useLiveTopic('containers');
+  const containers = useContainers();
   const [filter] = useServerFilter();
   const navigate = useNavigate();
 
@@ -59,6 +64,14 @@ export function OverviewPage(): ReactElement | null {
         </div>
       ) : null}
       <ServerListTile servers={list} active={one} />
+      {containers.data ? (
+        <div className="hz-grid app-grid">
+          <ContainersTile
+            containers={one ? containers.data.filter((c) => c.serverId === one) : containers.data}
+            serverId={one}
+          />
+        </div>
+      ) : null}
     </>
   );
 }

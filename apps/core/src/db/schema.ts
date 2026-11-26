@@ -204,24 +204,47 @@ export const metrics1h = sqliteTable('metrics_1h', { ...rollupColumns }, (t) => 
 export const containers = sqliteTable(
   'containers',
   {
+    /** Stable per server + name (containers/service.ts, containerCoreId). */
     id: text('id').primaryKey(),
     serverId: text('server_id')
       .notNull()
       .references(() => servers.id, { onDelete: 'cascade' }),
-    dockerId: text('docker_id').notNull(),
     name: text('name').notNull(),
+    /** Changes when the container is recreated (image update). */
+    dockerId: text('docker_id').notNull(),
     image: text('image').notNull(),
     composeProject: text('compose_project'),
+    composeService: text('compose_service'),
+    /** Label com.docker.compose.project.working_dir as reported (not trusted as a path). */
+    composeDir: text('compose_dir'),
     state: text('state').notNull(),
     health: text('health').notNull(),
+    statusText: text('status_text').notNull().default(''),
+    exitCode: integer('exit_code'),
+    startedAt: integer('started_at'),
+    restartCount: integer('restart_count'),
+    cpu: real('cpu'),
+    memBytes: real('mem_bytes'),
     portsJson: text('ports_json').notNull().default('[]'),
     /** Full ContainerInfo from the last inventory. */
     infoJson: text('info_json').notNull(),
+    /**
+     * Last admin action that takes the container down: `stop` (holds until the
+     * container runs again) or `restart` (also image update, holds until intent_until).
+     */
+    intent: text('intent'),
+    intentUntil: integer('intent_until'),
+    /** Last OOM event, so the following `die` is reported as out of memory. */
+    oomAt: integer('oom_at'),
+    /** Alert class of the last evaluation (containers/status.ts), for transitions. */
+    alertClass: text('alert_class'),
     updatedAt: integer('updated_at').notNull(),
   },
-  (t) => [unique().on(t.serverId, t.dockerId)],
+  (t) => [
+    unique().on(t.serverId, t.name),
+    index('containers_server_docker').on(t.serverId, t.dockerId),
+  ],
 );
-
 export const alerts = sqliteTable(
   'alerts',
   {
@@ -252,3 +275,4 @@ export type Session = typeof sessions.$inferSelect;
 export type ServerRow = typeof servers.$inferSelect;
 export type ServerStateRow = typeof serverState.$inferSelect;
 export type AlertRow = typeof alerts.$inferSelect;
+export type ContainerRow = typeof containers.$inferSelect;

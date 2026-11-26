@@ -1,10 +1,47 @@
+import { randomBytes } from 'node:crypto';
 import { WebSocket } from 'ws';
 
 /**
  * Simulated agent for e2e: speaks the protocol from packages/shared/src/agent-protocol.ts
  * (hello -> enrolled/welcome -> metrics + inventory) and answers the RPCs the web UI can
- * trigger in M2 (cleanup preview, cleanup). Nothing here runs a real command.
+ * trigger: cleanup preview and cleanup (M2), container.* and compose.* with a fresh
+ * inventory, and container.logs as a stream (M3). Nothing here runs a real command.
  */
+
+/** Same shape as containerInfoSchema in packages/shared (kept local, e2e has no deps). */
+export interface SimContainer {
+  dockerId: string;
+  name: string;
+  image: string;
+  imageId?: string;
+  composeProject?: string;
+  composeService?: string;
+  composeDir?: string;
+  state: 'created' | 'running' | 'paused' | 'restarting' | 'removing' | 'exited' | 'dead';
+  health: 'healthy' | 'unhealthy' | 'starting' | 'none';
+  statusText: string;
+  exitCode?: number;
+  startedAt?: string;
+  ports: { privatePort: number; publicPort?: number; ip?: string; proto: 'tcp' | 'udp' }[];
+  cpu?: number;
+  memBytes?: number;
+  restartCount?: number;
+}
+
+export function hexId(): string {
+  return randomBytes(32).toString('hex');
+}
+
+export function imageId(): string {
+  return `sha256:${randomBytes(32).toString('hex')}`;
+}
+
+interface LogStream {
+  streamId: string;
+  dockerId: string;
+  timer: ReturnType<typeof setInterval> | null;
+  n: number;
+}
 
 const PROTOCOL_VERSION = 1;
 const GB = 1024 ** 3;
@@ -21,6 +58,10 @@ export interface SimAgentOptions {
   temp?: number | null;
   tailscaleIp?: string;
   metricsEveryMs?: number;
+  /** Docker containers in the inventory. Turns on the docker capability. */
+  containers?: SimContainer[];
+  /** Interval of followed log lines. */
+  logEveryMs?: number;
 }
 
 type Msg = { type: string; [k: string]: unknown };
@@ -29,10 +70,20 @@ export class SimAgent {
   serverId: string | null = null;
   agentToken: string | null = null;
   readonly received: Msg[] = [];
+  /** Every RPC the core sent, in order (for asserting the right action). */
+  readonly rpcs: { action: string; params: Record<string, unknown> }[] = [];
+  containers: SimContainer[];
   private ws: WebSocket | null = null;
   private timer: ReturnType<typeof setInterval> | null = null;
+  private readonly streams = new Map<string, LogStream>();
 
-  constructor(private readonly o: SimAgentOptions) {}
+  constructor(private readonly o: SimAgentOptions) {
+    this.containers = (o.containers ?? []).map((c) => ({ ...c }));
+  }
+
+  container(name: string): SimContainer | undefined {
+    return this.containers.find((c) => c.name === name);
+  }
 
   /** Connects, sends hello and waits for welcome. */
   async connect(): Promise<void> {
@@ -52,7 +103,7 @@ export class SimAgent {
           arch: 'x64',
           os: 'Debian GNU/Linux 12 (bookworm)',
           token: this.agentToken ?? this.o.token,
-          capabilities: { terminal: false, docker: false },
+          capabilities: { terminal: false, docker: this.o.containers !== undefined },
         });
       });
       ws.on('message', (raw) => {
@@ -77,6 +128,8 @@ export class SimAgent {
           this.send({ type: 'pong', ts: new Date().toISOString() });
         } else if (msg.type === 'rpc') {
           this.answer(msg);
+        } else if (msg.type === 'stream.cancel') {
+          this.endStream(String(msg.streamId), null);
         }
       });
     });
@@ -87,6 +140,8 @@ export class SimAgent {
 
   /** Simulates a stopped agent: socket gone, no more reports. */
   disconnect(): void {
+    for (const st of this.streams.values()) if (st.timer) clearInterval(st.timer);
+    this.streams.clear();
     if (this.timer) clearInterval(this.timer);
     this.timer = null;
     this.ws?.terminate();
@@ -129,7 +184,7 @@ export class SimAgent {
         cpuCores: 4,
         tailscaleIp: this.o.tailscaleIp ?? '100.64.0.20',
       },
-      containers: [],
+      containers: this.containers,
       updates: { total: 12, security: 3 },
       rebootRequired: true,
       sshFailed24h: 41,
@@ -141,8 +196,142 @@ export class SimAgent {
     });
   }
 
+  /** Pushes one log line to every open stream of the container (stdout or stderr). */
+  logLine(name: string, text: string, channel: 'stdout' | 'stderr' = 'stdout'): void {
+    const c = this.container(name);
+    if (!c) return;
+    for (const st of this.streams.values()) {
+      if (st.dockerId === c.dockerId) {
+        this.send({ type: 'stream.data', streamId: st.streamId, channel, chunk: `${text}\n` });
+      }
+    }
+  }
+
+  private startLogs(streamId: string, params: Record<string, unknown>): void {
+    const c = this.containers.find((x) => x.dockerId === params.id || x.name === params.id);
+    if (!c) {
+      this.send({ type: 'stream.end', streamId, code: 1, error: 'no such container' });
+      return;
+    }
+    const tail = typeof params.tail === 'number' ? params.tail : 500;
+    const lines: string[] = [];
+    for (let i = 0; i < Math.min(tail, 40); i++) {
+      lines.push(`${c.name} boot step ${i + 1}: ok`);
+    }
+    if (lines.length) {
+      this.send({
+        type: 'stream.data',
+        streamId,
+        channel: 'stdout',
+        chunk: lines.join('\n') + '\n',
+      });
+      this.send({
+        type: 'stream.data',
+        streamId,
+        channel: 'stderr',
+        chunk: `WARN ${c.name}: config file has no timezone, using UTC\n`,
+      });
+    }
+    const st: LogStream = { streamId, dockerId: c.dockerId, timer: null, n: 0 };
+    this.streams.set(streamId, st);
+    if (params.follow === false || c.state !== 'running') {
+      this.endStream(streamId, 0);
+      return;
+    }
+    st.timer = setInterval(() => {
+      st.n++;
+      this.send({
+        type: 'stream.data',
+        streamId,
+        channel: 'stdout',
+        chunk: `${c.name} heartbeat ${st.n}\n`,
+      });
+    }, this.o.logEveryMs ?? 400);
+  }
+
+  /** code null: cancelled by the core, nothing is sent. */
+  private endStream(streamId: string, code: number | null): void {
+    const st = this.streams.get(streamId);
+    if (!st) return;
+    if (st.timer) clearInterval(st.timer);
+    this.streams.delete(streamId);
+    if (code !== null) this.send({ type: 'stream.end', streamId, code });
+  }
+
+  /** `docker logs -f` ends when the container stops or is recreated. */
+  private endStreamsOf(dockerId: string): void {
+    for (const st of [...this.streams.values()]) {
+      if (st.dockerId === dockerId) this.endStream(st.streamId, 0);
+    }
+  }
+
+  /** Applies a container action; returns false when the container is unknown. */
+  private act(action: string, params: Record<string, unknown>): boolean {
+    const now = new Date().toISOString();
+    if (action.startsWith('compose.')) {
+      const dir = params.dir;
+      const list = this.containers.filter((c) => c.composeDir === dir);
+      if (!list.length) return false;
+      if (action === 'compose.up') {
+        for (const c of list) this.recreate(c, now);
+      }
+      return true;
+    }
+    const c = this.containers.find((x) => x.dockerId === params.id || x.name === params.id);
+    if (!c) return false;
+    if (action === 'container.stop') {
+      this.endStreamsOf(c.dockerId);
+      c.state = 'exited';
+      c.exitCode = 0;
+      c.statusText = 'Exited (0) 1 second ago';
+      delete c.cpu;
+      delete c.memBytes;
+    } else if (action === 'container.start' || action === 'container.restart') {
+      c.state = 'running';
+      delete c.exitCode;
+      c.startedAt = now;
+      c.statusText = 'Up 1 second';
+    } else if (action === 'container.update') {
+      this.recreate(c, now);
+    }
+    return true;
+  }
+
+  /** Pull + recreate: new container id and image id, same name and config. */
+  private recreate(c: SimContainer, now: string): void {
+    this.endStreamsOf(c.dockerId);
+    c.dockerId = hexId();
+    c.imageId = imageId();
+    c.state = 'running';
+    delete c.exitCode;
+    c.startedAt = now;
+    c.statusText = 'Up 1 second';
+  }
+
   private answer(msg: Msg): void {
     const id = String(msg.id);
+    const action = String(msg.action);
+    const params = (msg.params ?? {}) as Record<string, unknown>;
+    this.rpcs.push({ action, params });
+    if (action === 'container.logs') {
+      this.startLogs(id, params);
+      return;
+    }
+    if (action.startsWith('container.') || action.startsWith('compose.')) {
+      if (!this.act(action, params)) {
+        this.send({
+          type: 'rpc.result',
+          id,
+          ok: false,
+          error: { code: 'not_found', message: 'no such container' },
+        });
+        return;
+      }
+      // The new state first, so the core answers the HTTP request with it.
+      this.sendInventory();
+      this.send({ type: 'rpc.result', id, ok: true, data: {} });
+      return;
+    }
     if (msg.action === 'system.cleanupPreview') {
       this.send({
         type: 'rpc.result',

@@ -6,6 +6,7 @@ import { rpcActions, type AgentEvent, type RpcEnvelope } from '@hz/shared';
 import { Dispatcher, handlers, type ActionContext } from '../src/actions/index.js';
 import type { RunResult } from '../src/exec.js';
 import { createLogger } from '../src/log.js';
+import { StreamManager } from '../src/streams.js';
 
 let base: string;
 let root: string;
@@ -39,6 +40,12 @@ function setup(overrides: Partial<ActionContext> = {}) {
     },
     log: createLogger('error', () => undefined),
     later,
+    streams: new StreamManager({ send: () => true, bufferedAmount: () => 0 }),
+    run: async (file: string, args: readonly string[]): Promise<RunResult> => {
+      execCalls.push({ file, args });
+      return { code: 0, stdout: '', stderr: '' };
+    },
+    dockerSocket: '/var/run/docker.sock',
     ...overrides,
   };
   const d = new Dispatcher(ctx, (e) => events.push(e));
@@ -101,8 +108,8 @@ describe('allowlist', () => {
   });
 
   it('answers unimplemented allowlisted actions with failed (no denied event)', async () => {
-    const { d, events } = setup();
-    const res = await d.handle(rpc('container.update', { id: 'web' }));
+    const { d, events } = setup({ allowTerminal: true });
+    const res = await d.handle(rpc('pty.open', { cols: 80, rows: 24 }));
     expect(res).toMatchObject({ ok: false, error: { code: 'failed' } });
     expect(res.ok === false && res.error.message).toMatch(/not implemented/);
     expect(events).toHaveLength(0);

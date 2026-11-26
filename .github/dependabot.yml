@@ -13,3 +13,7 @@ updates:
     directory: /deploy
     schedule:
       interval: weekly
+  - package-ecosystem: docker
+    directory: /apps/agent
+    schedule:
+      interval: weekly

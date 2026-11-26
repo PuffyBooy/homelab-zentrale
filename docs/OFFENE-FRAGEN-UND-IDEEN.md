@@ -22,7 +22,12 @@ Alles hier braucht deine Zugänge oder ist nicht rückgängig zu machen. Bis dah
 
 ## Annahmen
 
+- **Trivy-Ausnahme (bis 15.01.2027):** Im Agent-Image steckt das offizielle `docker compose`-Binary mit einer HIGH-Lücke in `golang.org/x/net` (HTML-Parser, CVE-2026-78661). Compose parst kein fremdes HTML, und es gibt noch keine Version mit Fix. Die Ausnahme steht in `apps/agent/.trivyignore` und läuft am 15.01.2027 ab; dann schlägt CI wieder an.
+
 - Sicherheitstests liegen in Dateien mit `security` im Namen und laufen zusätzlich als eigener Job `security tests` in GitHub Actions.
+
+- **Eigene Container geschützt:** Agent und Core tragen das Label `hz.role` (in den Compose-Dateien unter `deploy/`). Der Agent lehnt Stoppen, Neustart und Update dafür ab (auch für den eigenen Container über die Container-ID). Wer den Agent schon vor M3 ohne Label installiert hat, startet ihn einmal neu mit der neuen Compose-Datei (`deploy/install-agent.sh` erneut ausführen). Die Knöpfe sind in der Oberfläche noch sichtbar und liefern dann „nicht erlaubt“; ausblenden kommt später.
+- **Kleinigkeiten aus dem M3-Review, später:** Ein neuer Container, der beim Update sofort mit Exit 0 endet, gilt als Erfolg (kein Rollback). Fehler in Docker-Event-Handlern werden still verworfen. Der Log-Demuxer hat keine Obergrenze für die Frame-Größe (Docker ist vertrauenswürdig).
 
 ## Zukunftsideen
 

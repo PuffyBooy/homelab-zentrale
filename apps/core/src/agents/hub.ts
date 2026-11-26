@@ -95,8 +95,11 @@ export class RpcStream extends EventEmitter implements AsyncIterable<StreamChunk
   readonly done: Promise<StreamEndInfo>;
   /** Data of an `rpc.result ok` for this id, if the agent sends one (e.g. pty.open). */
   readonly result: Promise<unknown>;
+  /** Upper bound for buffered chunks; the oldest are dropped beyond it. */
+  static readonly MAX_QUEUE = 1024;
   private ended: StreamEndInfo | null = null;
   private readonly queue: StreamChunk[] = [];
+  private iterating = false;
   private wake: (() => void) | null = null;
   private resolveDone!: (e: StreamEndInfo) => void;
   private resolveResult!: (v: unknown) => void;
@@ -113,7 +116,12 @@ export class RpcStream extends EventEmitter implements AsyncIterable<StreamChunk
   /** @internal */
   pushData(c: StreamChunk): void {
     if (this.ended) return;
-    this.queue.push(c);
+    // Buffer only for the async iterator (or until a consumer attaches). Consumers that
+    // only listen on 'data' would otherwise let the queue grow without bound.
+    if (this.iterating || this.listenerCount('data') === 0) {
+      this.queue.push(c);
+      if (this.queue.length > RpcStream.MAX_QUEUE) this.queue.shift();
+    }
     this.emit('data', c);
     this.wake?.();
   }
@@ -133,6 +141,11 @@ export class RpcStream extends EventEmitter implements AsyncIterable<StreamChunk
     this.wake?.();
   }
 
+  /** Number of buffered chunks (for tests). */
+  get queued(): number {
+    return this.queue.length;
+  }
+
   get isEnded(): boolean {
     return this.ended !== null;
   }
@@ -145,6 +158,7 @@ export class RpcStream extends EventEmitter implements AsyncIterable<StreamChunk
   }
 
   async *[Symbol.asyncIterator](): AsyncIterator<StreamChunk> {
+    this.iterating = true;
     for (;;) {
       const next = this.queue.shift();
       if (next) {

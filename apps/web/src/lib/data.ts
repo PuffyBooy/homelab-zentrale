@@ -1,8 +1,9 @@
-import type { Alert, ServerSummary } from '@hz/shared';
+import type { Alert, ContainerSummary, ServerSummary } from '@hz/shared';
 import { useQuery, type UseQueryResult } from '@tanstack/react-query';
 import { useCallback } from 'react';
 import { useSearchParams } from 'react-router';
 import { alertsKey, fetchAlerts } from './alerts.js';
+import { containersKey, fetchContainers } from './containers.js';
 import { useLiveState } from './live.js';
 import { ALL_SERVERS, fetchServers, serversKey } from './servers.js';
 
@@ -16,6 +17,18 @@ export function useServers(): UseQueryResult<ServerSummary[]> {
     queryKey: serversKey,
     queryFn: ({ signal }) => fetchServers(signal),
     staleTime: live === 'open' ? Infinity : 15_000,
+    refetchInterval: live === 'open' ? false : 15_000,
+  });
+}
+
+/** All containers of all servers. Callers subscribe to the live topic `containers`. */
+export function useContainers(enabled = true): UseQueryResult<ContainerSummary[]> {
+  const live = useLiveState();
+  return useQuery({
+    queryKey: containersKey,
+    queryFn: ({ signal }) => fetchContainers(signal),
+    enabled,
+    staleTime: live === 'open' ? Infinity : 10_000,
     refetchInterval: live === 'open' ? false : 15_000,
   });
 }

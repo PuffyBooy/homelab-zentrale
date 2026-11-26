@@ -1,0 +1,4 @@
+# Reviewed exceptions for the agent image. Every entry expires; re-check then.
+# golang.org/x/net HTML parser DoS inside the bundled docker-compose binary.
+# Compose never parses untrusted HTML; no Compose release with x/net >= 0.62 yet (2026-11-26).
+CVE-2026-78661 exp:2027-01-15

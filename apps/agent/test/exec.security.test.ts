@@ -1,6 +1,9 @@
 import { readFile } from 'node:fs/promises';
 import { describe, expect, it } from 'vitest';
-import { ExecPolicyError, PROGRAMS, makeHostExec, runFile } from '../src/exec.js';
+import { ExecPolicyError, PROGRAMS, makeHostExec, makeRunner, runFile } from '../src/exec.js';
+
+/** Test-only runner: printf is not in the production allowlist. */
+const testRun = makeRunner(new Set(['printf']));
 
 describe('exec wrapper', () => {
   it('passes shell metacharacters literally (no shell)', async () => {
@@ -12,7 +15,7 @@ describe('exec wrapper', () => {
       '&&',
       '*',
     ];
-    const r = await runFile('printf', ['%s\\n', ...evil]);
+    const r = await testRun('printf', ['%s\\n', ...evil]);
     expect(r.code).toBe(0);
     expect(r.stdout.split('\n').slice(0, -1)).toEqual(evil);
   });
@@ -25,8 +28,25 @@ describe('exec wrapper', () => {
     expect(PROGRAMS.has('sh')).toBe(false);
   });
 
+  it('keeps test programs out of the production allowlist', () => {
+    expect(PROGRAMS.has('printf')).toBe(false);
+    expect(() => runFile('printf', ['x'])).toThrow(ExecPolicyError);
+    // A test runner only allows its own list.
+    expect(() => testRun('apt', ['list'])).toThrow(ExecPolicyError);
+  });
+
+  it('only allows whitelisted extra env keys', () => {
+    expect(() => runFile('docker', ['version'], { env: { HZ_AGENT_TOKEN: 'x' } as never })).toThrow(
+      ExecPolicyError,
+    );
+    expect(() => runFile('docker', ['version'], { env: { PATH: '/tmp' } as never })).toThrow(
+      ExecPolicyError,
+    );
+  });
+
   it('refuses NUL in arguments', () => {
-    expect(() => runFile('printf', ['a\0b'])).toThrow(ExecPolicyError);
+    expect(() => testRun('printf', ['a\0b'])).toThrow(ExecPolicyError);
+    expect(() => runFile('docker', ['ps', 'a\0b'])).toThrow(ExecPolicyError);
   });
 
   it('never uses a shell in the source', async () => {

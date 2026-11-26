@@ -4,7 +4,7 @@ import { Outlet, useLocation, useNavigate } from 'react-router';
 import { NavRail, ServerSwitch, cx } from '@hz/ui';
 import { openCount } from '../lib/alerts.js';
 import { authStateKey } from '../lib/auth.js';
-import { useActiveAlerts, useServerFilter, useServers } from '../lib/data.js';
+import { useActiveAlerts, useContainers, useServerFilter, useServers } from '../lib/data.js';
 import { interceptLinks } from '../lib/links.js';
 import { LiveClient, LiveProvider, useLiveState, useLiveTopic } from '../lib/live.js';
 import { ALL_SERVERS, sentenceText, switchEntries } from '../lib/servers.js';
@@ -13,7 +13,7 @@ import { activeNavId, navItems, settingsItem, shortcutAction } from '../nav.js';
 import { AlertToasts } from './AlertToasts.js';
 import { BottomBar } from './BottomBar.js';
 import { CommandPalette } from './CommandPalette.js';
-import { pageMeta, serverDetailId } from './pageMeta.js';
+import { needsContainers, pageMeta, serverDetailId } from './pageMeta.js';
 import { ThemeButton } from './ThemeButton.js';
 
 const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform);
@@ -47,12 +47,14 @@ function ShellBody(): ReactElement {
   const live = useLiveState();
   const servers = useServers();
   const alerts = useActiveAlerts();
+  const containers = useContainers(needsContainers(pathname));
   const [filter, setFilter] = useServerFilter();
   const detailId = serverDetailId(pathname);
 
   const meta = pageMeta(pathname, {
     servers: servers.data,
     alerts: alerts.data,
+    containers: containers.data,
     filter: detailId ?? filter,
     live,
     updatedAt: servers.dataUpdatedAt ? new Date(servers.dataUpdatedAt) : null,

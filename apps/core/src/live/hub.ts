@@ -22,6 +22,25 @@ const ALERT_SNAPSHOT_LIMIT = 100;
 export interface LiveOptions {
   /** At most one update per topic in this interval (real time). Default 1000 ms. */
   throttleMs?: number;
+  /** Appended items (log lines) go out at most this often per topic. Default 200 ms. */
+  appendThrottleMs?: number;
+}
+
+/**
+ * A family of topics served by another module (containers, container logs).
+ * `open` runs when a topic gets its first subscriber, `close` when the last
+ * one leaves (unsubscribe, socket closed, session ended).
+ */
+export interface TopicProvider {
+  matches(topic: string): boolean;
+  /** Snapshot data, or undefined if the topic does not exist. */
+  snapshot(topic: string): unknown;
+  /** Current item for an upsert, null if gone. */
+  item?(topic: string, id: string): unknown;
+  /** Checked before open(); defaults to `snapshot(topic) !== undefined`. */
+  has?(topic: string): boolean;
+  open?(topic: string): void;
+  close?(topic: string): void;
 }
 
 interface Client {
@@ -34,7 +53,8 @@ interface Client {
 type Pending = Map<string, 'upsert' | 'remove'>;
 
 /**
- * Browser live channel (/live). Topics `servers`, `server:<id>` and `alerts`:
+ * Browser live channel (/live). Topics `servers`, `server:<id>` and `alerts`,
+ * plus the topics of registered providers (`containers`, `container-logs:<id>`):
  * a snapshot on subscribe, then throttled `update` messages with the full
  * changed items (upsert by id) or removed ids.
  */
@@ -43,7 +63,11 @@ export class LiveHub {
   private readonly pending = new Map<string, Pending>();
   private readonly timers = new Map<string, NodeJS.Timeout>();
   private readonly lastFlush = new Map<string, number>();
+  private readonly appended = new Map<string, unknown[]>();
+  private readonly appendTimers = new Map<string, NodeJS.Timeout>();
+  private readonly providers: TopicProvider[] = [];
   private readonly throttleMs: number;
+  private readonly appendThrottleMs: number;
 
   constructor(
     private readonly deps: {
@@ -56,11 +80,20 @@ export class LiveHub {
     },
   ) {
     this.throttleMs = deps.options?.throttleMs ?? 1000;
+    this.appendThrottleMs = deps.options?.appendThrottleMs ?? 200;
     deps.servers.onChange((id, deleted) => {
       this.mark('servers', id, deleted ? 'remove' : 'upsert');
       this.mark(`server:${id}`, id, deleted ? 'remove' : 'upsert');
     });
     deps.alerts.onChange((a) => this.mark('alerts', a.id, 'upsert'));
+  }
+
+  addProvider(p: TopicProvider): void {
+    this.providers.push(p);
+  }
+
+  private provider(topic: string): TopicProvider | undefined {
+    return this.providers.find((p) => p.matches(topic));
   }
 
   get size(): number {
@@ -94,10 +127,10 @@ export class LiveHub {
       } else if (msg.type === 'subscribe') {
         for (const topic of msg.topics) this.subscribe(client, topic);
       } else {
-        for (const topic of msg.topics) client.topics.delete(topic);
+        for (const topic of msg.topics) this.unsubscribe(client, topic);
       }
     });
-    ws.on('close', () => this.clients.delete(client));
+    ws.on('close', () => this.drop(client));
     ws.on('error', () => undefined);
   }
 
@@ -113,6 +146,8 @@ export class LiveHub {
 
   /** Snapshot data for a topic; undefined if unknown. */
   private snapshot(topic: string): unknown {
+    const p = this.provider(topic);
+    if (p) return p.snapshot(topic);
     if (topic === 'servers') return this.deps.servers.list();
     if (topic === 'alerts') {
       const active = this.deps.alerts.list({ state: 'active', limit: 500 });
@@ -137,8 +172,20 @@ export class LiveHub {
       this.send(client, { type: 'error', code: 'invalid' });
       return;
     }
+    const p = this.provider(topic);
+    if (p && !client.topics.has(topic)) {
+      const exists = p.has ? p.has(topic) : p.snapshot(topic) !== undefined;
+      if (!exists) {
+        this.send(client, { type: 'error', code: 'unknown_topic' });
+        return;
+      }
+      const first = !this.hasSubscribers(topic);
+      client.topics.add(topic);
+      if (first) p.open?.(topic);
+    }
     const data = this.snapshot(topic);
     if (data === undefined) {
+      if (p) this.unsubscribe(client, topic);
       this.send(client, { type: 'error', code: 'unknown_topic' });
       return;
     }
@@ -146,9 +193,61 @@ export class LiveHub {
     this.send(client, { type: 'snapshot', topic, data });
   }
 
-  private hasSubscribers(topic: string): boolean {
+  private unsubscribe(client: Client, topic: string): void {
+    if (!client.topics.delete(topic)) return;
+    if (!this.hasSubscribers(topic)) this.provider(topic)?.close?.(topic);
+  }
+
+  /** Removes a client and closes the topics it was the last subscriber of. */
+  private drop(client: Client): void {
+    if (!this.clients.delete(client)) return;
+    for (const topic of client.topics) {
+      if (!this.hasSubscribers(topic)) this.provider(topic)?.close?.(topic);
+    }
+  }
+
+  hasSubscribers(topic: string): boolean {
     for (const c of this.clients) if (c.topics.has(topic)) return true;
     return false;
+  }
+
+  /**
+   * Appends items (log lines) to a topic; subscribers get them in order as
+   * `upsert`, batched at most every appendThrottleMs.
+   */
+  append(topic: string, items: unknown[]): void {
+    if (items.length === 0 || !this.hasSubscribers(topic)) return;
+    let list = this.appended.get(topic);
+    if (!list) {
+      list = [];
+      this.appended.set(topic, list);
+    }
+    list.push(...items);
+    if (this.appendTimers.has(topic)) return;
+    const timer = setTimeout(() => this.flushAppended(topic), this.appendThrottleMs);
+    timer.unref();
+    this.appendTimers.set(topic, timer);
+  }
+
+  private flushAppended(topic: string): void {
+    const t = this.appendTimers.get(topic);
+    if (t) clearTimeout(t);
+    this.appendTimers.delete(topic);
+    const items = this.appended.get(topic);
+    this.appended.delete(topic);
+    if (!items || items.length === 0) return;
+    const msg: LiveServerMessage = { type: 'update', topic, upsert: items };
+    for (const c of this.clients) if (c.topics.has(topic)) this.send(c, msg);
+  }
+
+  /** Sends pending appends first, then a new snapshot to every subscriber. */
+  resnapshot(topic: string): void {
+    this.flushAppended(topic);
+    const data = this.snapshot(topic);
+    if (data === undefined) return;
+    for (const c of this.clients) {
+      if (c.topics.has(topic)) this.send(c, { type: 'snapshot', topic, data });
+    }
   }
 
   /** Records a change; the update goes out at most once per throttle interval. */
@@ -169,6 +268,7 @@ export class LiveHub {
 
   /** Sends pending changes of a topic now (tests call this directly). */
   flush(topic: string): void {
+    this.flushAppended(topic);
     const t = this.timers.get(topic);
     if (t) clearTimeout(t);
     this.timers.delete(topic);
@@ -194,10 +294,14 @@ export class LiveHub {
   }
 
   flushAll(): void {
-    for (const topic of [...this.pending.keys()]) this.flush(topic);
+    for (const topic of new Set([...this.pending.keys(), ...this.appended.keys()])) {
+      this.flush(topic);
+    }
   }
 
   private item(topic: string, id: string): unknown {
+    const p = this.provider(topic);
+    if (p) return p.item ? p.item(topic, id) : null;
     if (topic === 'servers') return this.deps.servers.summary(id);
     if (topic === 'alerts') return this.deps.alerts.get(id);
     if (topic.startsWith('server:')) return this.deps.servers.detail(id);
@@ -218,7 +322,7 @@ export class LiveHub {
     );
     for (const c of [...this.clients]) {
       if (!alive.has(c.sessionId)) {
-        this.clients.delete(c);
+        this.drop(c);
         c.ws.close(LIVE_CLOSE_SESSION_ENDED, 'session ended');
       }
     }
@@ -226,8 +330,13 @@ export class LiveHub {
 
   closeAll(): void {
     for (const t of this.timers.values()) clearTimeout(t);
+    for (const t of this.appendTimers.values()) clearTimeout(t);
     this.timers.clear();
-    for (const c of this.clients) c.ws.terminate();
-    this.clients.clear();
+    this.appendTimers.clear();
+    this.appended.clear();
+    for (const c of [...this.clients]) {
+      this.drop(c);
+      c.ws.terminate();
+    }
   }
 }

@@ -15,9 +15,11 @@ import {
   formatUptime,
 } from '../../lib/format.js';
 import { bucket } from '../../lib/history.js';
+import { useContainers, useServers } from '../../lib/data.js';
 import { useLiveState, useLiveTopic } from '../../lib/live.js';
 import { fetchHistory, fetchServer, historyKey, serverKey } from '../../lib/servers.js';
 import { useNow } from '../../lib/useNow.js';
+import { ContainerGroups } from '../containers/ContainersPage.js';
 import { CleanupDialog } from './CleanupDialog.js';
 import { RebootDialog } from './RebootDialog.js';
 
@@ -258,6 +260,8 @@ function Detail({ d, history }: { d: ServerDetail; history?: HistoryResponse | u
           )}
         </Tile>
 
+        <ServerContainers server={s} />
+
         <Tile title="Aktionen" icon="power" span={4}>
           <div className="app-actions">
             <Button
@@ -298,6 +302,32 @@ function Detail({ d, history }: { d: ServerDetail; history?: HistoryResponse | u
         onClose={() => setDialog(null)}
       />
     </>
+  );
+}
+
+/** SPEC 5.2: "Container dieses Servers", same rows and actions as /containers. */
+function ServerContainers({ server }: { server: ServerDetail['server'] }): ReactElement | null {
+  useLiveTopic('containers');
+  const containers = useContainers();
+  const servers = useServers();
+  if (!containers.data) return null;
+  const list = containers.data.filter((c) => c.serverId === server.id);
+  if (!list.length) {
+    return (
+      <Tile title="Container dieses Servers" icon="container" count="0" span={4}>
+        <p className="app-empty">
+          {server.name} meldet keine Container. Der Agent zeigt sie, sobald er den Docker-Socket
+          lesen darf.
+        </p>
+      </Tile>
+    );
+  }
+  return (
+    <ContainerGroups
+      containers={list}
+      servers={servers.data ?? [server]}
+      title={() => 'Container dieses Servers'}
+    />
   );
 }
 

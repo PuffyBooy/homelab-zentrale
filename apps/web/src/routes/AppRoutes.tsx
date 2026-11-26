@@ -2,6 +2,8 @@ import { lazy, Suspense, type ReactElement } from 'react';
 import { Route, Routes } from 'react-router';
 import { navItems } from '../nav.js';
 import { AlertsPage } from '../pages/alerts/AlertsPage.js';
+import { ContainerLogsPage } from '../pages/containers/ContainerLogsPage.js';
+import { ContainersPage } from '../pages/containers/ContainersPage.js';
 import { EmptyPage, NotFoundPage } from '../pages/empty/EmptyPage.js';
 import { LoginPage } from '../pages/login/LoginPage.js';
 import { OverviewPage } from '../pages/overview/OverviewPage.js';
@@ -18,7 +20,7 @@ const DevUiPage = import.meta.env.DEV
   : null;
 
 /** Nav targets with their own page; the rest shows the empty placeholder. */
-const BUILT = new Set(['/', '/servers', '/alerts']);
+const BUILT = new Set(['/', '/servers', '/containers', '/alerts']);
 
 export function AppRoutes(): ReactElement {
   return (
@@ -59,6 +61,8 @@ export function AppRoutes(): ReactElement {
         <Route index element={<OverviewPage />} />
         <Route path="servers" element={<ServersPage />} />
         <Route path="servers/:id" element={<ServerDetailPage />} />
+        <Route path="containers" element={<ContainersPage />} />
+        <Route path="containers/:id/logs" element={<ContainerLogsPage />} />
         <Route path="alerts" element={<AlertsPage />} />
         {navItems
           .filter((it) => it.href && !BUILT.has(it.href))

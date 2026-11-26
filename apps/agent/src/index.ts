@@ -1,14 +1,18 @@
 import { readFile } from 'node:fs/promises';
 import os from 'node:os';
 import { Dispatcher } from './actions/index.js';
-import { openDocker } from './collect/docker.js';
+import { ContainerCollector, openDocker } from './collect/docker.js';
+import { DockerEventWatcher } from './collect/docker-events.js';
+import { hiddenDuringUpdate } from './actions/container-update.js';
 import { collectInventory } from './collect/inventory.js';
 import { SystemCollector } from './collect/system.js';
 import { ConfigError, loadConfig } from './config.js';
 import { AgentConnection } from './connection.js';
-import { makeHostExec } from './exec.js';
+import { debounce } from './debounce.js';
+import { makeHostExec, runFile } from './exec.js';
 import { normalizeArch, type HostContext } from './host.js';
 import { createLogger } from './log.js';
+import { StreamManager } from './streams.js';
 
 async function agentVersion(): Promise<string> {
   try {
@@ -43,7 +47,12 @@ async function main(): Promise<void> {
     docker,
   };
   const system = new SystemCollector(host);
+  const containers = new ContainerCollector(docker, { hide: (id) => hiddenDuringUpdate.has(id) });
   const timers = new Set<NodeJS.Timeout>();
+  const streams = new StreamManager({
+    send: (msg) => conn.send(msg),
+    bufferedAmount: () => conn.bufferedAmount(),
+  });
   const dispatcher = new Dispatcher(
     {
       name: config.name,
@@ -58,6 +67,9 @@ async function main(): Promise<void> {
         }, ms);
         timers.add(t);
       },
+      streams,
+      run: runFile,
+      dockerSocket: config.dockerSocket,
     },
     (event) => conn.send(event),
   );
@@ -74,9 +86,29 @@ async function main(): Promise<void> {
     osName: () => system.osName(),
     log,
     collectMetrics: () => system.metrics(),
-    collectInventory: () => collectInventory(host, system),
+    collectInventory: () => collectInventory(host, system, containers),
     handleRpc: (env) => dispatcher.handle(env),
+    onRpcResultSent: (result, sent) => dispatcher.resultSent(result, sent),
+    onStreamCancel: (id) => streams.cancel(id),
+    onDisconnect: () => streams.cancelAll(),
   });
+
+  // Docker events: report state changes at once and push a fresh inventory
+  // (debounced, so a burst of events costs one inventory).
+  const inventorySoon = debounce(() => conn.requestInventory(), 1000, 5000);
+  const events = docker
+    ? new DockerEventWatcher(docker, {
+        log,
+        onEvent: (event) => {
+          if ('dockerId' in event && hiddenDuringUpdate.has(event.dockerId)) return;
+          conn.send({ type: 'event', ts: new Date().toISOString(), event });
+        },
+        onChange: (id) => {
+          containers.invalidate(id ?? undefined);
+          inventorySoon.trigger();
+        },
+      })
+    : null;
 
   log.info('agent starting', {
     name: config.name,
@@ -85,9 +117,13 @@ async function main(): Promise<void> {
     terminal: config.allowTerminal,
   });
   await conn.start();
+  events?.start();
 
   const shutdown = (signal: string) => {
     log.info('shutting down', { signal });
+    events?.stop();
+    inventorySoon.cancel();
+    streams.cancelAll();
     conn.stop();
     for (const t of timers) clearTimeout(t);
     process.exit(0);
