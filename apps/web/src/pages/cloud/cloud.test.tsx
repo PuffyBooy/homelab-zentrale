@@ -100,7 +100,7 @@ describe('gameserver form with target "Neuer Azure-Server"', () => {
     expect(out).toMatch(
       /<option value="Standard_B2ms" selected="">B2ms · 2 vCPU · 8 GB RAM[^<]*Empfohlen/,
     );
-    expect(out).toMatch(/<option value="Standard_B2s" disabled="">[^<]*zu wenig RAM, braucht 5 GB/);
+    expect(out).toMatch(/<option value="Standard_B2s" disabled="">[^<]*zu wenig RAM, braucht 7 GB/);
     expect(out).toMatch(/<option value="Standard_B2ats_v2" disabled="">[^<]*Free-Tier/);
     // Machine name "hz-" + game name (the game name is filled in after mount).
     expect(out).toMatch(/Name des Servers<\/label><input[^>]*value="hz-/);
@@ -117,6 +117,44 @@ describe('gameserver form with target "Neuer Azure-Server"', () => {
     );
     // No port forwarding hint for the home router.
     expect(out).toContain('data-testid="cloud-forward"');
+  });
+
+  it('Valheim (MEMORY 4G) gets B2ms and the hint names the game RAM', () => {
+    const out = html(
+      <Routes>
+        <Route path="/games/new" element={<GameCreatePage />} />
+      </Routes>,
+      (qc) => {
+        qc.setQueryData(authStateKey, {
+          setupRequired: false,
+          authenticated: true,
+          modules: { ...MODULE_DEFAULTS, games: true, cloud: true },
+        });
+        qc.setQueryData(templatesKey, [
+          template({
+            id: 'valheim',
+            name: 'Valheim',
+            ram: { min: '3G', recommended: '8G' },
+            fields: [
+              {
+                key: 'MEMORY',
+                label: 'RAM',
+                type: 'select',
+                options: ['3G', '4G', '6G', '8G'],
+                default: '4G',
+              },
+            ],
+          }),
+        ]);
+        qc.setQueryData(serversKey, [server()]);
+        qc.setQueryData(gamesKey, []);
+        qc.setQueryData(cloudKey, overview());
+        qc.setQueryData(azurePricesKey(PRICE_Q), prices());
+      },
+      '/games/new?vorlage=valheim&server=cloud:azure',
+    );
+    expect(out).toContain('Spiel braucht 4 GB RAM plus 1 GB für das System');
+    expect(out).toMatch(/<option value="Standard_B2ms" selected="">/);
   });
 
   it('budget used up: a second confirmation is shown', () => {

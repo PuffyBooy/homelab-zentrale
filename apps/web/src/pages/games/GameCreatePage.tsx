@@ -11,7 +11,7 @@ import {
   MACHINE_PARAM,
   defaultMachineName,
   pendingGame,
-  ramGbOf,
+  gameRamGb,
   useCloudOverview,
   validateMachine,
   type MachineErrors,
@@ -19,7 +19,7 @@ import {
 import { useGames, useServers, useTemplates } from '../../lib/data.js';
 import { archMismatch } from '../../lib/gameFeatures.js';
 import { errorText } from '../../lib/errors.js';
-import { formatBytes, plural } from '../../lib/format.js';
+import { formatBytes, formatNumber, plural } from '../../lib/format.js';
 import {
   createGame,
   emptyCreateDraft,
@@ -154,10 +154,11 @@ function CreateForm({
   const cloudOffered = cloudOn && !!cloud.data && cloud.data.azure.status !== 'off';
   const isCloud = cloudOffered && draft.serverId === CLOUD_TARGET;
   const [machineErrors, setMachineErrors] = useState<MachineErrors>({});
+  const cloudRamGb = gameRamGb(tpl, draft.fields);
   const order = useMachineOrder({
     region: cloud.data?.azure.region ?? 'germanywestcentral',
     name: defaultMachineName(draft.name),
-    gameRamGb: ramGbOf(tpl.ram.min),
+    gameRamGb: cloudRamGb,
     overview: cloud.data,
     enabled: isCloud,
     onCreated: (m) => {
@@ -254,7 +255,7 @@ function CreateForm({
   }
   const freeRam = suggest.data?.freeRamBytes;
   const ramHint = isCloud
-    ? `braucht ${formatBytes(ramBytesOf(tpl.ram.min))} RAM plus 1 GB für das System`
+    ? `Spiel braucht ${formatNumber(cloudRamGb)} GB RAM plus 1 GB für das System`
     : draft.serverId
       ? suggest.isPending
         ? 'freier RAM wird geprüft …'

@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { azure, prices } from '../test-cloud.js';
 import { ApiError } from './api.js';
 import {
+  budgetText,
   buildAzurePatch,
   CLOUD_FAST_MS,
   CLOUD_SLOW_MS,
@@ -16,10 +17,12 @@ import {
   emptyMachineDraft,
   fetchAzurePrices,
   formatEurHour,
+  gameRamGb,
   formatEurMonth,
   machineCreateBody,
   machineStatus,
   orderReady,
+  pickSize,
   pendingGame,
   ramGbOf,
   sizeOptions,
@@ -46,6 +49,40 @@ describe('sizes', () => {
     const rec = opts.filter((o) => o.recommended);
     expect(rec.map((o) => o.size)).toEqual(['Standard_B2ms']);
     expect(rec[0]?.label).toContain('Empfohlen');
+  });
+
+  it('uses the game RAM like the core: MEMORY value, else its default, else recommended', () => {
+    const valheim = {
+      ram: { recommended: '8G' },
+      fields: [{ key: 'MEMORY', default: '4G' }],
+    };
+    expect(gameRamGb(valheim, {})).toBe(4);
+    expect(defaultSize(sizeOptions(prices().sizes, gameRamGb(valheim, {})))).toBe('Standard_B2ms');
+    const mc = { ram: { recommended: '6G' }, fields: [{ key: 'MEMORY', default: '6G' }] };
+    expect(gameRamGb(mc, { MEMORY: '8G' })).toBe(8);
+    expect(defaultSize(sizeOptions(prices().sizes, gameRamGb(mc, { MEMORY: '8G' })))).toBe(
+      'Standard_B4ms',
+    );
+    expect(gameRamGb({ ram: { recommended: '2G' }, fields: [] }, {})).toBe(2);
+    expect(gameRamGb(mc, { MEMORY: '512M' })).toBe(0.5);
+  });
+
+  it('keeps a chosen size while it fits the RAM, else switches to the recommendation', () => {
+    expect(pickSize(sizeOptions(prices().sizes, 4), 'Standard_E2as_v5')).toBe('Standard_E2as_v5');
+    expect(pickSize(sizeOptions(prices().sizes, 8), 'Standard_B2ms')).toBe('Standard_B4ms');
+    expect(pickSize(sizeOptions(prices().sizes, 8), '')).toBe('Standard_B4ms');
+  });
+
+  it('over budget the text points to the Cloud page, not to a game start', () => {
+    const t = budgetText({
+      limitEur: 20,
+      monthEur: 21,
+      projectedEur: 30,
+      percent: 105,
+      state: 'over',
+    });
+    expect(t).toContain('Starten geht nur noch auf der Seite Cloud mit Bestätigung');
+    expect(t).not.toContain('selbst starten');
   });
 
   it('recommends Standard_B2s for Terraria (1 GB)', () => {

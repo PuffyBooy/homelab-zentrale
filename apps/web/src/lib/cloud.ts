@@ -268,11 +268,18 @@ export function budgetStatus(b: Pick<CloudBudget, 'state'>): { status: Status; l
   return { status: 'ok', label: 'im Rahmen' };
 }
 
+/** Over budget every game start is refused; only the machine start with confirmation works. */
+export const OVER_BUDGET_START_HINT =
+  'Spiele starten nicht mehr von selbst und auch nicht per Knopf. Starten geht nur noch auf der Seite Cloud mit Bestätigung.';
+
+/** Game start answered 409 over_budget (tile on the game pages). */
+export const OVER_BUDGET_GAME_TEXT = 'Cloud-Budget aufgebraucht. Der Cloud-Server startet nicht.';
+
 /** Statussatz of the budget: state first, then the numbers. */
 export function budgetText(b: CloudBudget): string {
   const of = `${formatEur(b.monthEur)} von ${formatEur(b.limitEur)}`;
   if (b.state === 'over') {
-    return `Budget aufgebraucht: ${of}. Automatische Starts sind gesperrt, du kannst selbst starten.`;
+    return `Budget aufgebraucht: ${of}. ${OVER_BUDGET_START_HINT}`;
   }
   if (b.state === 'warn')
     return `Budget fast aufgebraucht: ${of} (${formatNumber(Math.round(b.percent), 0)} %).`;
@@ -297,10 +304,26 @@ export interface SizeOption {
   label: string;
 }
 
-/** Game RAM in GB from a template RAM string ("4G" -> 4). Unknown: 0. */
-export function ramGbOf(ram: string): number {
-  const m = /^(\d{1,3})G$/.exec(ram);
-  return m?.[1] ? Number(m[1]) : 0;
+/** RAM in GB from "4G" or "512M". Unknown: 0. */
+export function ramGbOf(ram: unknown): number {
+  const m = typeof ram === 'string' ? /^(\d{1,3})([GM])$/.exec(ram) : null;
+  if (!m?.[1]) return 0;
+  return m[2] === 'G' ? Number(m[1]) : Number(m[1]) / 1024;
+}
+
+/**
+ * RAM limit of the game like the core's ramLimitFor: the MEMORY field (as typed in the
+ * draft, else its default), else the template recommendation.
+ */
+export function gameRamGb(
+  tpl: { ram: { recommended: string }; fields: readonly { key: string; default?: unknown }[] },
+  fields: Readonly<Record<string, string | boolean>>,
+): number {
+  const typed = ramGbOf(fields.MEMORY);
+  if (typed > 0) return typed;
+  const def = ramGbOf(tpl.fields.find((f) => f.key === 'MEMORY')?.default);
+  if (def > 0) return def;
+  return ramGbOf(tpl.ram.recommended);
 }
 
 /**
