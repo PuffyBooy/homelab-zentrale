@@ -17,6 +17,7 @@ import {
   listTarArgs,
   parseListLine,
   unquoteC,
+  verifyExtractedTree,
 } from '../src/actions/game-transfer.js';
 import { ActionError } from '../src/actions/types.js';
 import { spawnFile } from '../src/exec.js';
@@ -403,38 +404,67 @@ describe('cleanupStaleTransfers', () => {
 });
 
 describe('game.import ownership', () => {
-  it('gives every extracted entry the uid:gid of the game folder, only below staging/data', async () => {
-    const gameId = 'owned';
-    await mkdir(path.join(games, gameId));
-    const owner = await lstat(path.join(games, gameId));
-    // Pretend the folder belongs to the game user: the mock sees the wanted owner.
+  it('verifyExtractedTree chowns every entry, only below the data folder', async () => {
+    // Works without root: the owner is passed in, the chown is a mock.
+    const root = await mkdtemp(path.join(os.tmpdir(), 'hz-tree-'));
+    const dataDir = path.join(root, 'data');
+    await mkdir(path.join(dataDir, 'world'), { recursive: true });
+    await writeFile(path.join(dataDir, 'world', 'level.dat'), 'x');
+    await writeFile(path.join(root, 'outside.txt'), 'x');
+    const st = await lstat(dataDir);
+    const want = { uid: st.uid + 1000, gid: st.gid + 1000 };
     const calls: [string, number, number][] = [];
-    const want = { uid: owner.uid + 1000, gid: owner.gid + 1000 };
-    const { chown: realChown } = await import('node:fs/promises');
-    await realChown(path.join(games, gameId), want.uid, want.gid);
-    const archive = okTar([{ name: 'data/world/region/', type: '5' }]);
-    const t = await start(archive, {
-      gameId,
+    const n = await verifyExtractedTree(dataDir, {
+      ...want,
       chown: async (p, uid, gid) => {
         calls.push([p, uid, gid]);
       },
     });
-    await t.sendAll();
-    expect(await waitEnd(t.frames)).toMatchObject({ code: 0 });
-    const stagedData = path.join(t.staging, 'data');
+    expect(n).toBe(3);
     expect(calls.map((c) => c[0]).sort()).toEqual(
-      [
-        stagedData,
-        path.join(stagedData, 'world'),
-        path.join(stagedData, 'world', 'level.dat'),
-        path.join(stagedData, 'world', 'region'),
-      ].sort(),
+      [dataDir, path.join(dataDir, 'world'), path.join(dataDir, 'world', 'level.dat')].sort(),
     );
-    for (const [p, uid, gid] of calls) {
-      expect(p === stagedData || p.startsWith(`${stagedData}/`)).toBe(true);
-      expect([uid, gid]).toEqual([want.uid, want.gid]);
-    }
+    for (const [, uid, gid] of calls) expect([uid, gid]).toEqual([want.uid, want.gid]);
+    await rm(root, { recursive: true, force: true });
   });
+
+  // Changing a folder's owner needs root; as non-root the test above covers the walk.
+  const isRootUser = typeof process.getuid === 'function' && process.getuid() === 0;
+  it.runIf(isRootUser)(
+    'gives every extracted entry the uid:gid of the game folder, only below staging/data',
+    async () => {
+      const gameId = 'owned';
+      await mkdir(path.join(games, gameId));
+      const owner = await lstat(path.join(games, gameId));
+      // Pretend the folder belongs to the game user: the mock sees the wanted owner.
+      const calls: [string, number, number][] = [];
+      const want = { uid: owner.uid + 1000, gid: owner.gid + 1000 };
+      const { chown: realChown } = await import('node:fs/promises');
+      await realChown(path.join(games, gameId), want.uid, want.gid);
+      const archive = okTar([{ name: 'data/world/region/', type: '5' }]);
+      const t = await start(archive, {
+        gameId,
+        chown: async (p, uid, gid) => {
+          calls.push([p, uid, gid]);
+        },
+      });
+      await t.sendAll();
+      expect(await waitEnd(t.frames)).toMatchObject({ code: 0 });
+      const stagedData = path.join(t.staging, 'data');
+      expect(calls.map((c) => c[0]).sort()).toEqual(
+        [
+          stagedData,
+          path.join(stagedData, 'world'),
+          path.join(stagedData, 'world', 'level.dat'),
+          path.join(stagedData, 'world', 'region'),
+        ].sort(),
+      );
+      for (const [p, uid, gid] of calls) {
+        expect(p === stagedData || p.startsWith(`${stagedData}/`)).toBe(true);
+        expect([uid, gid]).toEqual([want.uid, want.gid]);
+      }
+    },
+  );
 
   it('with the real lchown the files end up owned by the folder owner', async () => {
     const gameId = 'owned-real';
