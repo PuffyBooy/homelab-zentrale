@@ -400,7 +400,11 @@ async function main(): Promise<void> {
   await onboardHa();
   await startCore();
 
-  // 4. connect
+  // 4. switch the Home Assistant module on (off on a fresh install, needs step-up), connect
+  await json(
+    await api('PUT', '/api/settings/modules', { homeassistant: true }),
+    'settings/modules',
+  );
   const settings = haSettingsSchema.parse(
     await json(await api('PUT', '/api/ha/settings', { url: HA, token: haToken }), 'ha/settings'),
   );

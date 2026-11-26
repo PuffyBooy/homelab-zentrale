@@ -876,6 +876,8 @@ async function main(): Promise<void> {
   cookie = session;
   log('setup done, logged in');
 
+  // Creating an enrollment token needs a step-up session.
+  await stepUp();
   const enroll = enrollResponseSchema.parse(
     await json(await api('POST', '/api/servers/enroll', { name: AGENT_NAME }), 'servers/enroll'),
   );
