@@ -231,7 +231,9 @@ describe('compose.write file names', () => {
   it.each([
     '../compose.yml',
     '..',
-    '.env',
+    // '.env' is allowed since M6 (composeFileNameSchema; games.security.test.ts), other dotfiles not.
+    '.env.local',
+    '.envrc',
     '.hidden',
     'a/b.yml',
     'a\\b',

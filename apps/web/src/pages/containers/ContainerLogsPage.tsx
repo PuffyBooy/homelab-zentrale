@@ -101,10 +101,23 @@ export function ContainerLogsPage(): ReactElement | null {
     [],
   );
 
-  // Follow: stay at the end while new lines arrive.
+  // Follow: stay at the end while new lines arrive. Where the box was last
+  // scrolled to on its own: if it is above that now, the user scrolled up before
+  // the scroll event arrived, so following stops instead of jumping back down.
+  const autoTop = useRef<number | null>(null);
   useLayoutEffect(() => {
     const el = body();
-    if (el && follow && pausedAt == null) el.scrollTop = el.scrollHeight;
+    if (!el || !follow || pausedAt != null) {
+      autoTop.current = null;
+      return;
+    }
+    if (autoTop.current != null && el.scrollTop < autoTop.current - BOTTOM_SLACK) {
+      autoTop.current = null;
+      setFollow(false);
+      return;
+    }
+    el.scrollTop = el.scrollHeight;
+    autoTop.current = el.scrollTop;
   }, [lines, follow, pausedAt, body]);
 
   // Scrolling up stops following; scrolling back to the end starts it again.
@@ -117,6 +130,7 @@ export function ContainerLogsPage(): ReactElement | null {
     el.setAttribute('aria-label', 'Log-Ausgabe');
     const onScroll = (): void => {
       const atEnd = el.scrollHeight - el.scrollTop - el.clientHeight <= BOTTOM_SLACK;
+      if (atEnd) autoTop.current = el.scrollTop;
       setFollow(atEnd);
     };
     el.addEventListener('scroll', onScroll, { passive: true });

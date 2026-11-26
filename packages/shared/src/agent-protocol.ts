@@ -359,8 +359,14 @@ export const pingCheckParamsSchema = z.strictObject({
   timeoutMs: timeoutMs.default(10_000),
 });
 
+/**
+ * File names compose.write accepts: plain names plus exactly `.env` (secrets of a
+ * game folder, written by the agent with mode 0600). No other dotfiles.
+ */
+export const composeFileNameSchema = z.union([z.literal('.env'), fileNameSchema]);
+
 export const composeFilesSchema = z
-  .record(fileNameSchema, z.string().max(256 * 1024))
+  .record(composeFileNameSchema, z.string().max(256 * 1024))
   .refine((files) => Object.keys(files).length >= 1 && Object.keys(files).length <= 20, {
     message: '1 to 20 files',
   });
@@ -416,6 +422,21 @@ export const rpcParamsByAction = {
     gameDir: homelabPathSchema,
     keep: z.number().int().min(1).max(50).default(7),
   }),
+  /**
+   * Players/version/TPS of a game in /opt/homelab/games/<name>/. Query goes to
+   * 127.0.0.1:<port>; RCON port and password are read by the agent from the
+   * folder's .env (never sent over the wire). Result: gameStatusDataSchema.
+   */
+  'game.status': z.strictObject({
+    gameDir: homelabPathSchema,
+    method: z.enum(['minecraft', 'minecraft-bedrock', 'gamedig', 'none']),
+    port: z.number().int().min(1).max(65535),
+    gamedigType: z.enum(['valheim', 'counterstrike2', 'palworld']).optional(),
+    tpsCommand: z.enum(['tps']).optional(),
+    timeoutMs: z.number().int().min(500).max(15_000).default(5000),
+  }),
+  /** compose down and remove a game folder (only /opt/homelab/games/<name>/). */
+  'game.remove': z.strictObject({ gameDir: homelabPathSchema }),
   /** Stream. */
   'deploy.run': z.strictObject({
     dir: homelabPathSchema,
@@ -552,6 +573,20 @@ export const backupDoneDataSchema = z.strictObject({
   sizeBytes: nonNeg,
 });
 export const ptyOpenDataSchema = z.strictObject({ streamId: streamIdSchema });
+export const gameStatusDataSchema = z.strictObject({
+  online: z.boolean(),
+  players: z
+    .strictObject({
+      online: z.number().int().nonnegative(),
+      max: z.number().int().nonnegative(),
+      names: z.array(z.string().max(40)).max(200),
+    })
+    .nullable(),
+  version: z.string().max(80).nullable(),
+  tps: z.number().nonnegative().max(100).nullable(),
+});
+export type GameStatusData = z.infer<typeof gameStatusDataSchema>;
+
 /** Result of deploy.key: only the public half. */
 export const deployKeyDataSchema = z.strictObject({
   publicKey: z

@@ -17,6 +17,8 @@
   "dependencies": {
     "@hz/shared": "workspace:*",
     "dockerode": "^5.0.1",
+    "gamedig": "^5.3.3",
+    "minecraft-server-util": "^5.4.4",
     "systeminformation": "^5.33.26",
     "ws": "^8.23.0",
     "zod": "^4.6.7"

@@ -1,7 +1,15 @@
-import type { Alert, CheckSummary, ContainerSummary, RepoSummary, ServerSummary } from '@hz/shared';
+import type {
+  Alert,
+  CheckSummary,
+  ContainerSummary,
+  GameSummary,
+  RepoSummary,
+  ServerSummary,
+} from '@hz/shared';
 import { checkMatchesServer, checkSentence, checksSentence, KIND_LABEL } from '../lib/checks.js';
 import { containerSentence, containerStateText } from '../lib/containers.js';
 import { formatTime, plural } from '../lib/format.js';
+import { gameSentence, gamesSentence, isGameRunning, playersOnline } from '../lib/games.js';
 import { githubSentence, repoOnServer, repoSentence } from '../lib/github.js';
 import type { LiveState } from '../lib/live.js';
 import {
@@ -29,6 +37,8 @@ export interface PageData {
   checks?: CheckSummary[] | undefined;
   /** Only read on the GitHub pages. */
   repos?: RepoSummary[] | undefined;
+  /** Only read on the game server pages. */
+  games?: GameSummary[] | undefined;
   /** Server filter from the ServerSwitch, or the id of the detail page. */
   filter?: string | undefined;
   live?: LiveState | undefined;
@@ -70,6 +80,16 @@ export function checkDetailId(pathname: string): string | null {
 export function repoDetailId(pathname: string): string | null {
   const m = /^\/github\/([A-Za-z0-9_-]{8,64})\/?$/.exec(pathname);
   return m?.[1] ?? null;
+}
+
+export function gameDetailId(pathname: string): string | null {
+  const m = /^\/games\/([A-Za-z0-9_-]{8,64})\/?$/.exec(pathname);
+  return m?.[1] && m[1] !== 'new' ? m[1] : null;
+}
+
+/** Pages that read the game list in the shell header. */
+export function needsGames(pathname: string): boolean {
+  return pathname === '/games' || pathname === '/games/new' || gameDetailId(pathname) !== null;
 }
 
 /** Pages that read the repo list in the shell header. */
@@ -186,6 +206,43 @@ export function pageMeta(pathname: string, data: PageData = {}): PageMeta {
     return {
       title: repoSentence(r),
       sub: `GitHub · ${r.fullName} · ${plural(r.targets.length, 'Ziel', 'Ziele')}`,
+      serverSwitch: false,
+    };
+  }
+
+  if (pathname === '/games') {
+    if (data.games === undefined) {
+      return { title: plain('Gameserver'), sub: 'lädt …', serverSwitch: true };
+    }
+    const list = filtered ? data.games.filter((g) => g.serverId === filtered.id) : data.games;
+    const running = list.filter(isGameRunning);
+    const players = playersOnline(running);
+    return {
+      title: gamesSentence(list),
+      sub: liveSub(
+        'Gameserver',
+        data,
+        `${running.length} laufen · ${plural(players, 'Spieler', 'Spieler')} online`,
+      ),
+      serverSwitch: true,
+    };
+  }
+
+  if (pathname === '/games/new') {
+    return {
+      title: plain('Neuer Gameserver'),
+      sub: 'Vorlage wählen, Werte prüfen, aufsetzen',
+      serverSwitch: false,
+    };
+  }
+
+  const gameId = gameDetailId(pathname);
+  if (gameId) {
+    const g = data.games?.find((x) => x.id === gameId);
+    if (!g) return { title: plain('Gameserver'), sub: 'lädt …', serverSwitch: false };
+    return {
+      title: gameSentence(g),
+      sub: `Gameserver · ${g.game}${g.version ? ` ${g.version}` : ''} · ${g.serverName}`,
       serverSwitch: false,
     };
   }

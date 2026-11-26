@@ -1,24 +1,32 @@
-# Gerendert vom Core: ${VAR} wird aus template.json-Feldern + Systemwerten ersetzt.
+# Rendered by the core: ${VAR} is replaced with template.json field values and system
+# values (GAME_NAME, PORT_<NAME>, PORT_RCON). Secrets (RCON_PASSWORD) are never rendered
+# into this file: they live in the 0600 .env next to it and reach the container via env_file.
 services:
   server:
-    image: itzg/minecraft-server:latest
+    image: itzg/minecraft-server:2026.11.1-java25
     container_name: game-${GAME_NAME}
     restart: unless-stopped
+    # Container limit = RAM field; the JVM takes 75 % of it as heap (MEMORY stays empty).
+    mem_limit: ${MEMORY}
+    stop_grace_period: 60s
+    env_file:
+      - .env
     environment:
-      EULA: "TRUE"
+      EULA: 'TRUE'
       TYPE: ${TYPE}
       VERSION: ${VERSION}
       MAX_PLAYERS: ${MAX_PLAYERS}
-      MEMORY: ${MEMORY}
+      MEMORY: ''
+      JVM_XX_OPTS: '-XX:MaxRAMPercentage=75'
       SEED: ${SEED}
       ENABLE_WHITELIST: ${ENABLE_WHITELIST}
       ONLINE_MODE: ${ONLINE_MODE}
-      ENABLE_RCON: "true"
-      RCON_PASSWORD: ${RCON_PASSWORD}
+      ENABLE_RCON: 'true'
+      RCON_PORT: '25575'
       TZ: Europe/Vienna
     ports:
-      - "${PORT_GAME}:25565/tcp"
-      - "127.0.0.1:${PORT_RCON}:25575/tcp"
+      - '${PORT_GAME}:25565/tcp'
+      - '127.0.0.1:${PORT_RCON}:25575/tcp'
     volumes:
       - ./data:/data
     labels:

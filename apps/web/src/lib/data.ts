@@ -2,6 +2,7 @@ import type {
   Alert,
   CheckSummary,
   ContainerSummary,
+  GameSummary,
   GithubSettings,
   RepoSummary,
   ServerSummary,
@@ -12,6 +13,7 @@ import { useSearchParams } from 'react-router';
 import { alertsKey, fetchAlerts } from './alerts.js';
 import { checksKey, fetchChecks } from './checks.js';
 import { containersKey, fetchContainers } from './containers.js';
+import { fetchGames, fetchTemplates, gamesKey, templatesKey, type TemplateInfo } from './games.js';
 import { fetchGithubSettings, fetchRepos, githubSettingsKey, reposKey } from './github.js';
 import { useLiveState } from './live.js';
 import { ALL_SERVERS, fetchServers, serversKey } from './servers.js';
@@ -63,6 +65,28 @@ export function useRepos(enabled = true): UseQueryResult<RepoSummary[]> {
     enabled,
     staleTime: live === 'open' ? Infinity : 30_000,
     refetchInterval: live === 'open' ? false : 60_000,
+  });
+}
+
+/** All game servers. Callers subscribe to the live topic `games`. */
+export function useGames(enabled = true): UseQueryResult<GameSummary[]> {
+  const live = useLiveState();
+  return useQuery({
+    queryKey: gamesKey,
+    queryFn: ({ signal }) => fetchGames(signal),
+    enabled,
+    staleTime: live === 'open' ? Infinity : 10_000,
+    refetchInterval: live === 'open' ? false : 15_000,
+  });
+}
+
+/** Game templates from templates/games (files, change only with a core restart). */
+export function useTemplates(enabled = true): UseQueryResult<TemplateInfo[]> {
+  return useQuery({
+    queryKey: templatesKey,
+    queryFn: ({ signal }) => fetchTemplates(signal),
+    enabled,
+    staleTime: 5 * 60_000,
   });
 }
 

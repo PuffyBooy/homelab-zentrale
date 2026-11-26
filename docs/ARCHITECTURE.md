@@ -129,6 +129,8 @@ Die erste Nachricht muss innerhalb von 10 s ein gültiges `hello` sein. Danach a
 | `compose.write` | `{dir, files: {name: text}}` (nur unter `/opt/homelab/`) |
 | `game.rcon` | `{gameDir, command}` |
 | `game.backup` | `{gameDir}` → Stream |
+| `game.status` | `{gameDir, method, port, gamedigType?, tpsCommand?}` → Spieler, Version, TPS (RCON-Daten liest der Agent aus der `.env` im Ordner) |
+| `game.remove` | `{gameDir}` → `compose down` und Ordner löschen (nur unter `/opt/homelab/games/`) |
 | `deploy.run` | `{dir, repoUrl, sha, method, keyName?}` → Stream |
 | `deploy.key` | `{name}` → `{publicKey}` (ed25519, privater Schlüssel bleibt auf dem Server) |
 | `system.cleanupPreview` / `system.cleanup` | `{}` |

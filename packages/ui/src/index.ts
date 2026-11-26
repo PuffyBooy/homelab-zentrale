@@ -27,7 +27,7 @@ export type { CiStatus, RepoRowProps } from './RepoRow.js';
 export { CommitRow } from './CommitRow.js';
 export type { CommitRowProps } from './CommitRow.js';
 export { GameServer } from './GameServer.js';
-export type { GameServerProps } from './GameServer.js';
+export type { GameServerAction, GameServerProps } from './GameServer.js';
 export { GameTemplates } from './GameTemplates.js';
 export type { GameTemplate, GameTemplatesProps } from './GameTemplates.js';
 export { ShareLink } from './ShareLink.js';

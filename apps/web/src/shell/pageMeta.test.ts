@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { alert, check, container, repo, server, target } from '../test-fixtures.js';
+import { alert, check, container, game, repo, server, target } from '../test-fixtures.js';
 import {
   checkDetailId,
   containerLogsId,
+  gameDetailId,
+  needsGames,
   needsChecks,
   needsContainers,
   needsRepos,
@@ -113,5 +115,37 @@ describe('pageMeta for github', () => {
     expect(meta.title.rest).toBe('soundos: 3 neu, noch nicht deployt.');
     expect(meta.sub).toBe('GitHub · PuffyBooy/soundos · 1 Ziel');
     expect(meta.serverSwitch).toBe(false);
+  });
+});
+
+describe('pageMeta for game servers', () => {
+  it('puts the problem first on /games and filters by server', () => {
+    const a = game({ name: 'survival', serverId: 'srv-a' });
+    const b = game({
+      name: 'valheim',
+      status: 'crit',
+      statusText: 'Container abgestürzt',
+      serverId: 'srv-b',
+    });
+    const m = pageMeta('/games', { games: [a, b], servers: [] });
+    expect(m.title).toEqual({ em: 'valheim: Container abgestürzt', rest: ' · 2 Gameserver' });
+    expect(m.serverSwitch).toBe(true);
+    expect(m.sub).toContain('1 laufen · 4 Spieler online');
+    const s = server({ id: 'srv-a' });
+    expect(pageMeta('/games', { games: [a, b], servers: [s], filter: 'srv-a' }).title.rest).toBe(
+      'Gameserver läuft · 4 Spieler online',
+    );
+    expect(pageMeta('/games', {}).sub).toBe('lädt …');
+  });
+
+  it('describes one game and the create page', () => {
+    const g = game({ id: 'game-abcdef01' });
+    const m = pageMeta('/games/game-abcdef01', { games: [g] });
+    expect(m.title.rest).toBe('survival läuft · 4 von 20 Spielern online');
+    expect(m.sub).toBe('Gameserver · Minecraft Paper 1.21.4 · oracle-a1');
+    expect(pageMeta('/games/new', {}).title.rest).toBe('Neuer Gameserver');
+    expect(gameDetailId('/games/new')).toBeNull();
+    expect(needsGames('/games/game-abcdef01')).toBe(true);
+    expect(needsGames('/github')).toBe(false);
   });
 });

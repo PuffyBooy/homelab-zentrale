@@ -2,13 +2,25 @@ import type {
   Alert,
   CheckSummary,
   ContainerSummary,
+  GameSummary,
   RepoSummary,
   ServerDetail,
   ServerSummary,
 } from '@hz/shared';
 import { QueryClient } from '@tanstack/react-query';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { alert, check, container, deploy, detail, repo, server, target } from '../test-fixtures.js';
+import {
+  alert,
+  check,
+  container,
+  deploy,
+  detail,
+  game,
+  repo,
+  server,
+  target,
+} from '../test-fixtures.js';
+import { backupsKey, gameEventsKey, gamesKey, type GameEventBuffer } from './games.js';
 import { deployLogKey, reposKey, type DeployLogBuffer } from './github.js';
 import { checksKey } from './checks.js';
 import { alertsKey } from './alerts.js';
@@ -201,6 +213,10 @@ describe('applyLiveMessage', () => {
       'warn',
       'ready',
     ]);
+    // History from the first snapshot has no arrival time, live lines do.
+    const at = qc.getQueryData<LogBuffer>(key)?.at ?? {};
+    expect(Object.keys(at)).toEqual(['2']);
+    expect(at[2]).toMatch(/^\d{4}-\d{2}-\d{2}T/);
     applyLiveMessage(qc, {
       type: 'update',
       topic,
@@ -231,6 +247,42 @@ describe('applyLiveMessage', () => {
     const list = qc.getQueryData<RepoSummary[]>(reposKey);
     expect(list).toHaveLength(1);
     expect(list?.[0]?.targets[0]?.behind).toBe(1);
+  });
+
+  it('writes the games snapshot, merges updates and refreshes backups after a backup', () => {
+    const a = game({ name: 'survival' });
+    const b = game({ name: 'valheim' });
+    applyLiveMessage(qc, { type: 'snapshot', topic: 'games', data: [a, b, { id: 'x' }] });
+    expect(qc.getQueryData<GameSummary[]>(gamesKey)?.map((g) => g.name)).toEqual([
+      'survival',
+      'valheim',
+    ]);
+    qc.setQueryData(backupsKey(a.id), []);
+    const a2 = { ...a, lastBackupAt: '2026-11-26T22:00:00.000Z' };
+    applyLiveMessage(qc, { type: 'update', topic: 'games', upsert: [a2], remove: [b.id] });
+    expect(qc.getQueryData<GameSummary[]>(gamesKey)).toEqual([a2]);
+    expect(qc.getQueryState(backupsKey(a.id))?.isInvalidated).toBe(true);
+  });
+
+  it('buffers game:<id> events from snapshot and updates', () => {
+    const e = (id: string, kind: string) => ({
+      id,
+      kind,
+      text: id,
+      ts: '2026-11-26T22:00:00.000Z',
+    });
+    applyLiveMessage(qc, {
+      type: 'snapshot',
+      topic: 'game:game-000001',
+      data: [e('1', 'progress')],
+    });
+    applyLiveMessage(qc, {
+      type: 'update',
+      topic: 'game:game-000001',
+      upsert: [e('1', 'progress'), e('2', 'ready'), { nope: true }],
+    });
+    const buf = qc.getQueryData<GameEventBuffer>(gameEventsKey('game-000001'));
+    expect(buf?.events.map((x) => x.kind)).toEqual(['progress', 'ready']);
   });
 
   it('appends deploy log chunks and refreshes the deploy on a status item', () => {

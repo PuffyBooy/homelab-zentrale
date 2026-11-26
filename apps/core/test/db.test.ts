@@ -36,6 +36,8 @@ const tables = [
   schema.githubEtags,
   schema.deployTargets,
   schema.deploys,
+  schema.gameServers,
+  schema.gameBackups,
 ];
 
 describe('database', () => {

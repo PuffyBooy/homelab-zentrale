@@ -1,0 +1,38 @@
+# Rendered by the core (see templates/games/README.md).
+# - Players connect over UDP; TCP on the same container port only carries RCON, so it is
+#   published on 127.0.0.1 only.
+# - ${RCON_PASSWORD} below is a runtime placeholder: the core leaves it as is and
+#   docker compose fills it from the 0600 .env at `up` (the image wants CS2_RCONPW).
+#   CS2_PW and SRCDS_TOKEN (secret fields) come from .env via env_file.
+# - The dedicated server (~60 GB) lives in the named volume `server` (owned by the
+#   image's steam user); compose down --volumes removes it with the game.
+# - The image is amd64 only.
+services:
+  server:
+    image: joedwards32/cs2:5.0.1
+    container_name: game-${GAME_NAME}
+    restart: unless-stopped
+    mem_limit: ${MEMORY}
+    env_file:
+      - .env
+    environment:
+      CS2_SERVERNAME: ${CS2_SERVERNAME}
+      CS2_GAMEALIAS: ${CS2_GAMEALIAS}
+      CS2_STARTMAP: ${CS2_STARTMAP}
+      CS2_MAXPLAYERS: ${CS2_MAXPLAYERS}
+      CS2_RCONPW: ${RCON_PASSWORD}
+      CS2_PORT: '27015'
+      CS2_LAN: '0'
+      TV_ENABLE: '0'
+      TZ: Europe/Vienna
+    ports:
+      - '${PORT_GAME}:27015/udp'
+      - '127.0.0.1:${PORT_RCON}:27015/tcp'
+    volumes:
+      - server:/home/steam/cs2-dedicated
+    labels:
+      homelab.game: ${GAME_NAME}
+      homelab.template: cs2
+
+volumes:
+  server:

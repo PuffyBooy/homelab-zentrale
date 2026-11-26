@@ -3,6 +3,7 @@ import {
   alertSchema,
   checkSummarySchema,
   containerSummarySchema,
+  gameSummarySchema,
   logLineSchema,
   logSnapshotSchema,
   liveServerMessageSchema,
@@ -13,6 +14,7 @@ import {
   type Alert,
   type CheckSummary,
   type ContainerSummary,
+  type GameSummary,
   type LiveServerMessage,
   type LogLine,
   type RepoSummary,
@@ -44,7 +46,22 @@ import {
   reposKey,
   type DeployLogBuffer,
 } from './github.js';
-import { appendLogLines, containerLogsKey, type LogBuffer } from './logs.js';
+import {
+  applyGameEvents,
+  backupsKey,
+  emptyGameEvents,
+  gameEventsKey,
+  gamesKey,
+  gameSnapshotToBuffer,
+  type GameEventBuffer,
+} from './games.js';
+import {
+  appendLogLines,
+  containerLogsKey,
+  emptyLogBuffer,
+  stampArrivals,
+  type LogBuffer,
+} from './logs.js';
 import { serverKey, serversKey } from './servers.js';
 
 /**
@@ -204,6 +221,46 @@ export function applyLiveMessage(qc: QueryClient, msg: LiveServerMessage): Apply
     return result;
   }
 
+  if (topic === 'games') {
+    const before = qc.getQueryData<GameSummary[]>(gamesKey);
+    let next: GameSummary[] | undefined;
+    if (msg.type === 'snapshot') {
+      const raw = snapshotList(msg.data, 'games');
+      const { ok, bad } = parseItems(gameSummarySchema, raw ?? []);
+      if (raw) next = qc.setQueryData<GameSummary[]>(gamesKey, ok);
+      if (!raw || bad) void qc.invalidateQueries({ queryKey: gamesKey, exact: true });
+    } else {
+      const { ok, bad } = parseItems(gameSummarySchema, msg.upsert ?? []);
+      next = qc.setQueryData<GameSummary[]>(gamesKey, (old) =>
+        old ? mergeById(old, ok, msg.remove) : old,
+      );
+      for (const id of msg.remove ?? []) qc.removeQueries({ queryKey: backupsKey(id) });
+      if (bad) void qc.invalidateQueries({ queryKey: gamesKey, exact: true });
+    }
+    // A finished backup shows as a new lastBackupAt: refresh that backup list.
+    for (const g of next ?? []) {
+      const old = before?.find((x) => x.id === g.id);
+      if (old && old.lastBackupAt !== g.lastBackupAt) {
+        void qc.invalidateQueries({ queryKey: backupsKey(g.id) });
+      }
+    }
+    return result;
+  }
+
+  const game = /^game:([A-Za-z0-9_-]{1,64})$/.exec(topic);
+  if (game?.[1]) {
+    const key = gameEventsKey(game[1]);
+    if (msg.type === 'snapshot') {
+      const buf = gameSnapshotToBuffer(msg.data);
+      if (buf) qc.setQueryData<GameEventBuffer>(key, buf);
+    } else {
+      qc.setQueryData<GameEventBuffer>(key, (old) =>
+        applyGameEvents(old ?? emptyGameEvents, msg.upsert ?? []),
+      );
+    }
+    return result;
+  }
+
   const deploy = /^deploy:([A-Za-z0-9_-]{1,64})$/.exec(topic);
   if (deploy?.[1]) {
     applyDeployMessage(qc, deploy[1], msg);
@@ -242,6 +299,8 @@ export function applyLiveMessage(qc: QueryClient, msg: LiveServerMessage): Apply
   return result;
 }
 
+const nowIso = (): string => new Date().toISOString();
+
 /**
  * Topic `container-logs:<id>`: the snapshot replaces the buffer, updates append lines.
  * An update may also carry a snapshot-shaped item (`{ lines, ended }`) when the
@@ -256,9 +315,9 @@ function applyLogMessage(
   if (msg.type === 'snapshot') {
     const snap = logSnapshotSchema.safeParse(msg.data);
     if (!snap.success) return;
-    qc.setQueryData<LogBuffer>(key, {
-      lines: appendLogLines([], snap.data.lines),
-      ended: snap.data.ended,
+    qc.setQueryData<LogBuffer>(key, (old) => {
+      const lines = appendLogLines([], snap.data.lines);
+      return { lines, ended: snap.data.ended, at: stampArrivals(old, lines, nowIso()) };
     });
     return;
   }
@@ -276,10 +335,14 @@ function applyLogMessage(
       ended = snap.data.ended;
     }
   }
-  qc.setQueryData<LogBuffer>(key, (old) => ({
-    lines: appendLogLines(old?.lines ?? [], add),
-    ended: ended ?? old?.ended ?? false,
-  }));
+  qc.setQueryData<LogBuffer>(key, (old) => {
+    const lines = appendLogLines(old?.lines ?? [], add);
+    return {
+      lines,
+      ended: ended ?? old?.ended ?? false,
+      at: stampArrivals(old ?? emptyLogBuffer, lines, nowIso()),
+    };
+  });
 }
 
 /**

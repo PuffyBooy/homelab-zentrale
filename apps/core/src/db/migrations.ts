@@ -361,4 +361,42 @@ CREATE INDEX deploys_started ON deploys(started_at);
 CREATE INDEX deploys_status ON deploys(status);
 `,
   },
+  {
+    version: 6,
+    name: 'games',
+    // Game servers (SPEC 6.2/6.3). Secrets (RCON password, secret template fields)
+    // are AES-256-GCM encrypted; settings_json only holds non-secret field values.
+    sql: `
+CREATE TABLE game_servers (
+  id TEXT PRIMARY KEY,
+  server_id TEXT NOT NULL REFERENCES servers(id) ON DELETE CASCADE,
+  template_id TEXT NOT NULL,
+  name TEXT NOT NULL,
+  settings_json TEXT NOT NULL DEFAULT '{}',
+  ports_json TEXT NOT NULL DEFAULT '[]',
+  rcon_port INTEGER,
+  rcon_secret_enc TEXT,
+  secret_values_enc TEXT,
+  external_address TEXT NOT NULL DEFAULT '',
+  auto_stop_minutes INTEGER NOT NULL DEFAULT 0,
+  phase TEXT NOT NULL,
+  phase_text TEXT,
+  status_json TEXT,
+  status_at INTEGER,
+  empty_since INTEGER,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  UNIQUE (server_id, name)
+);
+
+CREATE TABLE game_backups (
+  id TEXT PRIMARY KEY,
+  game_id TEXT NOT NULL REFERENCES game_servers(id) ON DELETE CASCADE,
+  path TEXT NOT NULL,
+  size INTEGER NOT NULL,
+  created_at INTEGER NOT NULL
+);
+CREATE INDEX game_backups_game_created ON game_backups(game_id, created_at);
+`,
+  },
 ];

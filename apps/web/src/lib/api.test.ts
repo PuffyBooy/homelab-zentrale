@@ -98,6 +98,21 @@ describe('api', () => {
     expect(onUnauthorized).toHaveBeenCalledTimes(1);
   });
 
+  it('carries the fixed German hint of the core into errorText', async () => {
+    mockFetch(
+      json(400, {
+        ok: false,
+        error: 'invalid_input',
+        message: 'Server-Passwort: mindestens 8 Zeichen',
+      }),
+      json(400, { ok: false, error: 'invalid_input' }),
+    );
+    const withHint = await api('/api/x', { schema: okResponseSchema }).catch((e: unknown) => e);
+    expect(errorText(withHint)).toBe('Server-Passwort: mindestens 8 Zeichen');
+    const without = await api('/api/x', { schema: okResponseSchema }).catch((e: unknown) => e);
+    expect(errorText(without)).toBe('Eingabe ungültig. Felder prüfen.');
+  });
+
   it('asks for step-up and repeats the request once', async () => {
     const onStepUp = vi.fn(() => Promise.resolve(true));
     reset = configureApi({ onStepUp });

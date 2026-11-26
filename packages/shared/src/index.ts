@@ -8,3 +8,4 @@ export * from './api/containers.js';
 export * from './api/checks.js';
 export * from './api/push.js';
 export * from './api/github.js';
+export * from './api/games.js';

@@ -13,13 +13,16 @@ export class ApiError extends Error {
   readonly error: ApiErrorCode;
   /** Seconds until a retry is allowed (rate limit). */
   readonly retryAfter: number | undefined;
+  /** Optional fixed German hint from the core (errorResponseSchema `message`). */
+  readonly hint: string | undefined;
 
-  constructor(status: number, error: ApiErrorCode, retryAfter?: number) {
+  constructor(status: number, error: ApiErrorCode, retryAfter?: number, hint?: string) {
     super(`api ${status} ${error}`);
     this.name = 'ApiError';
     this.status = status;
     this.error = error;
     this.retryAfter = retryAfter;
+    this.hint = hint;
   }
 }
 
@@ -134,7 +137,8 @@ export async function api<T>(path: string, opts: RequestOptions<T>): Promise<T> 
       if (await askStepUp()) return api(path, { ...opts, stepUp: false });
     }
     if (code === 'unauthorized' && !opts.quiet401) handlers.onUnauthorized?.();
-    throw new ApiError(res.status, code, retryAfter);
+    const hint = parsed.success ? parsed.data.message?.trim() || undefined : undefined;
+    throw new ApiError(res.status, code, retryAfter, hint);
   }
 
   try {

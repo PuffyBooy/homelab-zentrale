@@ -1,0 +1,28 @@
+# Fixture like templates/games/minecraft-java; secrets come from .env (env_file).
+services:
+  server:
+    image: itzg/minecraft-server:latest
+    container_name: game-${GAME_NAME}
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      EULA: 'TRUE'
+      TYPE: ${TYPE}
+      VERSION: ${VERSION}
+      MAX_PLAYERS: ${MAX_PLAYERS}
+      MEMORY: ${MEMORY}
+      SEED: ${SEED}
+      MOTD: ${MOTD}
+      LEVEL: world-${LEVEL}
+      ENABLE_WHITELIST: ${ENABLE_WHITELIST}
+      ONLINE_MODE: ${ONLINE_MODE}
+      ENABLE_RCON: 'true'
+      TZ: Europe/Vienna
+    ports:
+      - '${PORT_GAME}:25565/tcp'
+      - '${PORT_RCON}:25575/tcp'
+    volumes:
+      - ./data:/data
+    labels:
+      homelab.game: ${GAME_NAME}
+      homelab.template: minecraft-java

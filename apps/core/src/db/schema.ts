@@ -428,6 +428,60 @@ export const deploys = sqliteTable(
   ],
 );
 
+// ---- M6: game servers ------------------------------------------------------------
+
+export const gameServers = sqliteTable(
+  'game_servers',
+  {
+    id: text('id').primaryKey(),
+    serverId: text('server_id')
+      .notNull()
+      .references(() => servers.id, { onDelete: 'cascade' }),
+    templateId: text('template_id').notNull(),
+    /** Folder /opt/homelab/games/<name>/ and container game-<name>; unique per server. */
+    name: text('name').notNull(),
+    /** Non-secret template field values (defaults applied). */
+    settingsJson: text('settings_json').notNull().default('{}'),
+    /** [{name, port, protocol, count}] host ports. */
+    portsJson: text('ports_json').notNull().default('[]'),
+    /** Host port of RCON (published on 127.0.0.1 only). */
+    rconPort: integer('rcon_port'),
+    /** RCON password, crypto.ts (AAD `game_servers.rcon:<id>`). */
+    rconSecretEnc: text('rcon_secret_enc'),
+    /** JSON of secret template fields, crypto.ts (AAD `game_servers.secrets:<id>`). */
+    secretValuesEnc: text('secret_values_enc'),
+    externalAddress: text('external_address').notNull().default(''),
+    autoStopMinutes: integer('auto_stop_minutes').notNull().default(0),
+    /** setup | failed | running | stopped (what the admin wants / where setup is). */
+    phase: text('phase').notNull(),
+    /** Setup progress or failure reason (German). */
+    phaseText: text('phase_text'),
+    /** Last game.status result (gameStatusDataSchema). */
+    statusJson: text('status_json'),
+    statusAt: integer('status_at'),
+    /** Since when the running game has had 0 players (auto-stop). */
+    emptySince: integer('empty_since'),
+    createdAt: integer('created_at').notNull(),
+    updatedAt: integer('updated_at').notNull(),
+  },
+  (t) => [unique().on(t.serverId, t.name)],
+);
+
+export const gameBackups = sqliteTable(
+  'game_backups',
+  {
+    id: text('id').primaryKey(),
+    gameId: text('game_id')
+      .notNull()
+      .references(() => gameServers.id, { onDelete: 'cascade' }),
+    /** Backup file on the server, below /opt/homelab/backups/. */
+    path: text('path').notNull(),
+    size: integer('size').notNull(),
+    createdAt: integer('created_at').notNull(),
+  },
+  (t) => [index('game_backups_game_created').on(t.gameId, t.createdAt)],
+);
+
 export type User = typeof users.$inferSelect;
 export type Session = typeof sessions.$inferSelect;
 export type ServerRow = typeof servers.$inferSelect;
@@ -440,3 +494,5 @@ export type PushSubscriptionRow = typeof pushSubscriptions.$inferSelect;
 export type GithubRepoRow = typeof githubRepos.$inferSelect;
 export type DeployTargetRow = typeof deployTargets.$inferSelect;
 export type DeployRow = typeof deploys.$inferSelect;
+export type GameServerRow = typeof gameServers.$inferSelect;
+export type GameBackupRow = typeof gameBackups.$inferSelect;

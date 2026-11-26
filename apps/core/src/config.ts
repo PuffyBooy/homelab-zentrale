@@ -35,6 +35,9 @@ export const configSchema = z.object({
     .string()
     .regex(/^[a-z0-9][a-z0-9._/:@-]{0,254}$/, 'HZ_AGENT_IMAGE: ungültiger Image-Name')
     .default('homelab-zentrale/agent:local'),
+  // Game templates (templates/games/<id>/). Default: the repo's templates dir; the
+  // Docker image sets it to the copy shipped in the image.
+  HZ_GAME_TEMPLATES_DIR: optionalEnv(z.string().min(1).max(4096)),
   // Fixed setup token, only for automated tests (e2e). Rejected unless NODE_ENV=test.
   HZ_SETUP_TOKEN: z
     .string()
@@ -68,6 +71,8 @@ export interface Config {
   webDir: string | undefined;
   demo: boolean;
   agentImage: string;
+  /** templates/games directory; undefined = the repo default (app.ts). */
+  gameTemplatesDir: string | undefined;
   env: 'development' | 'production' | 'test';
   /** Only set with NODE_ENV=test. */
   setupToken: string | undefined;
@@ -114,6 +119,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     webDir: c.HZ_WEB_DIR,
     demo: c.HZ_DEMO,
     agentImage: c.HZ_AGENT_IMAGE,
+    gameTemplatesDir: c.HZ_GAME_TEMPLATES_DIR,
     env: c.NODE_ENV,
     setupToken: c.HZ_SETUP_TOKEN,
     vapid:

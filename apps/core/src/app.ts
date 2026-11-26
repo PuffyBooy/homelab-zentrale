@@ -29,6 +29,9 @@ import { seedDemo } from './demo/seed.js';
 import { githubRoutes } from './github/routes.js';
 import { GithubService } from './github/service.js';
 import type { FetchLike as GithubFetch } from './github/client.js';
+import { gameRoutes } from './games/routes.js';
+import { GameService } from './games/service.js';
+import { loadTemplates } from './games/templates.js';
 import { errorHandler, sendError } from './http/errors.js';
 import { LiveHub, type LiveOptions } from './live/hub.js';
 import { liveRoutes } from './live/routes.js';
@@ -48,6 +51,9 @@ const here = dirname(fileURLToPath(import.meta.url));
 
 /** apps/web/dist, seen from apps/core/src or apps/core/dist. */
 export const defaultWebDir = resolve(here, '../../web/dist');
+
+/** templates/games of the repo, seen from apps/core/src or apps/core/dist. */
+export const defaultGameTemplatesDir = resolve(here, '../../../templates/games');
 
 export interface AppDeps {
   /** Database. Defaults to `${dataDir}/hz.sqlite`. The app closes it on shutdown. */
@@ -84,6 +90,7 @@ export interface CoreServices {
   push: PushService;
   notifier: Notifier;
   github: GithubService;
+  games: GameService;
   db: DbHandle;
 }
 
@@ -327,6 +334,37 @@ export async function buildApp(config: Config, deps: AppDeps = {}): Promise<Fast
     if (deleted) github.emitAll();
   });
 
+  // ---- M6: game servers ------------------------------------------------------
+  const gameTemplatesDir = resolve(config.gameTemplatesDir ?? defaultGameTemplatesDir);
+  const games = new GameService({
+    db: db.db,
+    box,
+    now,
+    hub,
+    alerts,
+    setIntent: (id, intent, ttlMs) => containers.setIntent(id, intent, ttlMs),
+    scheduler,
+    log: app.log.child({ mod: 'games' }),
+    templates: loadTemplates(gameTemplatesDir, app.log.child({ mod: 'games' })),
+  });
+  live.addProvider({
+    matches: (topic) => topic === 'games',
+    snapshot: () => games.list(),
+    item: (_topic, id) => games.summary(id),
+  });
+  live.addProvider({
+    matches: (topic) => games.matches(topic),
+    has: (topic) => games.has(topic),
+    snapshot: (topic) => games.snapshot(topic),
+  });
+  games.setPublisher(live);
+  games.onChange((id, deleted) => live.mark('games', id, deleted ? 'remove' : 'upsert'));
+  containers.onChange(() => games.queueRefresh());
+  servers.onChange((id, deleted) => {
+    if (deleted) games.forgetServer(id);
+    else games.queueRefresh();
+  });
+
   app.decorate('hzCore', {
     scheduler,
     tokens,
@@ -341,6 +379,7 @@ export async function buildApp(config: Config, deps: AppDeps = {}): Promise<Fast
     push,
     notifier,
     github,
+    games,
     db,
   });
 
@@ -353,6 +392,7 @@ export async function buildApp(config: Config, deps: AppDeps = {}): Promise<Fast
   scheduler.every('alerts.prune', HOUR, () => void alerts.prune());
   checks.start();
   github.start();
+  games.start();
   scheduler.every('push.warnBundle', 60_000, () => notifier.flush());
   scheduler.at('report.weekly', nextWeeklyReport, () => {
     if (!readNotifySettings(db.db).weeklyReport) return;
@@ -381,7 +421,7 @@ export async function buildApp(config: Config, deps: AppDeps = {}): Promise<Fast
     scheduler.stop();
     // Let running checks and pushes finish before the database closes (bounded).
     await Promise.race([
-      Promise.all([checks.idle(), push.idle(), github.idle()]),
+      Promise.all([checks.idle(), push.idle(), github.idle(), games.idle()]),
       new Promise((r) => setTimeout(r, 3_000).unref()),
     ]);
     github.deployer.shutdown();
@@ -411,6 +451,7 @@ export async function buildApp(config: Config, deps: AppDeps = {}): Promise<Fast
   await app.register(checkRoutes, { prefix: '/api', db: db.db, now, checks });
   await app.register(pushRoutes, { prefix: '/api', db: db.db, now, push });
   await app.register(githubRoutes, { prefix: '/api', db: db.db, now, github });
+  await app.register(gameRoutes, { prefix: '/api', db: db.db, now, games });
 
   const webDir = resolve(config.webDir ?? defaultWebDir);
   const hasWeb = existsSync(resolve(webDir, 'index.html'));

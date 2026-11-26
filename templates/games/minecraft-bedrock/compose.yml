@@ -1,0 +1,30 @@
+# Rendered by the core (see templates/games/README.md). No RCON: commands go through
+# `docker attach` (stdin_open + tty).
+services:
+  server:
+    image: itzg/minecraft-bedrock-server:2026.11.1
+    container_name: game-${GAME_NAME}
+    restart: unless-stopped
+    mem_limit: ${MEMORY}
+    stdin_open: true
+    tty: true
+    env_file:
+      - .env
+    environment:
+      EULA: 'TRUE'
+      VERSION: ${VERSION}
+      SERVER_NAME: ${SERVER_NAME}
+      GAMEMODE: ${GAMEMODE}
+      DIFFICULTY: ${DIFFICULTY}
+      MAX_PLAYERS: ${MAX_PLAYERS}
+      LEVEL_SEED: ${LEVEL_SEED}
+      ALLOW_LIST: ${ALLOW_LIST}
+      ONLINE_MODE: ${ONLINE_MODE}
+      TZ: Europe/Vienna
+    ports:
+      - '${PORT_GAME}:19132/udp'
+    volumes:
+      - ./data:/data
+    labels:
+      homelab.game: ${GAME_NAME}
+      homelab.template: minecraft-bedrock

@@ -17,6 +17,9 @@ import { containerUpdate } from './container-update.js';
 import { containerLogs } from './logs.js';
 import { deployRun } from './deploy.js';
 import { deployKey } from './deploy-key.js';
+import { gameBackup } from './game-backup.js';
+import { gameRemove } from './game-remove.js';
+import { gameRcon, gameStatus } from './games.js';
 import { cleanup, cleanupPreview } from './system-cleanup.js';
 import { systemReboot } from './system-reboot.js';
 import {
@@ -47,8 +50,10 @@ export const handlers: ActionHandlers = {
   'compose.down': composeDown,
   'compose.pull': composePull,
   'compose.write': composeWrite,
-  'game.rcon': notImplemented,
-  'game.backup': notImplemented,
+  'game.rcon': gameRcon,
+  'game.backup': (p, ctx, id) => gameBackup(p, ctx, id),
+  'game.status': gameStatus,
+  'game.remove': gameRemove,
   'deploy.run': deployRun,
   'deploy.key': deployKey,
   'system.cleanupPreview': cleanupPreview,

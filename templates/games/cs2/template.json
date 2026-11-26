@@ -1,0 +1,67 @@
+{
+  "$schema": "../template.schema.json",
+  "id": "cs2",
+  "name": "Counter-Strike 2",
+  "image": "joedwards32/cs2:5.0.1",
+  "ram": { "min": "4G", "recommended": "8G" },
+  "ports": [{ "name": "game", "container": 27015, "protocol": "udp", "default": 27015, "count": 1 }],
+  "query": { "method": "gamedig", "port": "game", "type": "counterstrike2" },
+  "rcon": { "supported": true, "port": 27015 },
+  "dataDir": "./data",
+  "fields": [
+    {
+      "key": "CS2_SERVERNAME",
+      "label": "Servername",
+      "type": "text",
+      "default": "Homelab",
+      "pattern": "[A-Za-z0-9 ._-]{1,40}"
+    },
+    {
+      "key": "CS2_GAMEALIAS",
+      "label": "Spielmodus",
+      "type": "select",
+      "options": ["casual", "competitive", "wingman", "deathmatch", "custom"],
+      "default": "casual"
+    },
+    {
+      "key": "CS2_STARTMAP",
+      "label": "Startkarte",
+      "type": "text",
+      "default": "de_inferno",
+      "pattern": "[a-z0-9_]{2,40}"
+    },
+    {
+      "key": "CS2_MAXPLAYERS",
+      "label": "Max. Spieler",
+      "type": "number",
+      "default": 10,
+      "min": 2,
+      "max": 64
+    },
+    {
+      "key": "CS2_PW",
+      "label": "Server-Passwort (leer oder mind. 8 Zeichen)",
+      "type": "text",
+      "default": "",
+      "optional": true,
+      "pattern": "[^\\s'\"$\\\\]{8,64}",
+      "secret": true
+    },
+    {
+      "key": "SRCDS_TOKEN",
+      "label": "Steam Game Server Token (für öffentliche Server)",
+      "type": "text",
+      "default": "",
+      "optional": true,
+      "pattern": "[A-F0-9]{8,64}",
+      "secret": true
+    },
+    {
+      "key": "MEMORY",
+      "label": "RAM",
+      "type": "select",
+      "options": ["4G", "8G", "12G"],
+      "default": "8G"
+    }
+  ]
+}
