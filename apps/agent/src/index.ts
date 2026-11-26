@@ -8,6 +8,7 @@ import { cleanupPartialBackups } from './actions/game-backup.js';
 import { cleanupStaleTransfers } from './actions/game-transfer.js';
 import { WakeManager } from './actions/game-wake.js';
 import { collectInventory } from './collect/inventory.js';
+import { SmartReader } from './collect/storage.js';
 import { SystemCollector } from './collect/system.js';
 import { ConfigError, loadConfig } from './config.js';
 import { AgentConnection } from './connection.js';
@@ -51,6 +52,10 @@ async function main(): Promise<void> {
     docker,
   };
   const system = new SystemCollector(host);
+  const storageOpts = {
+    smart: config.smart,
+    ...(config.smart ? { smartReader: new SmartReader(config.hostRoot) } : {}),
+  };
   const containers = new ContainerCollector(docker, { hide: (id) => hiddenDuringUpdate.has(id) });
   const timers = new Set<NodeJS.Timeout>();
   const streams = new StreamManager({
@@ -117,7 +122,7 @@ async function main(): Promise<void> {
     osName: () => system.osName(),
     log,
     collectMetrics: () => system.metrics(),
-    collectInventory: () => collectInventory(host, system, containers),
+    collectInventory: () => collectInventory(host, system, containers, storageOpts),
     handleRpc: (env) => dispatcher.handle(env),
     onRpcResultSent: (result, sent) => dispatcher.resultSent(result, sent),
     onStreamCancel: (id) => streams.cancel(id),

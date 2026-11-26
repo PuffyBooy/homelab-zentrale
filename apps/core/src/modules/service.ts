@@ -74,6 +74,7 @@ const MODULE_PREFIXES: Record<ModuleId, readonly string[]> = {
     '/api/share-gateway',
     '/s',
   ],
+  storage: ['/api/storage'],
 };
 
 function under(path: string, prefix: string): boolean {

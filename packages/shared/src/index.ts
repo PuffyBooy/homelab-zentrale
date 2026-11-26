@@ -17,4 +17,5 @@ export * from './api/throttle.js';
 export * from './api/onboarding.js';
 export * from './api/migrate.js';
 export * from './api/ports.js';
+export * from './api/storage.js';
 export * from './api/game-features.js';

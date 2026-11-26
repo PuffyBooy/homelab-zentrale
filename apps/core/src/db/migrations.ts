@@ -705,6 +705,19 @@ CREATE INDEX game_migrations_game ON game_migrations(game_id, started_at);
   },
   {
     version: 14,
+    name: 'server_storage',
+    // M13 NAS und Speicher (apps/core/src/storage): the latest inventory.storage per
+    // server (md RAID, volumes, disks, SMART) as validated JSON.
+    sql: `
+CREATE TABLE server_storage (
+  server_id TEXT PRIMARY KEY REFERENCES servers(id) ON DELETE CASCADE,
+  storage_json TEXT NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+`,
+  },
+  {
+    version: 15,
     name: 'games_complete',
     // M12 "Gameserver komplett". Existing games keep their behaviour: wake_on_connect 0
     // (new games get 1 from the request default). sleeping: stopped by the sleep mode and

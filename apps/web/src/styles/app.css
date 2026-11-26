@@ -1677,6 +1677,14 @@ a.hz-btn {
   text-decoration: none;
 }
 
+/* M13 Speicher (pages/storage/StorageTile.tsx) */
+.app-storage-head {
+  margin: var(--space-4) 0 var(--space-2);
+}
+.app-storage-head:first-child {
+  margin-top: 0;
+}
+
 /* ---------- M12: game statistics ---------- */
 .app-stats-hours {
   display: grid;

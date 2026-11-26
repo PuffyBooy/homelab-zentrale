@@ -90,6 +90,8 @@ export interface SimAgentOptions {
   listeningPorts?: SimListeningPort[];
   /** Size of the simulated world archive game.export sends (default 100 KiB, 3 chunks). */
   exportBytes?: number;
+  /** M13: inventory.storage (RAID, volumes, disks); left out when undefined. */
+  storage?: Record<string, unknown>;
 }
 
 /** An archive game.import is receiving. */
@@ -138,6 +140,8 @@ export class SimAgent {
   ptyInput = '';
   /** Public and local listening ports reported in every inventory (M11 port audit). */
   listeningPorts: SimListeningPort[];
+  /** M13: inventory.storage sent with every inventory (setStorage changes it). */
+  storage: Record<string, unknown> | undefined;
   /** World data per game folder name: set by game.import, read by game.export. */
   readonly gameData = new Map<string, Buffer>();
   private readonly imports = new Map<string, SimImport>();
@@ -151,6 +155,7 @@ export class SimAgent {
         { proto: 'tcp', address: '127.0.0.1', port: 8123, process: 'python3' },
       ]
     ).map((p) => ({ ...p }));
+    this.storage = o.storage;
   }
 
   container(name: string): SimContainer | undefined {
@@ -335,7 +340,14 @@ export class SimAgent {
       sshFailed24h: 41,
       fail2banBanned: 2,
       listeningPorts: this.listeningPorts,
+      ...(this.storage ? { storage: this.storage } : {}),
     });
+  }
+
+  /** M13: replaces inventory.storage and reports it in a fresh inventory. */
+  setStorage(storage: Record<string, unknown>): void {
+    this.storage = storage;
+    this.sendInventory();
   }
 
   /** Pushes one log line to every open stream of the container (stdout or stderr). */

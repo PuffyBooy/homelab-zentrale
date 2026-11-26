@@ -112,8 +112,6 @@ Arbeite die Meilensteine **in dieser Reihenfolge** ab. Jeder Meilenstein bekommt
 
 **Abnahme:** Ein neuer Sim-Agent kommt nur mit Code und Einzeiler online; ein Gameserver zieht zwischen zwei Sim-Servern um und läuft danach am Ziel; ein neuer Port meldet sich. Sicherheitstests: Code nur einmal, abgelaufen, Brute-Force-Grenze, `install.sh` enthält kein Secret, Umzug nur mit Step-up, kein Pfad außerhalb der Spielordner.
 
----
-
 ## M12: Gameserver komplett
 - **Schlafmodus:** Neue Gameserver schlafen nach 15 Min ohne Spieler (einstellbar, 0 = nie). Solange sie schlafen, lauscht der Agent auf ihren Ports (`game.wake.arm`): Minecraft zeigt in der Serverliste „Schläft“, der erste Login (bzw. bei anderen Spielen das erste Spielpaket) weckt den Server; der Spieler bekommt „Server startet, bitte in 1 Minute neu verbinden“. Aufwecken beachtet die RAM-Reserve (M10). Status „Schläft“ in Kachel, Detail und Benutzerlink.
 - **Zeitpläne pro Gameserver:** Neustart und Backup an Wochentagen zu einer Uhrzeit (`HZ_TIMEZONE`), Neustart mit Warnung an die Spieler 5 und 1 Min vorher (RCON `say`); schlafende Server werden nicht geweckt.
@@ -126,6 +124,20 @@ Arbeite die Meilensteine **in dieser Reihenfolge** ab. Jeder Meilenstein bekommt
 - **Netz am Server** (zuhause/Cloud/VPS) für den richtigen Hinweis zur Portweiterleitung; Gameserver-Container werden über das Label `homelab.game` erkannt.
 
 **Abnahme:** Ein Minecraft-Server schläft nach der eingestellten Zeit ohne Spieler ein, ein Login-Versuch weckt ihn, danach läuft er; die Serverliste zeigt im Schlaf „Schläft“. Ein Zeitplan-Backup läuft zur eingestellten Minute. Ein Plugin wird aus Modrinth installiert und wieder entfernt. Ein Freund lädt über den Link die Welt herunter und stellt eine Whitelist-Anfrage, die der Admin bestätigt. Ein Backup wird wiederhergestellt. Sicherheitstests: Wake-Listener nur auf Ports des eigenen Spiels, keine Weiterleitung von Daten, Größen- und Verbindungsgrenzen, kein Wecken über Serverlisten-Pings; Mod-URLs nur von Modrinth mit Hash; Discord-URL nicht im Log und in keiner Antwort; Welt-Download nur mit Recht und Limit; Restore nur mit Step-up und ohne Pfade außerhalb des Spielordners.
+
+---
+
+## M13: NAS und Speicher
+**Ziel:** Ein NAS (zuerst UGREEN NASync mit UGOS Pro, aber generisch für jeden Linux-Server mit md-RAID) hängt wie jeder andere Server an der Zentrale und zeigt seinen Speicher-Zustand.
+
+- **WP Schema** (`packages/shared`): optionales Feld `inventory.storage` (Plattform, RAID-Arrays, Volumes, Platten mit SMART), API `GET /api/storage`, `GET /api/storage/:id`, Regeln für Meldungen (`storageProblems`), Modul `storage` (Standard an).
+- **WP Agent ∥** (`apps/agent`, `deploy/`): Sammler `collect/storage.ts`: md-RAID aus `/proc/mdstat`, Volumes aus der Mount-Tabelle des Hosts mit Geräte-Kette (dm → md → Platte), Platten aus `/sys/block`, NVMe-Temperatur aus hwmon. SMART nur mit `HZ_AGENT_SMART=1` über `smartctl` aus dem Image, mit `--nocheck=standby` (weckt keine schlafende Platte), höchstens alle 10 Min pro Platte. Override `deploy/docker-compose.agent.smart.yml` (nur Lesezugriff auf die Platten, `CAP_SYS_RAWIO`). `install-agent.sh --smart` und der Einzeiler (`… -- <code> --smart`) schalten es ein, auf einem UGREEN-NAS automatisch.
+- **WP Core ∥** (`apps/core/src/storage`): letzter Stand pro Server (Tabelle `server_storage`, Migration 14), Meldungen: RAID beschädigt oder inaktiv (crit), SMART meldet Ausfall (crit), defekte Sektoren, Medienfehler, SSD abgenutzt (warn), Plattentemperatur (HDD 50/60 °C, SATA-SSD 60/70 °C, NVMe 70/80 °C); erledigt sich mit OK-Meldung. Modul aus: keine Routen, keine Meldungen.
+- **WP Web ∥** (`apps/web/src/pages/storage`): Abschnitt „Speicher“ im Serverdetail (RAID mit Rebuild-Fortschritt, Volumes als UsageBar, Platten mit Zustand, Temperatur, Betriebsstunden, „schläft“), Kachel „Speicher“ in der Übersicht, Schalter unter Einstellungen → Module.
+
+**Abnahme:** Ein simuliertes UGREEN-NAS zeigt RAID, Volumes und Platten. Fällt eine Platte aus dem RAID, gibt es eine CRIT-Meldung, nach dem Neuaufbau eine OK-Meldung. Sicherheitstests: `smartctl` nur mit festen, lesenden Argumenten und gültigen Plattennamen, kein Wecken schlafender Platten, strenges Schema mit Obergrenzen, Routen nur mit Admin-Session und nur lesend, Override gibt nur Lesezugriff auf Blockgeräte.
+
+**Später (M13b):** Das NAS als Backup-Ziel für Gameserver-Backups (Kopie über die Zentrale wie beim Umzug), sobald M12 (Gameserver komplett) gemergt ist.
 
 ---
 

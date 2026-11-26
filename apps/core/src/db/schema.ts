@@ -830,6 +830,16 @@ export const gameMigrations = sqliteTable(
 
 export type GameMigrationRow = typeof gameMigrations.$inferSelect;
 
+// ---- M13: NAS und Speicher ------------------------------------------------------
+
+/** Latest inventory.storage of a server (storage/service.ts). */
+export const serverStorage = sqliteTable('server_storage', {
+  serverId: text('server_id')
+    .primaryKey()
+    .references(() => servers.id, { onDelete: 'cascade' }),
+  storageJson: text('storage_json').notNull(),
+  updatedAt: integer('updated_at').notNull(),
+});
 // ---- M12: game server features ------------------------------------------------
 
 /** Restart / backup at weekdays and HH:MM in HZ_TIMEZONE (games/schedules.ts). */
