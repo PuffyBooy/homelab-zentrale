@@ -46,7 +46,7 @@ export const MODULE_LABEL: Record<ModuleId, string> = {
   fail2ban: 'Fail2ban',
   discordbot: 'Discord-Bot',
   voice: 'Sprachsteuerung',
-  cloud: 'Cloud-Server (Azure)',
+  cloud: 'Cloud-Server',
 };
 
 export const MODULE_HINT: Record<ModuleId, string> = {

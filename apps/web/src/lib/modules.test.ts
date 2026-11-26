@@ -49,9 +49,7 @@ describe('modules', () => {
     expect(ids({})).not.toContain('cloud');
     expect(ids({ cloud: true })).toContain('cloud');
     expect(isModuleOn(undefined, 'cloud')).toBe(false);
-    expect(pageMeta('/cloud', { modules: off }).title.rest).toBe(
-      'Cloud-Server (Azure) ist ausgeschaltet.',
-    );
+    expect(pageMeta('/cloud', { modules: off }).title.rest).toBe('Cloud-Server ist ausgeschaltet.');
   });
 
   it('shows Sicherheit while vulnscan or fail2ban is on', () => {
