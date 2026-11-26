@@ -270,7 +270,20 @@ export function pageMeta(pathname: string, data: PageData = {}): PageMeta {
   if (pathname === settingsItem.href) {
     return {
       title: plain('Einstellungen'),
-      sub: 'Konto, Sitzungen, Push, GitHub und Home Assistant',
+      sub: 'Einstellungen · Änderungen an Tokens und Zugängen brauchen einen Code',
+      serverSwitch: false,
+    };
+  }
+  if (pathname === '/console') {
+    if (data.servers === undefined)
+      return { title: plain('Konsole'), sub: 'lädt …', serverSwitch: false };
+    const ready = data.servers.filter((s) => s.allowTerminal && s.connected).length;
+    const total = data.servers.length;
+    return {
+      title: ready
+        ? plain(`Konsole bereit auf ${ready} von ${plural(total, 'Server', 'Servern')}.`)
+        : plain('Keine Konsole verfügbar.'),
+      sub: 'Konsole · nur mit Code · jede Sitzung wird protokolliert',
       serverSwitch: false,
     };
   }

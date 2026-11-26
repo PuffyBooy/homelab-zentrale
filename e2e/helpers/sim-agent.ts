@@ -64,6 +64,16 @@ export interface SimAgentOptions {
   logEveryMs?: number;
   /** Simulate game servers: compose.write, compose.down and game.status. */
   games?: boolean;
+  /** Announce the terminal capability and answer pty.* with an echo shell. */
+  terminal?: boolean;
+}
+
+/** One simulated PTY: echoes input like a line-mode shell, never runs anything. */
+interface SimPty {
+  streamId: string;
+  cols: number;
+  rows: number;
+  line: string;
 }
 
 type Msg = { type: string; [k: string]: unknown };
@@ -78,6 +88,12 @@ export class SimAgent {
   private ws: WebSocket | null = null;
   private timer: ReturnType<typeof setInterval> | null = null;
   private readonly streams = new Map<string, LogStream>();
+  /** Open PTYs by stream id. */
+  readonly ptys = new Map<string, SimPty>();
+  /** Every size the core sent (open and resize), for asserting the fit. */
+  readonly ptySizes: { cols: number; rows: number }[] = [];
+  /** All input that reached the agent (the core must not log it, the test checks it got here). */
+  ptyInput = '';
 
   constructor(private readonly o: SimAgentOptions) {
     this.containers = (o.containers ?? []).map((c) => ({ ...c }));
@@ -105,7 +121,7 @@ export class SimAgent {
           arch: 'x64',
           os: 'Debian GNU/Linux 12 (bookworm)',
           token: this.agentToken ?? this.o.token,
-          capabilities: { terminal: false, docker: this.o.containers !== undefined },
+          capabilities: { terminal: !!this.o.terminal, docker: this.o.containers !== undefined },
         });
       });
       ws.on('message', (raw) => {
@@ -132,6 +148,7 @@ export class SimAgent {
           this.answer(msg);
         } else if (msg.type === 'stream.cancel') {
           this.endStream(String(msg.streamId), null);
+          this.ptys.delete(String(msg.streamId));
         }
       });
     });
@@ -140,8 +157,77 @@ export class SimAgent {
     this.timer = setInterval(() => this.sendMetrics(), this.o.metricsEveryMs ?? 5000);
   }
 
+  /** The shell exits (like `exit` in bash): stream.end with the exit code. */
+  ptyExit(code = 0): void {
+    for (const id of [...this.ptys.keys()]) {
+      this.ptys.delete(id);
+      this.send({ type: 'stream.end', streamId: id, code });
+    }
+  }
+
+  private ptyOut(id: string, chunk: string): void {
+    this.send({ type: 'stream.data', streamId: id, channel: 'stdout', chunk });
+  }
+
+  private prompt(): string {
+    return `alex@${this.o.name}:~$ `;
+  }
+
+  /** pty.* RPCs; false when the action is not one of them. */
+  private answerPty(id: string, action: string, params: Record<string, unknown>): boolean {
+    if (!action.startsWith('pty.')) return false;
+    const fail = (code: string): true => {
+      this.send({ type: 'rpc.result', id, ok: false, error: { code, message: code } });
+      return true;
+    };
+    if (!this.o.terminal) return fail('terminal_disabled');
+    if (action === 'pty.open') {
+      const cols = Number(params.cols);
+      const rows = Number(params.rows);
+      this.ptySizes.push({ cols, rows });
+      this.ptys.set(id, { streamId: id, cols, rows, line: '' });
+      this.send({ type: 'rpc.result', id, ok: true, data: { streamId: id } });
+      this.ptyOut(id, `Simulierte Shell auf ${this.o.name}\r\n${this.prompt()}`);
+      return true;
+    }
+    const pty = this.ptys.get(String(params.streamId));
+    if (!pty) return fail('not_found');
+    if (action === 'pty.input') {
+      const data = String(params.data ?? '');
+      this.ptyInput += data;
+      let out = '';
+      for (const ch of data) {
+        if (ch === '\r') {
+          out += `\r\n${pty.line ? `echo: ${pty.line}\r\n` : ''}${this.prompt()}`;
+          pty.line = '';
+        } else {
+          pty.line += ch;
+          out += ch;
+        }
+      }
+      this.send({ type: 'rpc.result', id, ok: true, data: {} });
+      if (out) this.ptyOut(pty.streamId, out);
+      return true;
+    }
+    if (action === 'pty.resize') {
+      pty.cols = Number(params.cols);
+      pty.rows = Number(params.rows);
+      this.ptySizes.push({ cols: pty.cols, rows: pty.rows });
+      this.send({ type: 'rpc.result', id, ok: true, data: {} });
+      return true;
+    }
+    if (action === 'pty.close') {
+      this.ptys.delete(pty.streamId);
+      this.send({ type: 'rpc.result', id, ok: true, data: {} });
+      this.send({ type: 'stream.end', streamId: pty.streamId, code: 0 });
+      return true;
+    }
+    return fail('not_allowed');
+  }
+
   /** Simulates a stopped agent: socket gone, no more reports. */
   disconnect(): void {
+    this.ptys.clear();
     for (const st of this.streams.values()) if (st.timer) clearInterval(st.timer);
     this.streams.clear();
     if (this.timer) clearInterval(this.timer);
@@ -319,6 +405,7 @@ export class SimAgent {
       this.startLogs(id, params);
       return;
     }
+    if (this.answerPty(id, action, params)) return;
     if (this.o.games && this.answerGame(id, action, params)) return;
     if (action.startsWith('container.') || action.startsWith('compose.')) {
       if (!this.act(action, params)) {

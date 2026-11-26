@@ -13,6 +13,7 @@ import { debounce } from './debounce.js';
 import { makeHostExec, runFile, spawnFile } from './exec.js';
 import { normalizeArch, type HostContext } from './host.js';
 import { createLogger } from './log.js';
+import { PtyManager } from './actions/pty.js';
 import { StreamManager } from './streams.js';
 
 async function agentVersion(): Promise<string> {
@@ -54,6 +55,16 @@ async function main(): Promise<void> {
     send: (msg) => conn.send(msg),
     bufferedAmount: () => conn.bufferedAmount(),
   });
+  // Only constructed with HZ_AGENT_ALLOW_TERMINAL=1; node-pty loads on the first pty.open.
+  const pty = config.allowTerminal
+    ? new PtyManager({
+        allowTerminal: true,
+        hostExec: config.hostExec,
+        host,
+        streams,
+        log,
+      })
+    : undefined;
   const dispatcher = new Dispatcher(
     {
       name: config.name,
@@ -73,6 +84,7 @@ async function main(): Promise<void> {
       dockerSocket: config.dockerSocket,
       spawn: spawnFile,
       dataDir: config.dataDir,
+      ...(pty ? { pty } : {}),
     },
     (event) => conn.send(event),
   );
@@ -131,6 +143,7 @@ async function main(): Promise<void> {
     events?.stop();
     inventorySoon.cancel();
     streams.cancelAll();
+    pty?.closeAll();
     conn.stop();
     for (const t of timers) clearTimeout(t);
     process.exit(0);

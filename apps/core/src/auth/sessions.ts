@@ -1,4 +1,4 @@
-import { and, desc, eq, gt, lte, ne } from 'drizzle-orm';
+import { and, desc, eq, gt, inArray, lte, ne } from 'drizzle-orm';
 import type { Clock } from '../clock.js';
 import { randomToken, sha256Hex } from '../crypto.js';
 import type { Db } from '../db/index.js';
@@ -24,10 +24,39 @@ export function tokenHash(token: string): string {
 }
 
 export class SessionStore {
+  private readonly revokeListeners = new Set<() => void>();
+
   constructor(
     private readonly db: Db,
     private readonly now: Clock,
   ) {}
+
+  /**
+   * Called after sessions were deleted (logout, revoke, password or TOTP change),
+   * so long-lived sockets (console) can close at once instead of on the next check.
+   */
+  onRevoke(fn: () => void): () => void {
+    this.revokeListeners.add(fn);
+    return () => this.revokeListeners.delete(fn);
+  }
+
+  private revoked(changes: number): void {
+    if (changes === 0) return;
+    for (const fn of this.revokeListeners) fn();
+  }
+
+  /** Ids of the given sessions that still exist and are not expired. */
+  alive(ids: readonly string[]): Set<string> {
+    if (ids.length === 0) return new Set();
+    return new Set(
+      this.db
+        .select({ id: sessions.id })
+        .from(sessions)
+        .where(and(inArray(sessions.id, [...ids]), gt(sessions.expiresAt, this.now())))
+        .all()
+        .map((r) => r.id),
+    );
+  }
 
   /** Creates a session. Returns the cookie value (only here, never stored). */
   create(userId: number, userAgent: string | undefined): { token: string; session: Session } {
@@ -87,14 +116,17 @@ export class SessionStore {
       .delete(sessions)
       .where(and(eq(sessions.id, id), eq(sessions.userId, userId)))
       .run();
+    this.revoked(r.changes);
     return r.changes > 0;
   }
 
   revokeOthers(userId: number, keepId: string): number {
-    return this.db
+    const n = this.db
       .delete(sessions)
       .where(and(eq(sessions.userId, userId), ne(sessions.id, keepId)))
       .run().changes;
+    this.revoked(n);
+    return n;
   }
 
   setStepUp(id: string, until: number): void {

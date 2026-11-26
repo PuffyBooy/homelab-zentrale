@@ -15,6 +15,7 @@
     "build": "tsc -p tsconfig.build.json"
   },
   "dependencies": {
+    "@homebridge/node-pty-prebuilt-multiarch": "^0.15.0",
     "@hz/shared": "workspace:*",
     "dockerode": "^5.0.1",
     "gamedig": "^5.3.3",

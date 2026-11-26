@@ -15,6 +15,9 @@ Alles hier braucht deine Zugänge oder ist nicht rückgängig zu machen. Bis dah
 7. **Gameserver für Freunde erreichbar machen (ab M6):** Die Zentrale zeigt pro Gameserver, welche Ports weitergeleitet werden müssen. Das machst du selbst: am Heimserver im Deco-Router (Portweiterleitung auf die feste LAN-IP des Heimservers), bei Oracle in der Security List der VM *und* in iptables auf der VM. Für eine schöne Adresse (z. B. `mc.<deine-domain>`) einen DNS-/DDNS-Eintrag anlegen und im Gameserver unter Einstellungen als externe Adresse eintragen. Die Zentrale selbst bleibt dabei nur über Tailscale erreichbar.
 8. **Share-Gateway (optional, ab M7):** Nur wenn Freunde ohne Tailscale Links nutzen sollen. Anleitung in `deploy/README.md` → „Share-Gateway auf oracle-a1“: DDNS-Namen anlegen, in der Oracle Security List und in iptables 80/443 öffnen, Caddy installieren, in der Zentrale unter Einstellungen → Share-Gateway einen Token erzeugen und auf oracle-a1 in `/etc/homelab-share/share.env` eintragen, dann einschalten. Ohne Gateway funktionieren Links nur im Tailnet (sicherer Standard). Die Zentrale selbst bleibt dabei nie öffentlich.
 9. **Home Assistant verbinden (ab M8):** In HA unter Profil → Sicherheit einen Long-Lived Access Token anlegen. In der Zentrale unter Einstellungen → Home Assistant die URL (z. B. `http://<heimserver-LAN-IP>:8123`) und den Token eintragen (fragt nach dem TOTP-Code), dann unter „Wohnung: Räume und Geräte“ Räume anlegen und Geräte auswählen. Türöffner (BTicino/Shelly) als Art „Taster“ eintragen. Strompreis €/kWh und die Sensoren für Leistung (W) und Energie (kWh) wählen.
+10. **Web-Konsole einschalten (ab M9, nur wo gewünscht):** Die Konsole ist pro Server zweimal aus: Auf dem Server in der Agent-`.env` `HZ_AGENT_ALLOW_TERMINAL=1` setzen und den Agent neu starten (`deploy/install-agent.sh` erneut ausführen, das neue Image enthält die PTY-Bibliothek), dann in der Zentrale unter Einstellungen → Server „Konsole erlaubt“ einschalten. Öffnen fragt nach dem TOTP-Code; jede Sitzung steht im Protokoll (ohne Inhalte). Empfehlung: nur am Heimserver, nicht auf der öffentlichen Oracle-VM.
+11. **Wandmodus aufs Tablet (ab M9):** Unter Einstellungen → Wandmodus ein Gerät anlegen (fragt nach dem TOTP-Code), den QR-Code mit dem Tablet scannen und die Seite als Startseite bzw. im Kiosk-Browser festlegen. Das Gerät darf nur den Wandzustand lesen; verliert man das Tablet, das Gerät in den Einstellungen löschen.
+12. **Datenbank sichern:** Unter Einstellungen → Export lädt die ganze SQLite-Datenbank herunter (Step-up). Die Secrets darin sind verschlüsselt; ohne `HZ_SECRET_KEY` ist das Backup für Secrets wertlos, also beides getrennt aufbewahren.
 
 **Noch von Hand abzunehmen** (braucht echte Zugänge): Push am Handy (M4); ein echter Deploy eines Test-Repos mit `compose.yml` auf den Heimserver-Agent (M5, automatisiert nur mit Fake-GitHub, Fake-Agent und echtem git gegen ein lokales Repo getestet). Der echte Türöffner (BTicino/Shelly) mit deiner HA (M8, im CI nur mit der HA-Demo getestet). Benutzerlink von außen über das Gateway auf oracle-a1 (M7, im CI nur lokal getestet).
 
@@ -34,6 +37,9 @@ Alles hier braucht deine Zugänge oder ist nicht rückgängig zu machen. Bis dah
 - **Step-up für Benutzerlinks?** Links erstellen und widerrufen braucht derzeit keine erneute TOTP-Eingabe (SECURITY.md nennt es nicht); Gateway-Einstellungen und Gateway-Token schon. Soll auch das Erstellen eines Links Step-up brauchen?
 - **Neustart-Recht allein:** Ein Link nur mit „Neustart“ darf einen gestoppten Server nicht starten (sonst wäre es heimlich „Starten“). Passt das?
 - **Türöffner mit Step-up:** Tür öffnen fragt nach der Bestätigung zusätzlich nach dem TOTP-Code (gilt 15 Min), damit ein gestohlenes Session-Cookie die Haustür nicht öffnen kann. Zu umständlich?
+- **Wandgerät-Token wiederverwendbar:** Der Link fürs Tablet gilt, bis das Gerät gelöscht wird (Kiosk-Browser laden oft die Start-URL neu und verlieren Cookies). Sicherer wäre ein Einmal-Token, dann muss das Tablet bei Cookie-Verlust neu gekoppelt werden. Lieber einmalig?
+- **Konsole pro Server:** höchstens 2 gleichzeitig, 15 Min ohne Eingabe und 60 Min insgesamt, dann wird getrennt. Passt das?
+- **Arm64-Agent mit Konsole:** Die PTY-Bibliothek kommt als fertiges Binary; auf dem Raspberry Pi und der Oracle-ARM-VM ist das in CI gebaut, aber nicht am echten Gerät ausprobiert.
 - **Level für Updates/Neustart nötig:** derzeit `warn` (wie SPEC 5.1). Mit Push ab M4 wären das gesammelte Pushes alle 30 Min. Lieber `info` (kein Push)?
 
 ## Annahmen
@@ -100,6 +106,10 @@ Sortiert nach Bereich. Nichts davon ist in den Meilensteinen, alles wäre ein ei
 - iOS/Android-Widgets über die PWA-Shortcuts.
 - Tastatur-Makros und eigene Aktionen in der Palette.
 - Dunkles Wandmodus-Layout für den Echo Show.
+
+- Konsole: mehrere Tabs, Datei-Upload per Drag & Drop, gespeicherte Befehle.
+- Wandmodus: Kalender, Wetter und Öffi-Abfahrten (Wiener Linien) als Kacheln.
+- Export automatisch jede Nacht auf einen zweiten Server (verschlüsselt).
 
 ### Sonstiges
 - Roblox-/Evelon-Statistiken.

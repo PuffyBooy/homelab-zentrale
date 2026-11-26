@@ -22,6 +22,17 @@ RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
 RUN pnpm --filter @hz/agent... build
 RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
   pnpm --filter @hz/agent --prod deploy --legacy /out
+# node-pty (web console): the package ships prebuilt pty.node for every platform. Its
+# install script (prebuild check, node-gyp fallback) is not run: pnpm only runs build
+# scripts listed in onlyBuiltDependencies, so no compiler is needed. This stage runs on
+# the target platform, so keep only the prebuild for this arch (linux-x64 / linux-arm64)
+# and drop the C++ sources and the Windows conpty binaries.
+RUN set -eu; \
+  d="$(readlink -f /out/node_modules/@homebridge/node-pty-prebuilt-multiarch)"; \
+  keep="linux-$(node -p process.arch)"; \
+  test -f "$d/prebuilds/$keep/pty.node"; \
+  find "$d/prebuilds" -mindepth 1 -maxdepth 1 ! -name "$keep" -exec rm -rf {} +; \
+  rm -rf "$d/src" "$d/third_party" "$d/scripts" "$d/binding.gyp" "$d/build"
 
 FROM node:22-bookworm-slim AS runtime
 # util-linux: nsenter (host commands in the namespaces of host PID 1)
@@ -48,6 +59,8 @@ ENV NODE_ENV=production \
     HZ_AGENT_HOST_ROOT=/host/proc/1/root
 WORKDIR /app
 COPY --from=build /out /app
+# Fail the build if the native pty module does not load on this arch/libc.
+RUN node -e "require('/app/node_modules/@homebridge/node-pty-prebuilt-multiarch')"
 RUN mkdir -p /data && chown node:node /data && chmod 0700 /data
 VOLUME ["/data"]
 # Least privilege by default: as `node` the agent can still report metrics.

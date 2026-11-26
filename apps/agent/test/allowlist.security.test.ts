@@ -111,11 +111,11 @@ describe('allowlist', () => {
     }
   });
 
-  it('answers unimplemented allowlisted actions with failed (no denied event)', async () => {
+  it('answers pty.open without a terminal manager with failed (no denied event)', async () => {
     const { d, events } = setup({ allowTerminal: true });
     const res = await d.handle(rpc('pty.open', { cols: 80, rows: 24 }));
     expect(res).toMatchObject({ ok: false, error: { code: 'failed' } });
-    expect(res.ok === false && res.error.message).toMatch(/not implemented/);
+    expect(res.ok === false && res.error.message).toMatch(/not available/);
     expect(events).toHaveLength(0);
   });
 });

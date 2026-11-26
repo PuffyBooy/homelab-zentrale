@@ -6,6 +6,7 @@ onlyBuiltDependencies:
   - esbuild
 ignoredBuiltDependencies:
   - better-sqlite3
+  - '@homebridge/node-pty-prebuilt-multiarch'
 
 overrides:
   # gamedig pins 5.8.0 (GHSA-474x-hrwr-fgx4, low); 5.x is API compatible.

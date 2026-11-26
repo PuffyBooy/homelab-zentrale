@@ -91,7 +91,7 @@ test('two failed runs turn the check DOWN and raise an alert', async () => {
 
 test('detail with range switch, then delete with confirmation', async () => {
   await page.goto('/websites');
-  await page.getByRole('button', { name: `${TARGET} öffnen` }).click();
+  await page.getByRole('button', { name: `Details zu ${TARGET}` }).click();
   await expect(page).toHaveURL(/\/websites\/[A-Za-z0-9_-]{8,64}$/);
   await page.getByRole('button', { name: '7 T' }).click();
   await expect(page.getByRole('button', { name: '7 T' })).toHaveAttribute('aria-pressed', 'true');

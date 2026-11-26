@@ -98,6 +98,14 @@ async function readJson(res: Response): Promise<unknown> {
   }
 }
 
+/**
+ * Shows the step-up dialog outside of an API request (e.g. before opening the console
+ * socket). Resolves true once a fresh TOTP was accepted.
+ */
+export function requestStepUp(): Promise<boolean> {
+  return askStepUp();
+}
+
 /** JSON request to the core. Same origin only, cookies included, response validated. */
 export async function api<T>(path: string, opts: RequestOptions<T>): Promise<T> {
   if (!path.startsWith('/api/')) throw new Error('api() only talks to /api/*');

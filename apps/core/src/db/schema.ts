@@ -267,6 +267,7 @@ export const alerts = sqliteTable(
       .where(sql`state != 'resolved'`),
     index('alerts_opened_at').on(t.openedAt),
     index('alerts_server_id').on(t.serverId),
+    index('alerts_state_opened').on(t.state, t.openedAt),
   ],
 );
 
@@ -561,3 +562,42 @@ export const haEnergyMonths = sqliteTable('ha_energy_months', {
 });
 
 export type HaEnergyMonthRow = typeof haEnergyMonths.$inferSelect;
+
+// ---- M9: web console log, wall devices -----------------------------------------------
+
+/** One row per web console session. Never keystrokes or output. */
+export const consoleSessions = sqliteTable(
+  'console_sessions',
+  {
+    id: text('id').primaryKey(),
+    serverId: text('server_id')
+      .notNull()
+      .references(() => servers.id, { onDelete: 'cascade' }),
+    startedAt: integer('started_at').notNull(),
+    /** null while open. */
+    endedAt: integer('ended_at'),
+    /** ConsoleCloseReason, null while open. */
+    reason: text('reason'),
+    ip: text('ip'),
+    /** Bytes typed (browser -> shell) and shown (shell -> browser). */
+    bytesIn: integer('bytes_in').notNull().default(0),
+    bytesOut: integer('bytes_out').notNull().default(0),
+  },
+  (t) => [
+    index('console_sessions_server_started').on(t.serverId, t.startedAt),
+    index('console_sessions_started').on(t.startedAt),
+  ],
+);
+
+/** Read-only wall tablets (SPEC 12). Deleting a row revokes the device. */
+export const wallDevices = sqliteTable('wall_devices', {
+  id: text('id').primaryKey(),
+  name: text('name').notNull(),
+  /** SHA-256 of `wall:<token>`. The token itself is never stored. */
+  tokenHash: text('token_hash').notNull().unique(),
+  createdAt: integer('created_at').notNull(),
+  lastSeenAt: integer('last_seen_at'),
+});
+
+export type ConsoleSessionRow = typeof consoleSessions.$inferSelect;
+export type WallDeviceRow = typeof wallDevices.$inferSelect;

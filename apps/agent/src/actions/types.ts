@@ -3,6 +3,7 @@ import type { RunOptions, RunResult, Spawner } from '../exec.js';
 import type { HostContext } from '../host.js';
 import type { Logger } from '../log.js';
 import type { StreamManager } from '../streams.js';
+import type { PtyManager } from './pty.js';
 
 /** Thrown by actions; becomes rpc.result {ok:false, error:{code, message}}. */
 export class ActionError extends Error {
@@ -36,6 +37,8 @@ export interface ActionContext {
   spawn: Spawner;
   /** HZ_AGENT_DATA (agent state, deploy keys). */
   dataDir: string;
+  /** Web console sessions (actions/pty.ts); only set when HZ_AGENT_ALLOW_TERMINAL=1. */
+  pty?: PtyManager;
 }
 
 export type ActionHandler<A extends RpcAction> = (

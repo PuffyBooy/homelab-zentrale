@@ -40,6 +40,9 @@ const tables = [
   schema.gameBackups,
   schema.shareLinks,
   schema.shareAudit,
+  schema.haEnergyMonths,
+  schema.consoleSessions,
+  schema.wallDevices,
 ];
 
 describe('database', () => {

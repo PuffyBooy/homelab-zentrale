@@ -1,4 +1,5 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
+import { WALL_COOKIE } from '@hz/shared';
 import type { Clock } from '../clock.js';
 import { sendError } from '../http/errors.js';
 import { SESSION_COOKIE, SESSION_TTL_MS, type AuthContext, type SessionStore } from './sessions.js';
@@ -7,8 +8,18 @@ declare module 'fastify' {
   interface FastifyRequest {
     /** Admin session, set by the global guard for every /api request. */
     auth: AuthContext | null;
+    /** Wall device (cookie `hz_wall`), only ever set on DEVICE_API_ROUTES. */
+    wallDevice: WallDeviceContext | null;
   }
 }
+
+export interface WallDeviceContext {
+  id: string;
+  lastSeenAt: number | null;
+}
+
+/** Resolves a wall cookie value to a device (installed by the wall module). */
+export type WallDeviceResolver = (token: string | undefined) => WallDeviceContext | null;
 
 /**
  * /api routes that work without a session. Everything else under /api, including
@@ -21,7 +32,14 @@ export const PUBLIC_API_ROUTES: readonly string[] = [
   '/api/auth/login',
   '/api/setup/start',
   '/api/setup/confirm',
+  // Swaps a wall device token for the wall cookie (own rate limit, Origin checked).
+  '/api/wall/session',
 ];
+/**
+ * The only routes (GET) that accept the read-only wall device cookie instead of an
+ * admin session. Every other route ignores that cookie.
+ */
+export const DEVICE_API_ROUTES: readonly string[] = ['/api/wall/state'];
 /**
  * Prefixes with their own auth (no session). The share gateway API authenticates
  * with a bearer token in a header, not a cookie, so it needs no Origin check
@@ -114,9 +132,15 @@ export function clearSessionCookie(reply: FastifyReply): void {
 
 export function installAuthGuard(
   app: FastifyInstance,
-  opts: { sessions: SessionStore; baseUrl: string | undefined },
+  opts: {
+    sessions: SessionStore;
+    baseUrl: string | undefined;
+    /** Looked up per request: the wall module installs it after the guard. */
+    wallDevices: () => WallDeviceResolver | null;
+  },
 ): void {
   app.decorateRequest('auth', null);
+  app.decorateRequest('wallDevice', null);
 
   app.addHook('onRequest', async (request, reply) => {
     const g = guardPath(request);
@@ -129,7 +153,13 @@ export function installAuthGuard(
     if (request.auth?.touched && token) setSessionCookie(reply, token);
 
     if (!isPublicApiPath(path) && !request.auth) {
-      return sendError(reply, 401, 'unauthorized');
+      const deviceRoute =
+        (request.method === 'GET' || request.method === 'HEAD') && DEVICE_API_ROUTES.includes(path);
+      const device = deviceRoute
+        ? (opts.wallDevices()?.(request.cookies[WALL_COOKIE]) ?? null)
+        : null;
+      if (!device) return sendError(reply, 401, 'unauthorized');
+      request.wallDevice = device;
     }
     if (
       MUTATING.has(request.method) &&

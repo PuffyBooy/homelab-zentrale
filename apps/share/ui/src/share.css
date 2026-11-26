@@ -194,10 +194,15 @@ body {
   font-family: var(--font-mono);
   font-size: 11px;
   line-height: 16px;
-  color: var(--ink-muted);
+  color: var(--terminal-ink);
 }
 .hz-term-host {
-  color: var(--ink-faint);
+  color: var(--terminal-ink);
+}
+/* The terminal is always dark: in the light theme the light-theme ink and crit
+   colours would drop below 4.5:1 on --terminal-bg. */
+[data-theme='light'] .hz-term {
+  --crit: #ff6b6b;
 }
 .hz-term-body {
   margin: 0;
@@ -227,7 +232,8 @@ body {
   color: var(--crit);
 }
 .hz-term-dim {
-  color: var(--ink-faint);
+  color: var(--terminal-ink);
+  opacity: 0.75;
 }
 .sh-console-form {
   display: grid;

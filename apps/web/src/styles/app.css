@@ -1248,3 +1248,279 @@ body,
 .app-settings-wide {
   grid-column: 1 / -1;
 }
+
+/* ---------- Konsole (SPEC 11) ---------- */
+.app-console {
+  display: grid;
+  gap: var(--space-4);
+  grid-template-columns: minmax(260px, 380px) minmax(0, 1fr);
+  align-items: start;
+}
+/* The terminal stays dark in every theme, so its head uses the terminal ink too. */
+.app-console-term .hz-term-head,
+.app-console-term .hz-term-host {
+  color: var(--terminal-ink);
+}
+.app-console-meta {
+  display: grid;
+  justify-items: end;
+  gap: 2px;
+}
+.app-console-sessions {
+  grid-column: 1 / -1;
+}
+@media (max-width: 999px) {
+  .app-console {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+.app-console-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.app-console-term {
+  display: grid;
+  gap: var(--space-2);
+  min-width: 0;
+}
+.app-xterm {
+  height: max(320px, calc(100vh - 300px));
+  padding: var(--space-2) var(--space-3);
+  background: var(--terminal-bg);
+}
+.app-xterm[hidden] {
+  display: none;
+}
+.app-xterm .xterm {
+  height: 100%;
+}
+.app-xterm .xterm .xterm-viewport {
+  background-color: var(--terminal-bg);
+}
+.app-xterm .xterm:focus-within {
+  outline: none;
+}
+.app-console-term .hz-term:focus-within {
+  box-shadow: var(--focus-ring);
+}
+.app-xterm-empty {
+  height: max(320px, calc(100vh - 300px));
+  color: var(--terminal-ink);
+}
+.app-console-status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2) var(--space-3);
+  min-height: 36px;
+}
+.app-console-status-text {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--ink-muted);
+}
+.app-console-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+/* ---------- Wandmodus (SPEC 12) ---------- */
+.app-wall {
+  min-height: 100vh;
+  background: var(--bg-000);
+  color: var(--ink);
+  padding: var(--space-6);
+  display: grid;
+  grid-template-rows: auto 1fr;
+  gap: var(--space-6);
+  box-sizing: border-box;
+}
+.app-wall-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-4);
+}
+.app-wall-sentence {
+  margin: 0;
+  font-family: var(--font-sans);
+  font-size: 48px;
+  line-height: 56px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+.app-wall-sentence.app-wall-crit {
+  color: var(--crit);
+}
+.app-wall-meta {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex-shrink: 0;
+}
+.app-wall-time {
+  font-family: var(--font-mono);
+  font-size: 20px;
+  line-height: 28px;
+  color: var(--ink-faint);
+}
+.app-wall-main {
+  display: grid;
+  gap: var(--space-5);
+  align-content: start;
+}
+.app-wall-grid {
+  display: grid;
+  gap: var(--space-4);
+  grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
+}
+.app-wall-tile .hz-tile-body {
+  padding: var(--space-5) var(--space-6) var(--space-6);
+}
+.app-wall-tile .hz-metric-hint {
+  font-size: 20px;
+  line-height: 28px;
+}
+/* A problem turns the whole tile red, not only the dot (design/README.md, Wandmodus). */
+.app-wall-tile.hz-tile-crit {
+  background: var(--crit-soft);
+}
+.app-wall-tile.hz-tile-crit .hz-num {
+  color: var(--crit);
+}
+.app-wall-warn .hz-num {
+  color: var(--warn);
+}
+.app-wall-alerts {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: var(--space-2);
+}
+.app-wall-alert {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  font-family: var(--font-mono);
+  font-size: 24px;
+  line-height: 32px;
+}
+.app-wall-alert-time {
+  color: var(--ink-faint);
+}
+.app-wall-note {
+  display: grid;
+  gap: var(--space-4);
+  max-width: 640px;
+}
+.app-wall-note .app-text {
+  font-size: 20px;
+  line-height: 28px;
+}
+/* Night (22–7 Uhr): everything at 40 %, only crit stays bright. */
+.app-wall-night .app-wall-top,
+.app-wall-night .app-wall-tile:not(.hz-tile-crit),
+.app-wall-night .app-wall-alert:not(.app-wall-crit) {
+  opacity: 0.4;
+}
+.app-wall-night .app-wall-top:has(.app-wall-crit) {
+  opacity: 1;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .app-wall-tile,
+  .app-wall-top,
+  .app-wall-alert {
+    transition: opacity 300ms ease;
+  }
+}
+@media (max-width: 699px) {
+  .app-wall {
+    padding: var(--space-4);
+  }
+  .app-wall-sentence {
+    font-size: 32px;
+    line-height: 38px;
+  }
+  .app-wall-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* ---------- Einstellungen: Bereiche (SPEC 13) ---------- */
+.app-settings-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-2);
+  margin-bottom: var(--space-4);
+}
+.app-settings-link {
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  padding: 0 var(--space-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-muted);
+  text-decoration: none;
+}
+.app-settings-link:hover {
+  background: var(--bg-200);
+  color: var(--ink);
+}
+.app-settings-link:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+.app-rows {
+  display: grid;
+}
+.app-threshold-grid {
+  display: grid;
+  gap: var(--space-3);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+@media (max-width: 499px) {
+  .app-threshold-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+.app-qr-svg {
+  display: block;
+  width: 220px;
+  height: 220px;
+}
+.app-qr-light {
+  fill: var(--bg-100);
+}
+.app-qr-dark {
+  fill: var(--ink);
+}
+.app-wall-url .app-copy-code {
+  font-size: 14px;
+  line-height: 22px;
+  word-break: break-all;
+}
+
+/* ---------- Contrast fixes found by axe (M9) ---------- */
+/* The terminal stays dark in every theme: head text uses the terminal ink. */
+.hz-term-head,
+.hz-term-host {
+  color: var(--app-term-ink, var(--terminal-ink));
+}
+/* ink-faint on the -soft status fills is below 4.5:1 in the light theme. */
+.hz-tile-crit .hz-tile-count,
+.hz-alert .hz-alert-time,
+.hz-alert .app-alert-meta {
+  color: var(--ink-muted);
+}
