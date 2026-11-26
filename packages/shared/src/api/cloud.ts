@@ -183,10 +183,10 @@ export const CLOUD_OS_RAM_GB = 1;
 export function recommendAzureSize(gameRamGb: number): AzureVmSize | null {
   const need = gameRamGb + CLOUD_OS_RAM_GB;
   const fits = AZURE_VM_SIZES.filter((s) => s.ramGb >= need);
-  if (fits.length === 0) return null;
-  return [...fits].sort(
+  const sorted = [...fits].sort(
     (a, b) => Number(b.burstable) - Number(a.burstable) || a.eurPerHour - b.eurPerHour,
-  )[0]!;
+  );
+  return sorted[0] ?? null;
 }
 
 export const cloudCostSchema = z.strictObject({
