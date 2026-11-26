@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   containerActionResponseSchema,
   containerPriorityResponseSchema,
@@ -10,7 +10,7 @@ import {
   type ContainerInfo,
   type ScheduleWindow,
 } from '@hz/shared';
-import { auditLog } from '../src/db/schema.js';
+import { auditLog, containerThrottles, wichtigRestarts } from '../src/db/schema.js';
 import { activeWindows, tierRule, windowActive } from '../src/throttle/schedule.js';
 import { cores } from '../src/throttle/texts.js';
 import { setTimeZone } from '../src/timezone.js';
@@ -18,6 +18,7 @@ import { metricsMsg, type Received, type WsClient } from './agent-helpers.js';
 import {
   containerByName,
   info,
+  insertServer,
   inventory,
   withAgent,
   type AgentSetup,
@@ -420,5 +421,122 @@ describe('schedule windows (HZ_TIMEZONE)', () => {
   it('formats cores in de-AT', () => {
     expect(cores(1)).toBe('1 Kern');
     expect(cores(1.5)).toBe('1,5 Kerne');
+  });
+});
+
+describe('review fixes: auto-stop, deleted containers, tick', () => {
+  async function untilStopped(s: AgentSetup): Promise<void> {
+    for (let i = 0; i < 15 && s.rpcs.every((r) => r.action !== 'container.stop'); i++) {
+      await minutes(s, 96, 1);
+    }
+    expect(s.rpcs.filter((r) => r.action === 'container.stop')).toHaveLength(1);
+  }
+
+  for (const [label, cpuLimit, restored] of [
+    ['its previous limit', 4, 4],
+    ['no limit (null)', undefined, null],
+  ] as const) {
+    it(`auto-stop of a plain container restores ${label} (docker keeps NanoCpus when stopped)`, async () => {
+      const s = await setup([info('worker', { cpu: 50, ...(cpuLimit ? { cpuLimit } : {}) })]);
+      const id = idOf(s, 'worker');
+      await req(s, 'PUT', `/api/containers/${id}/priority`, {
+        priority: 'niedrig',
+        allowStop: true,
+      });
+      await untilStopped(s);
+      const dockerId = containerByName(s.t, 'worker')?.dockerId;
+      const stop = s.rpcs.findIndex((r) => r.action === 'container.stop');
+      const after = s.rpcs.slice(stop + 1).filter((r) => r.action === 'container.limit');
+      expect(after.map((r) => r.params)).toEqual([{ id: dockerId, cpus: restored }]);
+      inventory(s.t, s.serverId, [
+        info('worker', { state: 'exited', exitCode: 0, ...(cpuLimit ? { cpuLimit } : {}) }),
+      ]);
+      expect(containerByName(s.t, 'worker')).toMatchObject({ autoStopped: true, throttled: null });
+      expect(audits(s, 'throttle.removed').at(-1)?.detailsJson).toContain('"why":"stopped"');
+      // Started again with the restored limit: a later throttle keeps it as the original.
+      inventory(s.t, s.serverId, [info('worker', { cpu: 50, ...(cpuLimit ? { cpuLimit } : {}) })]);
+      await req(s, 'POST', `/api/containers/${id}/throttle`, { cpus: 0.5 });
+      await req(s, 'POST', `/api/containers/${id}/unthrottle`, {});
+      expect(limits(s).at(-1)?.params).toEqual({ id: dockerId, cpus: restored });
+    });
+  }
+
+  it('the stop is not postponed by throttling further candidates (ticks every forMinutes)', async () => {
+    const names = ['a', 'b', 'c', 'd', 'e', 'f', 'g'];
+    const s = await setup(names.map((n, i) => info(n, { cpu: 70 - i * 10 })));
+    for (const n of names) {
+      await req(s, 'PUT', `/api/containers/${idOf(s, n)}/priority`, {
+        priority: 'niedrig',
+        allowStop: n === 'a',
+      });
+    }
+    // 2 min steps: every tick throttles one more container (7 candidates).
+    for (let i = 0; i < 5; i++) {
+      s.t.clock.advance(2 * MIN);
+      s.t.app.hzCore.servers.ingestMetrics(s.serverId, metricsMsg({ cpu: 96 }));
+      await s.t.app.hzCore.throttle.tick();
+    }
+    // First throttle at +4 min, +10 min is 6 min later (>= stopAfterMinutes 5): a is stopped
+    // although b..e were throttled in between and f, g are still candidates.
+    const stops = s.rpcs.filter((r) => r.action === 'container.stop');
+    expect(stops.map((r) => r.params)).toEqual([{ id: containerByName(s.t, 'a')?.dockerId }]);
+    expect(containerByName(s.t, 'f')?.throttled).toBeNull();
+  });
+
+  it('a deleted container loses its throttle row, restart attempts and auto-stop alert', async () => {
+    const s = await setup([info('worker', { cpu: 50 }), info('db', { cpu: 1 })]);
+    const worker = idOf(s, 'worker');
+    const db = idOf(s, 'db');
+    await req(s, 'PUT', `/api/containers/${worker}/priority`, {
+      priority: 'niedrig',
+      allowStop: true,
+    });
+    await req(s, 'PUT', `/api/containers/${db}/priority`, { priority: 'wichtig' });
+    await untilStopped(s);
+    inventory(s.t, s.serverId, [
+      info('worker', { state: 'exited', exitCode: 0 }),
+      info('db', { state: 'exited', exitCode: 1 }),
+    ]);
+    s.t.clock.advance(MIN);
+    s.t.app.hzCore.servers.ingestMetrics(s.serverId, metricsMsg({ cpu: 10 }));
+    await s.t.app.hzCore.throttle.tick();
+    const key = `autostop:${s.serverId}:worker`;
+    expect(s.t.app.hzCore.alerts.active(key)).not.toBeNull();
+    const restarts = () =>
+      s.t.db.db
+        .select()
+        .from(wichtigRestarts)
+        .all()
+        .filter((r) => r.containerId === db);
+    expect(restarts()).toHaveLength(1);
+    // Both removed from Docker.
+    inventory(s.t, s.serverId, []);
+    expect(
+      s.t.db.db
+        .select()
+        .from(containerThrottles)
+        .all()
+        .filter((r) => r.containerId === worker),
+    ).toHaveLength(0);
+    expect(restarts()).toHaveLength(0);
+    expect(s.t.app.hzCore.alerts.active(key)).toBeNull();
+  });
+
+  it('tick runs the servers in parallel: a hung server does not hold up the others', async () => {
+    const s = await setup([info('worker')]);
+    const other = insertServer(s.t, 'pi');
+    const throttle = s.t.app.hzCore.throttle;
+    const connected = vi.spyOn(s.t.app.hzCore.hub, 'isConnected').mockReturnValue(true);
+    const seen: string[] = [];
+    const target = throttle as unknown as { tickServer: (row: { id: string }) => Promise<void> };
+    const spy = vi.spyOn(target, 'tickServer').mockImplementation((row) => {
+      seen.push(row.id);
+      return row.id === s.serverId ? new Promise<void>(() => undefined) : Promise.resolve();
+    });
+    void throttle.tick();
+    await Promise.resolve();
+    expect(new Set(seen)).toEqual(new Set([s.serverId, other]));
+    spy.mockRestore();
+    connected.mockRestore();
   });
 });

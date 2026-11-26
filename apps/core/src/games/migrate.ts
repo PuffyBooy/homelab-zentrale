@@ -1,4 +1,5 @@
 import { and, desc, eq, inArray, or } from 'drizzle-orm';
+import { SAVE_COMMANDS } from '../throttle/service.js';
 import type { FastifyBaseLogger } from 'fastify';
 import {
   gameImportDoneDataSchema,
@@ -63,12 +64,6 @@ import { BACKUP_TIMEOUT_MS, gameDirOf, SETUP_TIMEOUT_MS, type GameService } from
  * Only folder names (gameId = folder name) go to the agents, never paths from
  * the wire. One migration per game and per target server at a time.
  */
-
-/** RCON save command before the stop (same list as the M10 auto-stop, throttle/service.ts). */
-const SAVE_COMMANDS: Record<string, string> = {
-  'minecraft-java': 'save-all',
-  palworld: 'Save',
-};
 
 const BEGIN_TIMEOUT_MS = BACKUP_TIMEOUT_MS;
 const IMPORT_ACCEPT_TIMEOUT_MS = 60_000;

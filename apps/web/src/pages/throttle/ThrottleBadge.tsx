@@ -17,7 +17,7 @@ export function ThrottleBadge({
   if (throttled) {
     return (
       <span title={throttleDetail(throttled)}>
-        <Badge tone="warn" icon="cpu">
+        <Badge tone="warn" icon="cpu" className="app-throttle-badge">
           {throttleBadge(throttled)}
         </Badge>
       </span>
@@ -25,7 +25,7 @@ export function ThrottleBadge({
   }
   if (autoStopped) {
     return (
-      <Badge tone="warn" icon="stop">
+      <Badge tone="warn" icon="stop" className="app-throttle-badge">
         {AUTO_STOPPED_TEXT}
       </Badge>
     );

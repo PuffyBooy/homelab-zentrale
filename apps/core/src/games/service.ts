@@ -217,17 +217,28 @@ const TOPIC_RE = /^game:([A-Za-z0-9_-]{1,64})$/;
 export const gameTopic = (id: string): string => `game:${id}`;
 
 /**
+ * Result of the RAM reserve check before a game start: `fits`, `unknown` (no
+ * fresh metrics, the caller decides) or `insufficient` with the numbers.
+ */
+export type RamCheckResult =
+  | { kind: 'fits' }
+  | { kind: 'unknown' }
+  | { kind: 'insufficient'; details: InsufficientRamDetails };
+
+/**
  * M10 hooks from the throttle service: throttle state of a game's container and
  * the RAM reserve check before a game starts.
  */
 export interface GameControl {
   throttleOf(gameId: string): { throttled: Throttled | null; autoStopped: boolean };
-  /** null = fits (or RAM unknown); else the numbers for 409 insufficient_ram. */
+  /** Free RAM minus reserve minus RAM held by starts in flight vs. `neededBytes`. */
   ramCheck(
     serverId: string,
     neededBytes: number,
     ownContainerIds: readonly string[],
-  ): InsufficientRamDetails | null;
+  ): RamCheckResult;
+  /** Holds RAM for a start in flight until the returned release function runs. */
+  holdRam(serverId: string, bytes: number): () => void;
   /** Effective reserve in bytes, null while RAM is unknown. */
   reserveOf(serverId: string, ownContainerIds: readonly string[]): number | null;
 }
@@ -772,6 +783,8 @@ export class GameService {
     const { ports, rconPort } = this.resolvePorts(t, server.id, req.ports);
     const rconPassword = t.rcon.supported ? randomToken(24) : null;
     const files = this.render(l, { name: req.name, ports, rconPort, values, rconPassword });
+    // The setup ends with compose up: the RAM reserve applies (held until it returns).
+    const release = this.admitStart(server.id, this.ramLimitFor(t.id, values.values), [], 'admin');
 
     const id = randomToken(12);
     const now = this.deps.now();
@@ -805,11 +818,12 @@ export class GameService {
         })
         .run();
     } catch {
+      release();
       throw new HttpError(409, 'conflict');
     }
     this.emit(id);
     const secrets = [...(rconPassword ? [rconPassword] : []), ...Object.values(values.secrets)];
-    this.track(this.runSetup(id, server.id, dir, files, secrets));
+    this.track(this.runSetup(id, server.id, dir, files, secrets).finally(release));
     const sum = this.summary(id);
     if (!sum) throw new Error('game vanished');
     return sum;
@@ -1087,13 +1101,19 @@ export class GameService {
     }
     const texts = { start: 'Startet', stop: 'Wird gestoppt', restart: 'Neustart' } as const;
     // A restart of a game that does not run is a start (compose up): same RAM check.
+    let release = (): void => undefined;
     if (
       action === 'start' ||
       (action === 'restart' && this.containerOf(row)?.state !== 'running')
     ) {
-      this.checkRam(row);
+      release = this.admitStart(row.serverId, this.ramLimitOf(row), this.containerIds(row), actor);
     }
-    this.lock(row, texts[action]);
+    try {
+      this.lock(row, texts[action]);
+    } catch (err) {
+      release();
+      throw err;
+    }
     const dir = gameDirOf(row.name);
     const hub = this.deps.hub;
     const cIds = this.containerIds(row);
@@ -1121,6 +1141,7 @@ export class GameService {
       if (action !== 'start') for (const c of cIds) this.deps.setIntent(c, null);
       throw err;
     } finally {
+      release();
       this.unlock(id);
     }
     writeAudit(this.deps.db, this.deps.now(), {
@@ -1164,37 +1185,73 @@ export class GameService {
 
   /** RAM limit of the game: MEMORY field, else the template recommendation. */
   ramLimitOf(row: GameServerRow): number | null {
-    const mem = storedOf(row).values.MEMORY;
+    return this.ramLimitFor(row.templateId, storedOf(row).values);
+  }
+
+  private ramLimitFor(templateId: string, values: Record<string, unknown>): number | null {
+    const mem = values.MEMORY;
     const m = typeof mem === 'string' ? /^(\d{1,3})([GM])$/.exec(mem) : null;
     if (m) return Number(m[1]) * (m[2] === 'G' ? 1024 ** 3 : 1024 ** 2);
-    const rec = this.templates.get(row.templateId)?.template.ram.recommended;
+    const rec = this.templates.get(templateId)?.template.ram.recommended;
     return rec ? ramBytes(rec) : null;
   }
 
   /**
-   * M10 RAM reserve: refuses a start (admin, share link, automatic) with 409
-   * insufficient_ram when the RAM limit does not fit into free RAM minus the
-   * reserve for wichtig containers. Unknown RAM (no metrics yet) does not block.
+   * M10 RAM reserve, on every path that starts a game container (create, start,
+   * restart of a stopped game, wichtig restart, share link, settings/ports with
+   * compose up): refuses with 409 insufficient_ram when `needed` does not fit
+   * into free RAM minus the reserve for wichtig containers minus the RAM held by
+   * other starts in flight on the server. On success the RAM is held until the
+   * returned release function runs (after compose up).
+   *
+   * Unknown RAM (no metrics or older than 60 s): a share link is refused with
+   * 409 `ram_unknown` (friends never bypass the reserve); the admin and the
+   * system may start (their start is the way out when the agent's metrics lag).
    */
-  private checkRam(row: GameServerRow): void {
-    this.checkRamOn(row, row.serverId);
+  /**
+   * The RAM reserve check of a migration (M11) on `serverId`, check only: the
+   * migration runs it before backup, before transfer and before the start on
+   * the target. Unknown RAM does not block (system actor).
+   */
+  checkRamOn(row: GameServerRow, serverId: string): void {
+    const own = serverId === row.serverId ? this.containerIds(row) : [];
+    this.admitStart(serverId, this.ramLimitOf(row), own, 'system')();
   }
 
-  /** The RAM reserve check of a start, on `serverId` (M11: the migration target). */
-  checkRamOn(row: GameServerRow, serverId: string): void {
-    const needed = this.ramLimitOf(row);
-    if (needed === null || !this.control) return;
-    const own = serverId === row.serverId ? this.containerIds(row) : [];
-    const d = this.control.ramCheck(serverId, needed, own);
-    if (d === null) return;
-    const left = Math.max(0, d.freeBytes - d.reserveBytes);
-    throw new HttpError(
-      409,
-      'insufficient_ram',
-      undefined,
-      `Zu wenig RAM, ${gigabytes(left)} frei`,
-      d,
-    );
+  private admitStart(
+    serverId: string,
+    needed: number | null,
+    own: readonly string[],
+    actor: 'admin' | 'system' | `share:${string}`,
+  ): () => void {
+    if (!this.control || needed === null || needed <= 0) return () => undefined;
+    const r = this.control.ramCheck(serverId, needed, own);
+    const share = actor.startsWith('share:');
+    if (r.kind === 'unknown' && share) throw new HttpError(409, 'ram_unknown');
+    if (r.kind === 'insufficient') {
+      const d = r.details;
+      const left = Math.max(0, d.freeBytes - d.reserveBytes);
+      throw new HttpError(
+        409,
+        'insufficient_ram',
+        undefined,
+        `Zu wenig RAM, ${gigabytes(left)} frei`,
+        d,
+      );
+    }
+    return this.control.holdRam(serverId, needed);
+  }
+
+  /**
+   * RAM a compose up of a game in phase running needs on top of what it uses:
+   * the whole limit when its container does not run, else only the growth of
+   * the limit (a recreate with the same or a smaller limit needs nothing).
+   */
+  private recreateNeed(row: GameServerRow, newLimit: number | null): number | null {
+    if (this.containerOf(row)?.state !== 'running') return newLimit;
+    if (newLimit === null) return 0;
+    const cur = this.ramLimitOf(row);
+    return cur === null ? newLimit : Math.max(0, newLimit - cur);
   }
 
   private setRunState(id: string, phase: 'running' | 'stopped'): void {
@@ -1429,7 +1486,22 @@ export class GameService {
       values,
       rconPassword,
     });
-    this.lock(row, 'Einstellungen werden übernommen');
+    // A running game is recreated (compose up): a larger RAM limit must fit.
+    const release =
+      row.phase === 'running'
+        ? this.admitStart(
+            row.serverId,
+            this.recreateNeed(row, this.ramLimitFor(row.templateId, values.values)),
+            this.containerIds(row),
+            'admin',
+          )
+        : () => undefined;
+    try {
+      this.lock(row, 'Einstellungen werden übernommen');
+    } catch (err) {
+      release();
+      throw err;
+    }
     const dir = gameDirOf(row.name);
     try {
       await this.deps.hub.call(
@@ -1450,6 +1522,7 @@ export class GameService {
         this.setRunState(id, 'running');
       }
     } finally {
+      release();
       this.unlock(id);
     }
     return this.summary(id) as GameSummary;
@@ -1533,7 +1606,22 @@ export class GameService {
       values,
       rconPassword: this.rconPassword(row),
     });
-    this.lock(row, 'Ports werden geändert');
+    // Same limit; only a running-phase game whose container is down needs the RAM.
+    const release =
+      row.phase === 'running'
+        ? this.admitStart(
+            row.serverId,
+            this.recreateNeed(row, this.ramLimitOf(row)),
+            this.containerIds(row),
+            'admin',
+          )
+        : () => undefined;
+    try {
+      this.lock(row, 'Ports werden geändert');
+    } catch (err) {
+      release();
+      throw err;
+    }
     const dir = gameDirOf(row.name);
     try {
       await this.deps.hub.call(
@@ -1553,6 +1641,7 @@ export class GameService {
         this.setRunState(id, 'running');
       }
     } finally {
+      release();
       this.unlock(id);
     }
     return result(this.summary(id) as GameSummary);

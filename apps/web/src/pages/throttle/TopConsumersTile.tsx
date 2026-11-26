@@ -18,8 +18,15 @@ function ramText(c: TopConsumer): string {
   return `RAM ${formatBytes(c.memBytes)}`;
 }
 
-function target(c: TopConsumer): ThrottleTarget {
-  return { id: c.containerId, name: c.containerName, serverName: c.serverName };
+/** Dialog target: games stop through the game route, `wichtig` gets a hint. */
+export function consumerTarget(c: TopConsumer): ThrottleTarget {
+  return {
+    id: c.containerId,
+    name: c.containerName,
+    serverName: c.serverName,
+    gameId: c.isGame ? c.gameId : null,
+    priority: c.priority,
+  };
 }
 
 export interface ConsumerRowProps {
@@ -42,8 +49,11 @@ export function ConsumerRow({
 }: ConsumerRowProps): ReactElement {
   const can = consumerActions(c);
   const value = by === 'cpu' ? cpuText(c) : ramText(c);
-  const meta = c.throttled ? `${value} · ${throttleBadge(c.throttled)}` : value;
-  const host = c.protected ? `${c.serverName} · Zentrale/Agent` : `${c.serverName} · ${c.priority}`;
+  // The priority goes into meta (not truncated); the host line keeps only the server.
+  const tier = c.protected ? 'Zentrale/Agent' : c.priority;
+  const meta = c.throttled
+    ? `${value} · ${throttleBadge(c.throttled)} · ${tier}`
+    : `${value} · ${tier}`;
   const actions = c.protected ? undefined : (
     <>
       {can.throttle ? (
@@ -86,7 +96,7 @@ export function ConsumerRow({
   return (
     <ServiceRow
       name={c.containerName}
-      host={host}
+      host={c.serverName}
       status={c.throttled ? 'warn' : 'ok'}
       meta={meta}
       actions={actions}
@@ -163,11 +173,11 @@ export function TopConsumersTile({
         <List title="RAM" list={data.byRam} by="ram" {...handlers} />
       </div>
       {open?.kind === 'throttle' ? (
-        <ThrottleDialog target={target(open.c)} onClose={() => setOpen(null)} />
+        <ThrottleDialog target={consumerTarget(open.c)} onClose={() => setOpen(null)} />
       ) : null}
       {open?.kind === 'stop' ? (
         <StopConfirmDialog
-          target={target(open.c)}
+          target={consumerTarget(open.c)}
           isGame={open.c.isGame}
           onClose={() => setOpen(null)}
         />

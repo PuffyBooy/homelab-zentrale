@@ -23,6 +23,8 @@ export interface ContainerRoutesOptions {
   containers: ContainerService;
   servers: ServerService;
   hub: AgentHub;
+  /** The game a container belongs to (M10), else null. */
+  gameIdOf?: (row: ContainerRow) => string | null;
 }
 
 const ACTION_TIMEOUT_MS = 60_000;
@@ -58,6 +60,19 @@ export const containerRoutes: FastifyPluginAsync<ContainerRoutesOptions> = async
     const { id, action } = containerActionParamsSchema.parse(request.params);
     const row = o.containers.row(id);
     if (!row) throw new HttpError(404, 'not_found');
+    // A game container only starts through the game (RAM reserve, run state,
+    // auto-stop mark): start, and restart/update of a stopped one (they would start it).
+    if (
+      o.gameIdOf?.(row) != null &&
+      (action === 'start' || (action !== 'stop' && row.state !== 'running'))
+    ) {
+      throw new HttpError(
+        409,
+        'conflict',
+        undefined,
+        'Gameserver über die Gameserver-Seite starten',
+      );
+    }
     if (!o.hub.isConnected(row.serverId)) throw new HttpError(409, 'agent_offline');
 
     const plan = action === 'update' ? updatePlan(row) : null;

@@ -333,7 +333,7 @@ describe('server settings (Automatik)', () => {
       expect(p.errors.cpuPct).toBe('Ganze Zahl von 50 bis 99.');
       expect(p.errors.forMinutes).toBe('Ganze Zahl von 1 bis 120.');
       expect(p.errors.throttleCpus).toBe('Zahl von 0,1 bis 64.');
-      expect(p.errors.ramReserveMb).toBe('Zahl von 0 bis 1024 GB.');
+      expect(p.errors.ramReserveMb).toBe('Zahl von 0 bis 1.024 GB.');
     }
   });
 

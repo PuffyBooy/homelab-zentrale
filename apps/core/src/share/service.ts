@@ -832,6 +832,9 @@ export function shareErrorOf(err: unknown): ShareError {
       case 'insufficient_ram':
         // Friends get the code only, never the server's RAM figures.
         return new ShareError(409, 'insufficient_ram');
+      case 'ram_unknown':
+        // RAM reserve not checkable (stale metrics): a friend's start is refused.
+        return new ShareError(409, 'unavailable');
       case 'rate_limited':
         return new ShareError(
           429,

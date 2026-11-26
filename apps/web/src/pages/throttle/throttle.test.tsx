@@ -17,7 +17,9 @@ import { ContainerThrottleTile } from './ContainerThrottleTile.js';
 import { ContainerPriorityBody, GamePriorityTile } from './PriorityTile.js';
 import { StopConfirmDialog, ThrottleDialog } from './ThrottleDialogs.js';
 import { RestartAutostopButton } from './RestartAutostopButton.js';
-import { ConsumerRow, TopConsumersTile } from './TopConsumersTile.js';
+import { ConsumerRow, consumerTarget, TopConsumersTile } from './TopConsumersTile.js';
+import { containerOrGameAction } from '../containers/useContainerAction.js';
+import { throttleRequest } from './useThrottle.js';
 
 const GB = 1024 ** 3;
 const NOW = new Date('2026-11-26T22:04:00.000Z');
@@ -32,6 +34,19 @@ function html(el: ReactElement): string {
 }
 
 afterEach(() => vi.unstubAllGlobals());
+
+const json = (body: unknown): Response =>
+  new Response(JSON.stringify(body), {
+    status: 200,
+    headers: { 'Content-Type': 'application/json' },
+  });
+
+/** fetch stub that answers every call with `body`; returns the called URLs. */
+function stubFetch(body: unknown): { urls: () => string[] } {
+  const fn = vi.fn<typeof fetch>(() => Promise.resolve(json(body)));
+  vi.stubGlobal('fetch', fn);
+  return { urls: () => fn.mock.calls.map((c) => String(c[0])) };
+}
 
 const throttled = {
   cpus: 1,
@@ -148,6 +163,20 @@ describe('manual throttle in container detail', () => {
     expect(out).not.toContain('<button');
   });
 
+  it('warns before throttling a wichtig container by hand', () => {
+    const target = { id: 'ctr-000001', name: 'nextcloud', serverName: 'heimserver' };
+    const hint = 'Wichtig: wird von der Automatik nie gedrosselt. Trotzdem von Hand drosseln?';
+    expect(
+      html(<ThrottleDialog target={{ ...target, priority: 'wichtig' }} onClose={noop} />),
+    ).toContain(hint);
+    expect(
+      html(<ThrottleDialog target={{ ...target, priority: 'normal' }} onClose={noop} />),
+    ).not.toContain(hint);
+    expect(html(<ContainerThrottleTile c={container({ priority: 'wichtig' })} />)).not.toContain(
+      hint,
+    );
+  });
+
   it('the dialog asks for 0,1 to 64 cores', () => {
     const out = html(
       <ThrottleDialog
@@ -238,7 +267,8 @@ describe('"Wer frisst gerade?"', () => {
     expect(out).toContain('CPU 96 %');
     expect(out).toContain('CPU 8,3 % · gedrosselt (1 Kern)');
     expect(out).toContain('RAM 5,8 GB');
-    expect(out).toContain('heimserver · Zentrale/Agent');
+    expect(out).toContain('CPU 41 % · Zentrale/Agent');
+    expect(out).toContain('CPU 96 % · niedrig');
   });
 
   it('protected entries have no buttons, others Drosseln/Aufheben/Stoppen', () => {
@@ -284,6 +314,28 @@ describe('"Wer frisst gerade?"', () => {
     expect(out).toContain('werden getrennt');
     expect(out.indexOf('Abbrechen')).toBeLessThan(out.lastIndexOf('Stoppen'));
     expect(out).toContain('hz-btn-danger');
+  });
+
+  it('"Stoppen" of a game goes through the game route (RCON save, compose down)', async () => {
+    const g = game({ id: 'game-000001' });
+    const f = stubFetch({ game: g });
+    const res = await throttleRequest({ kind: 'stop', id: 'ctr-000001', gameId: 'game-000001' });
+    expect(f.urls()).toEqual(['/api/games/game-000001/stop']);
+    expect(res).toEqual({ container: null, game: true });
+  });
+
+  it('"Stoppen" of a plain container stays a container action', async () => {
+    const f = stubFetch({ ok: true, container: null });
+    await throttleRequest({ kind: 'stop', id: 'ctr-000003', gameId: null });
+    expect(f.urls()).toEqual(['/api/containers/ctr-000003/stop']);
+  });
+
+  it('the stop target of a game consumer carries the gameId, plain ones none', () => {
+    expect(consumerTarget(consumer())).toMatchObject({
+      gameId: 'game-000001',
+      priority: 'niedrig',
+    });
+    expect(consumerTarget(consumer({ isGame: false, gameId: null })).gameId).toBeNull();
   });
 
   it('protected rows render no action buttons at all', () => {
@@ -366,6 +418,29 @@ describe('Automatik', () => {
     expect(out).toContain('Höchstens 20 Zeitfenster.');
     expect(out).toMatch(/<button[^>]*disabled=""[^>]*>.*Zeitfenster hinzufügen/);
     expect(out).toContain('Zeitzone: unbekannt');
+  });
+});
+
+describe('container actions on game containers', () => {
+  it('start, stop and restart go through the game route; update stays', async () => {
+    const g = game({ id: 'game-000001' });
+    let f = stubFetch({ game: g });
+    for (const a of ['start', 'stop', 'restart'] as const) {
+      const res = await containerOrGameAction({ id: 'ctr-000001', gameId: 'game-000001' }, a);
+      expect(res.game?.id).toBe('game-000001');
+    }
+    expect(f.urls()).toEqual([
+      '/api/games/game-000001/start',
+      '/api/games/game-000001/stop',
+      '/api/games/game-000001/restart',
+    ]);
+    f = stubFetch({ ok: true, container: null });
+    await containerOrGameAction({ id: 'ctr-000001', gameId: 'game-000001' }, 'update');
+    await containerOrGameAction({ id: 'ctr-000002', gameId: null }, 'start');
+    expect(f.urls()).toEqual([
+      '/api/containers/ctr-000001/update',
+      '/api/containers/ctr-000002/start',
+    ]);
   });
 });
 

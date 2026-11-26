@@ -579,7 +579,6 @@ export const rpcParamsByAction = {
   'container.restart': containerIdParams,
   /** Pull the image and recreate a standalone container with the same config. */
   'container.update': containerIdParams,
-  /** Stream: the rpc id is the stream id. */
   /**
    * `docker update --cpus <cpus>`; cpus null removes the limit (--cpus 0).
    * Nothing else is changed (never memory). The agent refuses containers with
@@ -587,6 +586,7 @@ export const rpcParamsByAction = {
    * caps cpus at the host's CPU count. Result: containerLimitDataSchema.
    */
   'container.limit': z.strictObject({ id: containerRefSchema, cpus: cpusSchema.nullable() }),
+  /** Stream: the rpc id is the stream id. */
   'container.logs': z.strictObject({
     id: containerRefSchema,
     tail: z.number().int().min(0).max(5000).default(500),

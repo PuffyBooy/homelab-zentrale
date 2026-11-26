@@ -474,6 +474,7 @@ export async function buildApp(config: Config, deps: AppDeps = {}): Promise<Fast
   games.setControl({
     throttleOf: (gameId) => throttle.throttleOf(gameId),
     ramCheck: (serverId, needed, own) => throttle.ramCheck(serverId, needed, own),
+    holdRam: (serverId, bytes) => throttle.holdRam(serverId, bytes),
     reserveOf: (serverId, own) => throttle.reserveOf(serverId, own),
   });
   containers.onChange((id, deleted) => throttle.onContainerChange(id, deleted));
@@ -704,7 +705,15 @@ export async function buildApp(config: Config, deps: AppDeps = {}): Promise<Fast
   await app.register(portRoutes, { prefix: '/api', db: db.db, now, servers, ports });
   await app.register(moduleRoutes, { prefix: '/api', db: db.db, now, modules });
   await app.register(alertRoutes, { prefix: '/api', db: db.db, now, alerts });
-  await app.register(containerRoutes, { prefix: '/api', db: db.db, now, containers, servers, hub });
+  await app.register(containerRoutes, {
+    prefix: '/api',
+    db: db.db,
+    now,
+    containers,
+    servers,
+    hub,
+    gameIdOf: (row) => throttle.control(row).gameId,
+  });
   await app.register(throttleRoutes, {
     prefix: '/api',
     db: db.db,

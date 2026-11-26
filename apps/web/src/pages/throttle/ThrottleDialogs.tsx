@@ -1,5 +1,6 @@
 import { useState, type FormEvent, type ReactElement } from 'react';
-import { Button } from '@hz/ui';
+import type { Priority } from '@hz/shared';
+import { Alert, Button } from '@hz/ui';
 import { Dialog } from '../../components/Dialog.js';
 import { Field } from '../../components/Field.js';
 import { FormError } from '../../components/FormError.js';
@@ -12,7 +13,14 @@ export interface ThrottleTarget {
   id: string;
   name: string;
   serverName: string;
+  /** Set for game containers: "Stoppen" goes through the game route. */
+  gameId?: string | null;
+  /** `wichtig`: the dialog says the automatic never throttles it. */
+  priority?: Priority;
 }
+
+export const WICHTIG_THROTTLE_HINT =
+  'Wichtig: wird von der Automatik nie gedrosselt. Trotzdem von Hand drosseln?';
 
 /** "Drosseln …": CPU share 0,1–64 cores (docker update --cpus). RAM stays as it is. */
 export function ThrottleDialog({
@@ -61,6 +69,7 @@ export function ThrottleForm({
         Begrenzt die CPU von {target.name} auf {target.serverName}. Das RAM-Limit bleibt gleich. Die
         Drosselung bleibt, bis du sie aufhebst.
       </p>
+      {target.priority === 'wichtig' ? <Alert tone="warn" title={WICHTIG_THROTTLE_HINT} /> : null}
       <Field
         label="CPU-Anteil (Kerne)"
         mono
@@ -113,7 +122,12 @@ export function StopConfirmDialog({
             variant="danger"
             icon="stop"
             disabled={act.isPending}
-            onClick={() => act.mutate({ kind: 'stop', id: target.id }, { onSuccess: onClose })}
+            onClick={() =>
+              act.mutate(
+                { kind: 'stop', id: target.id, gameId: target.gameId },
+                { onSuccess: onClose },
+              )
+            }
           >
             {act.isPending ? 'Stoppt …' : 'Stoppen'}
           </Button>

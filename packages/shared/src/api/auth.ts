@@ -160,6 +160,12 @@ export const errorCodeSchema = z.enum([
    * reserve for wichtig containers (409). `details`: InsufficientRamDetails.
    */
   'insufficient_ram',
+  /**
+   * Game start refused because the server's RAM is unknown (no metrics, or older
+   * than 60 s), so the reserve cannot be checked (409). Only for share-link
+   * starts (the share API answers it as 409 `unavailable`); the admin may start.
+   */
+  'ram_unknown',
 ]);
 export type ErrorCode = z.infer<typeof errorCodeSchema>;
 export const errorResponseSchema = z.strictObject({
