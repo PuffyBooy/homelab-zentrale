@@ -3,7 +3,7 @@ import { mkdirSync, rmSync } from 'node:fs';
 import { expect, test, type BrowserContext, type Page } from '@playwright/test';
 import { Secret, TOTP } from 'otpauth';
 import { E2E_SETUP_TOKEN } from '../playwright.config.js';
-import { PASSWORD, USER } from './helpers/auth.js';
+import { PASSWORD, USER, loopbackOrigin } from './helpers/auth.js';
 
 /**
  * M12 "Gameserver komplett" (web part) against a second core with HZ_DEMO=1. The shared
@@ -17,7 +17,7 @@ import { PASSWORD, USER } from './helpers/auth.js';
  */
 
 const PORT = 8097;
-const DEMO = `http://127.0.0.1:${PORT}`;
+const DEMO = loopbackOrigin(PORT);
 const DATA = 'test-results/data-m12';
 const SHOTS = 'docs/screenshots/m12';
 
@@ -45,6 +45,7 @@ async function waitForHealth(): Promise<void> {
   const until = Date.now() + 60_000;
   while (Date.now() < until) {
     try {
+      // Loopback only: the demo core this spec started itself.
       const res = await fetch(`${DEMO}/api/health`);
       if (res.ok) return;
     } catch {
