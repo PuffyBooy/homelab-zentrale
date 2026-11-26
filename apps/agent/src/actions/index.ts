@@ -19,6 +19,7 @@ import { containerLogs } from './logs.js';
 import { logsSearch } from './logs-search.js';
 import { imageScan } from './image-scan.js';
 import { fail2banStatus, fail2banUnban } from './fail2ban.js';
+import { backupTargetStatus, backupTargetStore, backupTargetSync } from './backup-target.js';
 import { deployRun } from './deploy.js';
 import { deployKey } from './deploy-key.js';
 import { gameBackup } from './game-backup.js';
@@ -86,6 +87,9 @@ export const handlers: ActionHandlers = {
   'image.scan': (p, ctx) => imageScan(p, ctx),
   'fail2ban.status': (p, ctx) => fail2banStatus(p, ctx),
   'fail2ban.unban': (p, ctx) => fail2banUnban(p, ctx),
+  'backup.target.status': (p, ctx) => backupTargetStatus(p, ctx),
+  'backup.target.sync': (p, ctx) => backupTargetSync(p, ctx),
+  'backup.target.store': (p, ctx, id) => backupTargetStore(p, ctx, id),
 };
 
 export function hasGitSegment(p: unknown): boolean {
