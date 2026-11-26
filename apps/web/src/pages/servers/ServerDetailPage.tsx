@@ -21,6 +21,7 @@ import { useLiveState, useLiveTopic } from '../../lib/live.js';
 import { fetchHistory, fetchServer, historyKey, serverKey } from '../../lib/servers.js';
 import { useNow } from '../../lib/useNow.js';
 import { ContainerGroups } from '../containers/ContainersPage.js';
+import { StorageTile } from '../storage/StorageTile.js';
 import { AutomatikTile } from '../throttle/AutomatikTile.js';
 import { CleanupDialog } from './CleanupDialog.js';
 import { OpenPortsTile } from './OpenPortsTile.js';
@@ -303,6 +304,8 @@ function Detail({ d, history }: { d: ServerDetail; history?: HistoryResponse | u
             <p className="app-empty">Keine offenen Ports gemeldet.</p>
           )}
         </Tile>
+
+        <StorageTile serverId={s.id} />
 
         <OpenPortsTile serverId={s.id} serverName={s.name} />
 

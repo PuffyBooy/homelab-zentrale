@@ -112,6 +112,18 @@ Arbeite die Meilensteine **in dieser Reihenfolge** ab. Jeder Meilenstein bekommt
 
 **Abnahme:** Ein neuer Sim-Agent kommt nur mit Code und Einzeiler online; ein Gameserver zieht zwischen zwei Sim-Servern um und läuft danach am Ziel; ein neuer Port meldet sich. Sicherheitstests: Code nur einmal, abgelaufen, Brute-Force-Grenze, `install.sh` enthält kein Secret, Umzug nur mit Step-up, kein Pfad außerhalb der Spielordner.
 
+## M13: NAS und Speicher
+**Ziel:** Ein NAS (zuerst UGREEN NASync mit UGOS Pro, aber generisch für jeden Linux-Server mit md-RAID) hängt wie jeder andere Server an der Zentrale und zeigt seinen Speicher-Zustand.
+
+- **WP Schema** (`packages/shared`): optionales Feld `inventory.storage` (Plattform, RAID-Arrays, Volumes, Platten mit SMART), API `GET /api/storage`, `GET /api/storage/:id`, Regeln für Meldungen (`storageProblems`), Modul `storage` (Standard an).
+- **WP Agent ∥** (`apps/agent`, `deploy/`): Sammler `collect/storage.ts`: md-RAID aus `/proc/mdstat`, Volumes aus der Mount-Tabelle des Hosts mit Geräte-Kette (dm → md → Platte), Platten aus `/sys/block`, NVMe-Temperatur aus hwmon. SMART nur mit `HZ_AGENT_SMART=1` über `smartctl` aus dem Image, mit `--nocheck=standby` (weckt keine schlafende Platte), höchstens alle 10 Min pro Platte. Override `deploy/docker-compose.agent.smart.yml` (nur Lesezugriff auf die Platten, `CAP_SYS_RAWIO`). `install-agent.sh --smart` und der Einzeiler (`… -- <code> --smart`) schalten es ein, auf einem UGREEN-NAS automatisch.
+- **WP Core ∥** (`apps/core/src/storage`): letzter Stand pro Server (Tabelle `server_storage`, Migration 14), Meldungen: RAID beschädigt oder inaktiv (crit), SMART meldet Ausfall (crit), defekte Sektoren, Medienfehler, SSD abgenutzt (warn), Plattentemperatur (HDD 50/60 °C, SATA-SSD 60/70 °C, NVMe 70/80 °C); erledigt sich mit OK-Meldung. Modul aus: keine Routen, keine Meldungen.
+- **WP Web ∥** (`apps/web/src/pages/storage`): Abschnitt „Speicher“ im Serverdetail (RAID mit Rebuild-Fortschritt, Volumes als UsageBar, Platten mit Zustand, Temperatur, Betriebsstunden, „schläft“), Kachel „Speicher“ in der Übersicht, Schalter unter Einstellungen → Module.
+
+**Abnahme:** Ein simuliertes UGREEN-NAS zeigt RAID, Volumes und Platten. Fällt eine Platte aus dem RAID, gibt es eine CRIT-Meldung, nach dem Neuaufbau eine OK-Meldung. Sicherheitstests: `smartctl` nur mit festen, lesenden Argumenten und gültigen Plattennamen, kein Wecken schlafender Platten, strenges Schema mit Obergrenzen, Routen nur mit Admin-Session und nur lesend, Override gibt nur Lesezugriff auf Blockgeräte.
+
+**Später (M13b):** Das NAS als Backup-Ziel für Gameserver-Backups (Kopie über die Zentrale wie beim Umzug), sobald M12 (Gameserver komplett) gemergt ist.
+
 ## M14: Anbindungen (Proxmox, Pi-hole/AdGuard, FRITZ!Box, Uptime Kuma, Wake-on-LAN, Discord/Telegram/ntfy)
 Wunsch des Admins vom 26.11.2026. Vier neue Module (alle standardmäßig aus, Einschalten mit Step-up), dazu Wake-on-LAN und weitere Meldungskanäle im Core. Schemas: `packages/shared/src/api/integrations.ts`.
 - **WP Schema** (`packages/shared`): Einstellungen, Daten und Aktionen jeder Anbindung, Agent-Aktion `wol.send`, Module `proxmox`, `dnsfilter`, `fritzbox`, `uptimekuma`.

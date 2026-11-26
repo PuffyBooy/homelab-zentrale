@@ -7,7 +7,7 @@ import { z } from 'zod';
  * topics send nothing, it is left out of overview data (wall tiles, weekly
  * report), and for `games` the share links (tailnet page and gateway API) stop.
  *
- * Fresh install: games on, github off, homeassistant off. An existing install keeps
+ * Fresh install: games on, storage on, github off, homeassistant off. An existing install keeps
  * GitHub/HA on if they were configured (migration 10).
  */
 export const MODULES = [
@@ -18,6 +18,7 @@ export const MODULES = [
   'dnsfilter',
   'fritzbox',
   'uptimekuma',
+  'storage',
 ] as const;
 export const moduleIdSchema = z.enum(MODULES);
 export type ModuleId = z.infer<typeof moduleIdSchema>;
@@ -31,6 +32,8 @@ export const modulesSchema = z.strictObject({
   dnsfilter: z.boolean(),
   fritzbox: z.boolean(),
   uptimekuma: z.boolean(),
+  /** M13: NAS und Speicher (RAID, volumes, disks, SMART). Read only, on by default. */
+  storage: z.boolean(),
 });
 export type Modules = z.infer<typeof modulesSchema>;
 
@@ -42,6 +45,7 @@ export const MODULE_DEFAULTS: Modules = {
   dnsfilter: false,
   fritzbox: false,
   uptimekuma: false,
+  storage: true,
 };
 
 /** Enabling these needs step-up (they hold tokens with access to outside systems). */
@@ -56,7 +60,7 @@ export const MODULES_ENABLE_STEP_UP: readonly ModuleId[] = [
 
 // GET /api/settings/modules -> Modules
 export const modulesResponseSchema = modulesSchema;
-// PUT /api/settings/modules { github?, homeassistant?, games? } -> Modules
+// PUT /api/settings/modules { github?, homeassistant?, games?, storage? } -> Modules
 // (step-up when switching github or homeassistant on)
 export const modulesUpdateRequestSchema = modulesSchema
   .partial()

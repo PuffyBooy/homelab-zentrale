@@ -77,6 +77,8 @@ import { throttleRoutes } from './throttle/routes.js';
 import { ThrottleService } from './throttle/service.js';
 import { moduleRoutes } from './modules/routes.js';
 import { installModuleGate, ModuleService } from './modules/service.js';
+import { storageRoutes } from './storage/routes.js';
+import { StorageService } from './storage/service.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 
@@ -315,6 +317,10 @@ export async function buildApp(config: Config, deps: AppDeps = {}): Promise<Fast
   // Optional modules: routes of a switched-off module answer 404 module_disabled
   // (after the auth guard, so anonymous requests still get 401).
   const modules = new ModuleService(db.db, now);
+  // The install wizard's choice counts only until the admin account exists.
+  if (config.initialModules !== undefined && !auth.hasUser()) {
+    modules.set(config.initialModules);
+  }
   installModuleGate(app, modules);
   auth.bootstrap = () => ({ modules: modules.get(), timeZone: config.timeZone });
 
@@ -583,6 +589,27 @@ export async function buildApp(config: Config, deps: AppDeps = {}): Promise<Fast
       );
     }
   });
+  // ---- M13: NAS und Speicher -------------------------------------------------
+  const storage = new StorageService({
+    db: db.db,
+    now,
+    alerts,
+    log: app.log.child({ mod: 'storage' }),
+  });
+  storage.setEnabled(modules.enabled('storage'));
+  servers.onInventoryStored((id, inv) => {
+    try {
+      storage.onInventory(id, inv.storage);
+    } catch (err) {
+      app.log.error(
+        {
+          serverId: id,
+          err: err instanceof Error ? { name: err.name, stack: err.stack } : 'error',
+        },
+        'storage update failed',
+      );
+    }
+  });
 
   // ---- M14: integrations (Proxmox, DNS filter, FRITZ!Box, Uptime Kuma) ------------
   const integrations = new Integrations({
@@ -671,6 +698,7 @@ export async function buildApp(config: Config, deps: AppDeps = {}): Promise<Fast
     if (m === 'github') github.setEnabled(on);
     else if (m === 'games') games.setEnabled(on);
     else if (m === 'homeassistant') ha.setEnabled(on);
+    else if (m === 'storage') storage.setEnabled(on);
     else integrations.setModule(m, on);
     app.log.info({ module: m, on }, 'module switched');
   });
@@ -769,6 +797,7 @@ export async function buildApp(config: Config, deps: AppDeps = {}): Promise<Fast
   await app.register(installScriptRoutes, { onboarding });
   await app.register(portRoutes, { prefix: '/api', db: db.db, now, servers, ports });
   await app.register(moduleRoutes, { prefix: '/api', db: db.db, now, modules });
+  await app.register(storageRoutes, { prefix: '/api', storage });
   await app.register(alertRoutes, { prefix: '/api', db: db.db, now, alerts });
   await app.register(containerRoutes, {
     prefix: '/api',

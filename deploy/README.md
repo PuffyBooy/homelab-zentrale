@@ -18,6 +18,8 @@ Tags: `latest` und `sha-<kurz>` (Push auf `main`), `v<version>` und `sha-<kurz>`
 
 Ein Image: Der Core liefert die gebaute Web-App mit aus.
 
+**Am einfachsten mit dem Installer:** `sudo ./deploy/install.sh` richtet alles ein (Docker, Tailscale, `/etc/homelab-zentrale/core.env` mit 0600, Image, Compose, `tailscale serve`, Health-Check, erster Login). Update, Status und Entfernen über dieselbe Datei, das Share-Gateway mit `sudo ./deploy/install.sh share`. Siehe [`docs/INSTALL.md`](../docs/INSTALL.md). Von Hand geht es so:
+
 ```bash
 cp .env.example .env            # HZ_SECRET_KEY setzen: openssl rand -base64 32
 docker compose -f deploy/docker-compose.core.yml up -d     # Image aus GHCR
@@ -53,6 +55,7 @@ sudo HZ_AGENT_TOKEN=<token> ./deploy/install-agent.sh \
 # optional: --allow-terminal für die Web-Konsole
 #           --image ghcr.io/puffybooy/homelab-agent:sha-<kurz>   fester Stand statt :latest
 #           --build-local (oder HZ_BUILD_LOCAL=1)                 Image aus dem Checkout bauen
+#           --smart       SMART-Werte der Platten lesen (NAS, auf UGREEN automatisch)
 ```
 
 Standardmäßig lädt das Skript `ghcr.io/puffybooy/homelab-agent:latest` (passend zur Architektur des Servers) und startet es. `--image` und `--build-local` schließen sich aus. Ein erneuter Aufruf ohne `--image` setzt das Image wieder auf `:latest` und zieht es neu (Update).
@@ -67,8 +70,22 @@ Beim ersten Verbinden tauscht der Agent das Einmal-Token gegen ein dauerhaftes A
 | `HZ_AGENT_TOKEN` | Enrollment-Token (erster Start) oder Agent-Token. |
 | `HZ_AGENT_NAME` | Name des Servers, `a-z0-9-`. Muss bei „Neu starten“ zur Bestätigung eingegeben werden. |
 | `HZ_AGENT_ALLOW_TERMINAL` | `1` erlaubt die Web-Konsole (PTY). Standard `0`: alle `pty.*` werden abgelehnt. |
+| `HZ_AGENT_SMART` | `1` liest SMART der Platten (M13). Setzt das Override `docker-compose.agent.smart.yml`, nicht von Hand: es bringt auch die nötigen Rechte. |
 | `HZ_AGENT_DATA` | Datenordner (`/data`). |
 | `HZ_AGENT_HOST_EXEC` | `nsenter` (Image-Standard), `direct` (Agent direkt auf dem Host, Entwicklung), `none`. |
+
+### NAS und SMART (M13)
+
+Ein NAS bindest du wie jeden Server an. Für ein **UGREEN NASync** (UGOS Pro):
+
+1. UGOS: Systemsteuerung → Terminal → SSH einschalten; Docker aus dem App Center; Tailscale aufs NAS (App Center oder Container mit `network_mode: host`).
+2. Zentrale: „Server hinzufügen“, den Einzeiler per SSH als root am NAS ausführen. Auf UGREEN-Hardware (DMI-Hersteller `UGREEN`) schaltet er SMART selbst ein, sonst `--smart` anhängen: `curl -fsSL https://<zentrale>/install.sh | sudo sh -s -- <code> --smart`.
+
+Mit SMART startet zusätzlich `docker-compose.agent.smart.yml` (in `/etc/homelab-agent/` als `docker-compose.smart.yml`, eingetragen über `COMPOSE_FILE` in `.env`). Es gibt dem Agent **nur Lesezugriff** auf die Blockgeräte der Platten (`device_cgroup_rules` mit `r`, Major 8, 65–71, 128–135, 259) und `CAP_SYS_RAWIO` für ATA-Pass-through. Der Agent ruft `smartctl --json --info --health --attributes --nocheck=standby,0` auf, höchstens alle 10 Min pro Platte; schlafende Platten bleiben schlafen. Ohne Override zeigt die Zentrale RAID, Volumes und Platten, aber keine SMART-Werte.
+
+RAID kommt aus `/proc/mdstat`, Volumes aus der Mount-Tabelle des Hosts, Platten aus `/sys/block` (USB-Sticks und andere Wechselmedien nicht). Die Zentrale ändert nichts an RAID oder Platten.
+
+Gameserver auf dem NAS: `/opt/homelab` liegt bei UGOS auf dem kleinen Systemvolume. Wer Spiele dort laufen lassen will, legt `/volume1/homelab` an und mountet es per Bind-Mount auf `/opt/homelab`, bevor der Agent startet.
 
 ### Rechte des Containers
 

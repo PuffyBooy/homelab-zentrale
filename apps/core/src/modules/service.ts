@@ -71,6 +71,7 @@ const MODULE_PREFIXES: Record<ModuleId, readonly string[]> = {
   dnsfilter: ['/api/dnsfilter'],
   fritzbox: ['/api/fritzbox'],
   uptimekuma: ['/api/uptimekuma'],
+  storage: ['/api/storage'],
 };
 
 function under(path: string, prefix: string): boolean {

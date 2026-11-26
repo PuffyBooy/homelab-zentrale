@@ -12,6 +12,7 @@ const off = {
   dnsfilter: false,
   fritzbox: false,
   uptimekuma: false,
+  storage: false,
 };
 
 describe('modules', () => {

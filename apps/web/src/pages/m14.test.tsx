@@ -127,6 +127,7 @@ describe('VMs page', () => {
         dnsfilter: false,
         fritzbox: false,
         uptimekuma: false,
+        storage: true,
       },
     });
     expect(off.title.rest).toBe('Proxmox ist ausgeschaltet.');

@@ -112,6 +112,7 @@ describe('shortcuts', () => {
       homeassistant: false,
       games: true,
       ...NONE_EXTRA,
+      storage: true,
     });
     expect(items.map((i) => i.id)).toEqual([
       'overview',

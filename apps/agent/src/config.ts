@@ -60,6 +60,8 @@ export const configSchema = z.object({
     .pipe(agentTokenSchema.optional()),
   HZ_AGENT_NAME: agentNameSchema.optional(),
   HZ_AGENT_ALLOW_TERMINAL: boolFlag,
+  /** M13: read SMART with smartctl (needs deploy/docker-compose.agent.smart.yml). */
+  HZ_AGENT_SMART: boolFlag,
   HZ_AGENT_DATA: z.string().min(1).default('/data'),
   /** How host commands run: nsenter (container, default in the image), direct (bare host), none. */
   HZ_AGENT_HOST_EXEC: z.enum(['nsenter', 'direct', 'none']).default('direct'),
@@ -79,6 +81,7 @@ export interface AgentConfig {
   token: string | undefined;
   name: string;
   allowTerminal: boolean;
+  smart: boolean;
   dataDir: string;
   hostExec: 'nsenter' | 'direct' | 'none';
   hostProc: string;
@@ -122,6 +125,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AgentConfig {
     token: c.HZ_AGENT_TOKEN,
     name,
     allowTerminal: c.HZ_AGENT_ALLOW_TERMINAL,
+    smart: c.HZ_AGENT_SMART,
     dataDir: c.HZ_AGENT_DATA,
     hostExec: c.HZ_AGENT_HOST_EXEC,
     hostProc: c.HZ_AGENT_HOST_PROC,

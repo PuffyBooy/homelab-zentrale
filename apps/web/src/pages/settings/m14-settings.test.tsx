@@ -41,6 +41,7 @@ describe('Einstellungen → Anbindungen', () => {
         dnsfilter: false,
         fritzbox: true,
         uptimekuma: false,
+        storage: true,
       }),
     ).toEqual(['proxmox', 'fritzbox']);
   });

@@ -8,6 +8,7 @@ import {
   collectUpdates,
   rebootRequired,
 } from './security.js';
+import { collectStorage, type StorageOptions } from './storage.js';
 import type { SystemCollector } from './system.js';
 
 const safe = <T>(p: Promise<T>, fallback: T): Promise<T> => p.catch(() => fallback);
@@ -17,8 +18,9 @@ export async function collectInventory(
   ctx: HostContext,
   system: SystemCollector,
   collector: ContainerCollector = new ContainerCollector(ctx.docker),
+  storageOpts: StorageOptions = { smart: false },
 ): Promise<Inventory> {
-  const [version, containers, updates, reboot, ssh, f2b, ports] = await Promise.all([
+  const [version, containers, updates, reboot, ssh, f2b, ports, storage] = await Promise.all([
     safe(dockerVersion(ctx.docker), undefined),
     safe(collector.list(), []),
     safe(collectUpdates(ctx), null),
@@ -26,6 +28,7 @@ export async function collectInventory(
     safe(collectSshFailures(ctx), null),
     safe(collectFail2ban(ctx), null),
     safe(collectPorts(ctx), []),
+    safe(collectStorage(ctx, storageOpts), undefined),
   ]);
   return {
     type: 'inventory',
@@ -37,5 +40,6 @@ export async function collectInventory(
     sshFailed24h: ssh,
     fail2banBanned: f2b,
     listeningPorts: ports,
+    ...(storage ? { storage } : {}),
   };
 }

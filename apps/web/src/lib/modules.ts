@@ -5,7 +5,7 @@ import { api } from './api.js';
 /**
  * Optional modules (decision 2026-11-26): github, homeassistant, games, and the M14
  * Anbindungen proxmox, dnsfilter, fritzbox, uptimekuma. Their nav items, overview tiles,
- * palette entries and settings tiles are hidden while switched off.
+ * palette entries and settings tiles are hidden while switched off. M13 adds storage.
  */
 
 export const modulesKey = ['settings', 'modules'] as const;
@@ -19,6 +19,7 @@ export const ALL_MODULES_ON: Modules = {
   dnsfilter: true,
   fritzbox: true,
   uptimekuma: true,
+  storage: true,
 };
 
 export const MODULE_LABEL: Record<ModuleId, string> = {
@@ -29,6 +30,7 @@ export const MODULE_LABEL: Record<ModuleId, string> = {
   dnsfilter: 'DNS-Filter (Pi-hole/AdGuard)',
   fritzbox: 'FRITZ!Box',
   uptimekuma: 'Uptime Kuma',
+  storage: 'NAS und Speicher',
 };
 
 export const MODULE_HINT: Record<ModuleId, string> = {
@@ -39,6 +41,8 @@ export const MODULE_HINT: Record<ModuleId, string> = {
   dnsfilter: 'Pi-hole oder AdGuard Home: Anfragen, Blockierte, Blocken pausieren.',
   fritzbox: 'Internet-Status und Geräte im Netz über TR-064, Neustart der Box.',
   uptimekuma: 'Monitore aus Uptime Kuma anzeigen und als eigene Checks übernehmen.',
+  storage:
+    'RAID, Volumes und Festplatten (SMART, Temperatur) im Serverdetail, z. B. für ein UGREEN-NAS.',
 };
 
 /** Page of the module, for the "Modul ausgeschaltet" note. */
@@ -50,6 +54,7 @@ export const MODULE_PAGE: Record<ModuleId, string> = {
   dnsfilter: 'Netzwerk',
   fritzbox: 'Netzwerk',
   uptimekuma: 'Websites',
+  storage: 'Server',
 };
 
 export const MODULE_ICON: Record<ModuleId, IconName> = {
@@ -60,6 +65,7 @@ export const MODULE_ICON: Record<ModuleId, IconName> = {
   dnsfilter: 'lock',
   fritzbox: 'wifi',
   uptimekuma: 'globe',
+  storage: 'server',
 };
 
 /**

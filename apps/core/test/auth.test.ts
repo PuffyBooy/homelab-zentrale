@@ -105,6 +105,7 @@ describe('setup', () => {
         dnsfilter: false,
         fritzbox: false,
         uptimekuma: false,
+        storage: true,
       },
       timeZone: 'Europe/Vienna',
     });
@@ -176,6 +177,7 @@ describe('login', () => {
         dnsfilter: false,
         fritzbox: false,
         uptimekuma: false,
+        storage: true,
       },
       timeZone: 'Europe/Vienna',
     });

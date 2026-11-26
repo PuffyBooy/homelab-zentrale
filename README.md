@@ -2,7 +2,19 @@
 
 Ein privates Kontrollzentrum für alle meine Server, Container, Gameserver, GitHub-Repos, Websites und die Wohnung. Es ist nur über Tailscale erreichbar und nie öffentlich.
 
-> **Status:** Spezifikation und Designsystem sind fertig, der Code wird nach `docs/ROADMAP.md` gebaut.
+> **Status:** Die Meilensteine aus `docs/ROADMAP.md` werden der Reihe nach gebaut. Jeder kann die Zentrale auf eigenen Servern betreiben; GitHub, Home Assistant und Gameserver sind Module zum An- und Ausschalten.
+
+## Installieren
+
+Auf dem Server, der die Zentrale tragen soll (Debian, Ubuntu oder Raspberry Pi OS):
+
+```bash
+git clone https://github.com/PuffyBooy/homelab-zentrale.git
+cd homelab-zentrale
+sudo ./deploy/install.sh
+```
+
+Der Assistent installiert bei Bedarf Docker und Tailscale, erzeugt die Konfiguration samt Schlüssel, startet die Zentrale, gibt sie mit `tailscale serve` nur im Tailnet frei und zeigt am Ende den Link für den ersten Login (Passwort + TOTP). Update: `sudo ./deploy/install.sh update`. Alles Weitere in [`docs/INSTALL.md`](docs/INSTALL.md).
 
 ## Was sie kann
 
