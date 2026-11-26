@@ -72,6 +72,7 @@ Beim ersten Verbinden tauscht der Agent das Einmal-Token gegen ein dauerhaftes A
 | `HZ_AGENT_ALLOW_TERMINAL` | `1` erlaubt die Web-Konsole (PTY). Standard `0`: alle `pty.*` werden abgelehnt. |
 | `HZ_AGENT_SMART` | `1` liest SMART der Platten (M13). Setzt das Override `docker-compose.agent.smart.yml`, nicht von Hand: es bringt auch die nötigen Rechte. |
 | `HZ_AGENT_DATA` | Datenordner (`/data`). |
+| `HZ_AGENT_TRIVY_IMAGE` | Scanner für `image.scan` (Schwachstellen-Scan). Nur mit Digest (`repo[:tag]@sha256:…`), sonst nimmt der Agent den eingebauten Standard (`TRIVY_IMAGE_DEFAULT`) und schreibt eine Warnung ins Log. Der Scanner läuft als eigener Container ohne Docker-Socket und ohne Host-Pfade (read-only, `--cap-drop ALL`, 1 GB RAM, 256 PIDs), holt das Image selbst aus der Registry und legt seine Datenbank im Docker-Volume `hz-trivy-cache` ab (wird beim ersten Scan angelegt, löschen mit `docker volume rm hz-trivy-cache`). |
 | `HZ_AGENT_HOST_EXEC` | `nsenter` (Image-Standard), `direct` (Agent direkt auf dem Host, Entwicklung), `none`. |
 | `HZ_AGENT_SERVICES` | M16: systemd-Dienste, die die Zentrale starten, stoppen und neu starten darf, durch Komma getrennt, z. B. `nginx.service,smbd`. Ohne Endung wird `.service` ergänzt. Leer (Standard): nur Anzeige. Ungültige Namen und Dienste der festen Sperrliste (`tailscaled`, `docker`, `containerd`, `ssh`/`sshd`, `dbus`, `systemd-*`, `networking`, `NetworkManager`, `getty` …) ignoriert der Agent mit einer Warnung im Log, egal was hier steht. |
 

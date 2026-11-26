@@ -73,6 +73,10 @@ describe('agent protocol allowlist', () => {
         'system.upgrade',
         'update.check',
         'update.apply',
+        'logs.search',
+        'image.scan',
+        'fail2ban.status',
+        'fail2ban.unban',
         'wol.send',
       ].sort(),
     );

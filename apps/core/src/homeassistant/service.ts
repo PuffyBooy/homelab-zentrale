@@ -173,6 +173,8 @@ export class HaService {
   private areas = new Map<string, string>();
   private readonly pending = new Map<string, number>();
   private readonly listeners = new Set<() => void>();
+  /** Every state_changed of every entity (voice module), see onEntityState. */
+  private readonly entityListeners = new Set<(entityId: string, state: string | null) => void>();
   private waiters: (() => void)[] = [];
   private readonly energy: EnergyStore;
   private readonly pressLimiter: WindowLimiter;
@@ -191,6 +193,67 @@ export class HaService {
   onChange(fn: () => void): () => void {
     this.listeners.add(fn);
     return () => this.listeners.delete(fn);
+  }
+
+  /**
+   * Called for every state_changed HA sends (all entities, not only the
+   * configured tiles) with the new state string, null when the entity was removed.
+   */
+  onEntityState(fn: (entityId: string, state: string | null) => void): () => void {
+    this.entityListeners.add(fn);
+    return () => this.entityListeners.delete(fn);
+  }
+
+  /** Module on and connected (states loaded). */
+  get ready(): boolean {
+    return this.active && this.client !== null && this.status === 'connected';
+  }
+
+  /** Last known state of any entity HA reported, null if unknown or not connected. */
+  entityState(entityId: string): string | null {
+    if (!this.ready) return null;
+    return this.cache.get(entityId)?.state ?? null;
+  }
+
+  /**
+   * Sets a helper entity (voice module) through a fixed service map:
+   * `input_boolean.*` turn_on / turn_off, `input_text.*` set_value. Anything
+   * else is refused. Fails with HttpError 502 ha_error like the toggles.
+   */
+  async setHelper(entityId: string, value: boolean | string): Promise<void> {
+    const client = this.client;
+    if (!client || !this.ready) {
+      throw new HttpError(502, 'ha_error', undefined, 'Home Assistant nicht erreichbar');
+    }
+    try {
+      if (typeof value === 'boolean' && /^input_boolean\.[a-z0-9_]{1,64}$/.test(entityId)) {
+        await client.callService('input_boolean', value ? 'turn_on' : 'turn_off', entityId);
+      } else if (typeof value === 'string' && /^input_text\.[a-z0-9_]{1,64}$/.test(entityId)) {
+        await client.callServiceData('input_text', 'set_value', entityId, { value });
+      } else {
+        throw new HttpError(400, 'invalid_input');
+      }
+    } catch (err) {
+      if (!(err instanceof HaCallError)) throw err;
+      this.deps.log.info(
+        { kind: err.kind, haCode: err.haCode },
+        'home assistant helper call failed',
+      );
+      throw new HttpError(502, 'ha_error', undefined, 'Home Assistant nicht erreichbar');
+    }
+  }
+
+  private emitEntity(entityId: string, state: string | null): void {
+    for (const fn of this.entityListeners) {
+      try {
+        fn(entityId, state);
+      } catch (err) {
+        this.deps.log.error(
+          { err: err instanceof Error ? { name: err.name, stack: err.stack } : 'error' },
+          'home assistant entity hook failed',
+        );
+      }
+    }
   }
 
   private emit(): void {
@@ -423,6 +486,7 @@ export class HaService {
     ) {
       this.emit();
     }
+    this.emitEntity(entityId, s?.state ?? null);
   }
 
   private onDown(reason: HaDownReason): void {

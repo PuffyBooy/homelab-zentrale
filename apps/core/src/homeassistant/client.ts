@@ -222,6 +222,21 @@ export class HaClient {
     return this.request('call_service', { domain, service, target: { entity_id: entityId } });
   }
 
+  /** Like callService, with `service_data` (e.g. input_text.set_value { value }). */
+  callServiceData(
+    domain: string,
+    service: string,
+    entityId: string,
+    serviceData: Record<string, string | number | boolean>,
+  ): Promise<unknown> {
+    return this.request('call_service', {
+      domain,
+      service,
+      target: { entity_id: entityId },
+      service_data: serviceData,
+    });
+  }
+
   // ---- connection --------------------------------------------------------------
 
   private connect(): void {

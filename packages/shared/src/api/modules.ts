@@ -19,6 +19,11 @@ export const MODULES = [
   'fritzbox',
   'uptimekuma',
   'storage',
+  'logsearch',
+  'vulnscan',
+  'fail2ban',
+  'discordbot',
+  'voice',
 ] as const;
 export const moduleIdSchema = z.enum(MODULES);
 export type ModuleId = z.infer<typeof moduleIdSchema>;
@@ -34,6 +39,12 @@ export const modulesSchema = z.strictObject({
   uptimekuma: z.boolean(),
   /** M13: NAS und Speicher (RAID, volumes, disks, SMART). Read only, on by default. */
   storage: z.boolean(),
+  /** Operations modules (api/ops.ts), all off by default. */
+  logsearch: z.boolean(),
+  vulnscan: z.boolean(),
+  fail2ban: z.boolean(),
+  discordbot: z.boolean(),
+  voice: z.boolean(),
 });
 export type Modules = z.infer<typeof modulesSchema>;
 
@@ -46,6 +57,11 @@ export const MODULE_DEFAULTS: Modules = {
   fritzbox: false,
   uptimekuma: false,
   storage: true,
+  logsearch: false,
+  vulnscan: false,
+  fail2ban: false,
+  discordbot: false,
+  voice: false,
 };
 
 /** Enabling these needs step-up (they hold tokens with access to outside systems). */
@@ -56,6 +72,9 @@ export const MODULES_ENABLE_STEP_UP: readonly ModuleId[] = [
   'dnsfilter',
   'fritzbox',
   'uptimekuma',
+  // Control from outside the hub (Discord, Home Assistant / Alexa).
+  'discordbot',
+  'voice',
 ];
 
 // GET /api/settings/modules -> Modules

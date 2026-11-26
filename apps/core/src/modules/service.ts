@@ -79,6 +79,11 @@ const MODULE_PREFIXES: Record<ModuleId, readonly string[]> = {
   fritzbox: ['/api/fritzbox'],
   uptimekuma: ['/api/uptimekuma'],
   storage: ['/api/storage'],
+  logsearch: ['/api/logsearch'],
+  vulnscan: ['/api/vulnscan'],
+  fail2ban: ['/api/fail2ban'],
+  discordbot: ['/api/discord-bot'],
+  voice: ['/api/voice'],
 };
 
 function under(path: string, prefix: string): boolean {

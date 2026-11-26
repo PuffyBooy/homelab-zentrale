@@ -16,6 +16,9 @@ import { containerRestart, containerStart, containerStop } from './container.js'
 import { containerLimit } from './container-limit.js';
 import { containerUpdate } from './container-update.js';
 import { containerLogs } from './logs.js';
+import { logsSearch } from './logs-search.js';
+import { imageScan } from './image-scan.js';
+import { fail2banStatus, fail2banUnban } from './fail2ban.js';
 import { deployRun } from './deploy.js';
 import { deployKey } from './deploy-key.js';
 import { gameBackup } from './game-backup.js';
@@ -97,6 +100,10 @@ export const handlers: ActionHandlers = {
   'update.check': updateCheck,
   'update.apply': updateApply,
   'system.upgrade': systemUpgrade,
+  'logs.search': (p, ctx) => logsSearch(p, ctx),
+  'image.scan': (p, ctx) => imageScan(p, ctx),
+  'fail2ban.status': (p, ctx) => fail2banStatus(p, ctx),
+  'fail2ban.unban': (p, ctx) => fail2banUnban(p, ctx),
 };
 
 export function hasGitSegment(p: unknown): boolean {

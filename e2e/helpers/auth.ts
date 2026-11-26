@@ -167,7 +167,18 @@ export function enrollServer(
 }
 
 export type ModuleSwitches = Partial<
-  Record<'github' | 'homeassistant' | 'games' | 'storage', boolean>
+  Record<
+    | 'github'
+    | 'homeassistant'
+    | 'games'
+    | 'storage'
+    | 'logsearch'
+    | 'vulnscan'
+    | 'fail2ban'
+    | 'discordbot'
+    | 'voice',
+    boolean
+  >
 >;
 
 /** PUT /api/settings/modules (step-up when GitHub or Home Assistant is switched on). */

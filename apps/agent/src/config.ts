@@ -2,9 +2,11 @@ import os from 'node:os';
 import { z } from 'zod';
 import {
   HOMELAB_ROOT,
+  TRIVY_IMAGE_DEFAULT,
   agentNameSchema,
   agentTokenSchema,
   isDeniedServiceUnit,
+  pinnedImageRefSchema,
   serviceUnitSchema,
 } from '@hz/shared';
 
@@ -84,6 +86,8 @@ export const configSchema = z.object({
    * SERVICE_DENYLIST are ignored (parseServiceList).
    */
   HZ_AGENT_SERVICES: z.string().max(4000).default(''),
+  /** Trivy image for image.scan; must be pinned (`repo[:tag]@sha256:...`), else the default is used. */
+  HZ_AGENT_TRIVY_IMAGE: z.string().optional(),
   HZ_AGENT_LOG_LEVEL: z.enum(['debug', 'info', 'warn', 'error']).default('info'),
   NODE_ENV: z.enum(['development', 'production', 'test']).default('production'),
 });
@@ -105,6 +109,10 @@ export interface AgentConfig {
   services: readonly string[];
   /** HZ_AGENT_SERVICES entries that were ignored (shortened, for one warning at start). */
   ignoredServices: readonly string[];
+  /** Pinned Trivy image for image.scan. */
+  trivyImage: string;
+  /** HZ_AGENT_TRIVY_IMAGE was set but not a pinned ref; trivyImage is the default (log a warning). */
+  trivyImageRejected: boolean;
 }
 
 /**
@@ -125,6 +133,14 @@ export function parseServiceList(raw: string): { units: string[]; ignored: strin
     units.add(unit);
   }
   return { units: [...units].slice(0, 200), ignored: ignored.slice(0, 20) };
+}
+
+/** HZ_AGENT_TRIVY_IMAGE -> pinned image; anything not pinned by digest falls back to the default. */
+export function resolveTrivyImage(v: string | undefined): { image: string; rejected: boolean } {
+  if (v === undefined || v === '') return { image: TRIVY_IMAGE_DEFAULT, rejected: false };
+  return pinnedImageRefSchema.safeParse(v).success
+    ? { image: v, rejected: false }
+    : { image: TRIVY_IMAGE_DEFAULT, rejected: true };
 }
 
 export class ConfigError extends Error {
@@ -157,6 +173,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AgentConfig {
     throw new ConfigError(['HZ_AGENT_HOMELAB_ROOT: nur mit NODE_ENV=test erlaubt']);
   }
   const services = parseServiceList(c.HZ_AGENT_SERVICES);
+  const trivy = resolveTrivyImage(c.HZ_AGENT_TRIVY_IMAGE);
   return {
     coreUrl: c.HZ_CORE_URL,
     token: c.HZ_AGENT_TOKEN,
@@ -172,5 +189,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AgentConfig {
     logLevel: c.HZ_AGENT_LOG_LEVEL,
     services: services.units,
     ignoredServices: services.ignored,
+    trivyImage: trivy.image,
+    trivyImageRejected: trivy.rejected,
   };
 }

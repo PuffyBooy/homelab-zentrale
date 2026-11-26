@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   authStateSchema,
+  MODULE_DEFAULTS,
   recoveryCodesResponseSchema,
   sessionListResponseSchema,
   setupStartResponseSchema,
@@ -98,13 +99,10 @@ describe('setup', () => {
       authenticated: true,
       username: USERNAME,
       modules: {
+        ...MODULE_DEFAULTS,
         github: true,
         homeassistant: true,
         games: true,
-        proxmox: false,
-        dnsfilter: false,
-        fritzbox: false,
-        uptimekuma: false,
         storage: true,
       },
       timeZone: 'Europe/Vienna',
@@ -170,13 +168,10 @@ describe('login', () => {
       authenticated: true,
       username: USERNAME,
       modules: {
+        ...MODULE_DEFAULTS,
         github: true,
         homeassistant: true,
         games: true,
-        proxmox: false,
-        dnsfilter: false,
-        fritzbox: false,
-        uptimekuma: false,
         storage: true,
       },
       timeZone: 'Europe/Vienna',
