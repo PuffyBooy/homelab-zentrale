@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   authStateSchema,
+  MODULE_DEFAULTS,
   recoveryCodesResponseSchema,
   sessionListResponseSchema,
   setupStartResponseSchema,
@@ -97,7 +98,13 @@ describe('setup', () => {
       setupRequired: false,
       authenticated: true,
       username: USERNAME,
-      modules: { github: true, homeassistant: true, games: true, storage: true },
+      modules: {
+        ...MODULE_DEFAULTS,
+        github: true,
+        homeassistant: true,
+        games: true,
+        storage: true,
+      },
       timeZone: 'Europe/Vienna',
     });
     expect(actions(t)).toContain('setup.complete');
@@ -160,7 +167,13 @@ describe('login', () => {
       setupRequired: false,
       authenticated: true,
       username: USERNAME,
-      modules: { github: true, homeassistant: true, games: true, storage: true },
+      modules: {
+        ...MODULE_DEFAULTS,
+        github: true,
+        homeassistant: true,
+        games: true,
+        storage: true,
+      },
       timeZone: 'Europe/Vienna',
     });
     const cookie = sessionCookie(res);

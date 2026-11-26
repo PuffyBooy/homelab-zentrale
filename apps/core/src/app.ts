@@ -78,6 +78,10 @@ import { moduleRoutes } from './modules/routes.js';
 import { installModuleGate, ModuleService } from './modules/service.js';
 import { storageRoutes } from './storage/routes.js';
 import { StorageService } from './storage/service.js';
+import { setupOps, type OpsServices } from './ops/index.js';
+import { setupDiscordBot, type DiscordBotHandle } from './discord/index.js';
+import type { FetchLike as DiscordFetch } from './discord/rest.js';
+import { setupVoice, type VoiceHandle } from './voice/index.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 
@@ -113,6 +117,8 @@ export interface AppDeps {
   consoleOptions?: ConsoleOptions;
   /** M12: HTTP for Discord webhooks and the Modrinth API (tests: a fake). */
   gameFetch?: FetchLike;
+  /** Discord REST for the bot (tests: a fake; the gateway URL comes from it). */
+  discordFetch?: DiscordFetch;
 }
 
 /** Core services, decorated on the app as `hzCore` (routes, tests). */
@@ -144,6 +150,12 @@ export interface CoreServices {
   throttle: ThrottleService;
   onboarding: OnboardingService;
   ports: PortAuditService;
+  /** Log search, vulnerability scan, fail2ban (ops/index.ts). */
+  ops: OpsServices;
+  /** Discord bot for friends (discord/index.ts). */
+  discordBot: DiscordBotHandle;
+  /** Echo Show / Alexa through Home Assistant helpers (voice/index.ts). */
+  voice: VoiceHandle;
   db: DbHandle;
 }
 
@@ -628,6 +640,35 @@ export async function buildApp(config: Config, deps: AppDeps = {}): Promise<Fast
       );
     }
   });
+  // ---- Operations: log search, vulnerability scan, fail2ban ----------------------
+  const ops = await setupOps(app, {
+    db: db.db,
+    now,
+    hub,
+    alerts,
+    scheduler,
+    modules,
+    servers,
+    containers,
+    log: app.log.child({ mod: 'ops' }),
+  });
+  // ---- Discord bot and voice control (Echo Show / Alexa via Home Assistant) --------
+  const discordBot = await setupDiscordBot(app, {
+    db: db.db,
+    box,
+    now,
+    log: app.log.child({ mod: 'discord' }),
+    shares,
+    games,
+    ...(deps.discordFetch ? { fetch: deps.discordFetch } : {}),
+  });
+  const voice = await setupVoice(app, {
+    db: db.db,
+    now,
+    log: app.log.child({ mod: 'voice' }),
+    ha,
+    games,
+  });
 
   app.decorate('hzCore', {
     scheduler,
@@ -657,6 +698,9 @@ export async function buildApp(config: Config, deps: AppDeps = {}): Promise<Fast
     throttle,
     onboarding,
     ports,
+    ops,
+    discordBot,
+    voice,
     db,
   });
 
@@ -693,7 +737,9 @@ export async function buildApp(config: Config, deps: AppDeps = {}): Promise<Fast
     if (m === 'github') github.setEnabled(on);
     else if (m === 'games') games.setEnabled(on);
     else if (m === 'homeassistant') ha.setEnabled(on);
-    else storage.setEnabled(on);
+    else if (m === 'storage') storage.setEnabled(on);
+    else if (m === 'discordbot') discordBot.setEnabled(on);
+    else if (m === 'voice') voice.setEnabled(on);
     app.log.info({ module: m, on }, 'module switched');
   });
   checks.start();
@@ -729,16 +775,28 @@ export async function buildApp(config: Config, deps: AppDeps = {}): Promise<Fast
     metrics.rollup1h(30 * DAY);
     if (deps.startScheduler !== false) scheduler.start();
     ha.start();
+    discordBot.setEnabled(modules.enabled('discordbot'));
+    voice.setEnabled(modules.enabled('voice'));
     await removeStaleExports(config.dataDir);
   });
   app.addHook('preClose', async () => {
     scheduler.stop();
     // Let running checks and pushes finish before the database closes (bounded).
     await Promise.race([
-      Promise.all([checks.idle(), push.idle(), github.idle(), games.idle(), gameNotifier.idle()]),
+      Promise.all([
+        checks.idle(),
+        push.idle(),
+        github.idle(),
+        games.idle(),
+        gameNotifier.idle(),
+        discordBot.idle(),
+        voice.idle(),
+      ]),
       new Promise((r) => setTimeout(r, 3_000).unref()),
     ]);
     ha.stop();
+    discordBot.shutdown();
+    voice.shutdown();
     github.deployer.shutdown();
     consoles.closeAll();
     hub.shutdown();

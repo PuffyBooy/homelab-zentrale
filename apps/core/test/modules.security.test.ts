@@ -43,6 +43,11 @@ describe('optional modules', () => {
       homeassistant: false,
       games: true,
       storage: true,
+      logsearch: false,
+      vulnscan: false,
+      fail2ban: false,
+      discordbot: false,
+      voice: false,
     });
     const state = await t.app.inject({
       method: 'GET',
@@ -65,7 +70,7 @@ describe('optional modules', () => {
 
   it('routes of disabled modules are unreachable even with a valid session (404 module_disabled)', async () => {
     t = await makeApp({
-      modules: { github: false, homeassistant: false, games: false, storage: false },
+      modules: Object.fromEntries(MODULES.map((m) => [m, false])),
     });
     const { cookie } = await completeSetup(t);
     const routes = t.app.hzRoutes.filter((r) => moduleOfPath(r.url) !== null);
@@ -123,6 +128,11 @@ describe('optional modules', () => {
       homeassistant: false,
       games: true,
       storage: true,
+      logsearch: false,
+      vulnscan: false,
+      fail2ban: false,
+      discordbot: false,
+      voice: false,
     });
     // Off and games on: no step-up.
     expect((await put(t, cookie, { games: false })).statusCode).toBe(200);
@@ -131,6 +141,11 @@ describe('optional modules', () => {
       homeassistant: false,
       games: true,
       storage: true,
+      logsearch: false,
+      vulnscan: false,
+      fail2ban: false,
+      discordbot: false,
+      voice: false,
     });
     // Invalid input.
     for (const body of [{}, { shell: true }, { github: 'yes' }, []]) {
