@@ -17,7 +17,7 @@ services:
       ENABLE_WHITELIST: ${ENABLE_WHITELIST}
       ONLINE_MODE: ${ONLINE_MODE}
       ENABLE_RCON: 'true'
-      TZ: Europe/Vienna
+      TZ: ${TZ}
     ports:
       - '${PORT_GAME}:25565/tcp'
       - '127.0.0.1:${PORT_RCON}:25575/tcp'

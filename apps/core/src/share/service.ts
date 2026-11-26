@@ -12,6 +12,7 @@ import {
   sharePinSchema,
   sharePlayerNameSchema,
   shareStatusResponseSchema,
+  WORLD_DOWNLOAD_MAX_BYTES,
   shareTokenSchema,
   type ShareLink,
   type SharePerm,
@@ -28,6 +29,9 @@ import { shareAudit, shareLinks, type ShareLinkRow } from '../db/schema.js';
 import { readSetting, writeSetting } from '../db/settings.js';
 import { HttpError } from '../http/errors.js';
 import type { GameService } from '../games/service.js';
+import type { WhitelistRequests } from '../games/whitelist-requests.js';
+import type { AgentHub } from '../agents/hub.js';
+import { openWorldExport, type WorldStream } from './world.js';
 
 const MIN = 60_000;
 const DAY = 24 * 60 * MIN;
@@ -57,6 +61,8 @@ const TOUCH_MS = MIN;
 const CONSOLE_MAX_LINES = 500;
 const CONSOLE_LINE_MAX = 4096;
 const OUTPUT_MAX = 16 * 1024;
+/** World downloads per link and hour (M12). */
+export const WORLD_DOWNLOAD_WINDOW_MS = 60 * MIN;
 /** Templates whose RCON knows `whitelist add|remove <player>`. Bedrock has no RCON. */
 const WHITELIST_TEMPLATES = new Set(['minecraft-java']);
 
@@ -156,6 +162,7 @@ export const FRIEND_STATUS_TEXTS = [
   'Backup läuft',
   'Wird eingerichtet',
   'Beschäftigt',
+  'Schläft',
 ] as const;
 export type FriendStatusText = (typeof FRIEND_STATUS_TEXTS)[number];
 
@@ -173,6 +180,7 @@ export function friendStatusText(
     case 'crit':
       return 'Gestört';
     case 'off':
+      if (statusText === 'Schläft') return 'Schläft';
       return statusText === 'Server offline' ? 'Nicht erreichbar' : 'Gestoppt';
     case 'busy':
       if (phase === 'setup') return 'Wird eingerichtet';
@@ -206,6 +214,10 @@ export interface ShareServiceDeps {
   games: GameService;
   logs: Pick<ContainerLogs, 'lease' | 'snapshot'>;
   log: FastifyBaseLogger;
+  /** M12: whitelist requests (right whitelist_request). */
+  whitelist?: WhitelistRequests;
+  /** M12: game.export for the world download. */
+  hub?: Pick<AgentHub, 'stream' | 'sendTransfer' | 'isConnected'>;
 }
 
 /**
@@ -224,6 +236,8 @@ export class ShareService {
   private readonly grantKey = randomBytes(32);
   /** PIN verifies in flight per link (a saturated counter without one is stale). */
   private readonly pinInFlight = new Map<string, number>();
+  /** Links with a world download in flight (one at a time). */
+  private readonly worldInFlight = new Set<string>();
 
   constructor(private readonly deps: ShareServiceDeps) {}
 
@@ -277,6 +291,19 @@ export class ShareService {
     req: { person: string; perms: SharePerm[]; expires: ShareExpiry; pin?: string | undefined },
   ): Promise<{ share: ShareLinkView; token: string }> {
     if (!this.deps.games.row(gameId)) throw new HttpError(404, 'not_found');
+    // M12: a whitelist request needs a template with a whitelist command.
+    if (req.perms.includes('whitelist_request') && !this.deps.whitelist?.supported(gameId)) {
+      throw new HttpError(
+        400,
+        'invalid_input',
+        undefined,
+        'Whitelist-Anfragen gehen nur bei Minecraft',
+      );
+    }
+    // M12: only templates with worldPaths (the rest of data/ can hold passwords).
+    if (req.perms.includes('world_download') && !this.worldSupported(gameId)) {
+      throw new HttpError(400, 'invalid_input', undefined, 'Dieses Spiel hat keine Weltdaten');
+    }
     const now = this.deps.now();
     const token = randomToken(32);
     const id = randomToken(12);
@@ -639,6 +666,17 @@ export class ShareService {
 
   // ---- friend: API -------------------------------------------------------------------
 
+  /** World paths of the template; without them there is no world download (secrets in data/). */
+  private worldPaths(gameId: string): string[] | null {
+    const row = this.deps.games.row(gameId);
+    const t = row ? this.deps.games.templates.get(row.templateId)?.template : undefined;
+    return t?.worldPaths && t.worldPaths.length > 0 ? [...t.worldPaths] : null;
+  }
+
+  private worldSupported(gameId: string): boolean {
+    return this.worldPaths(gameId) !== null;
+  }
+
   private whitelistSupported(gameId: string): boolean {
     const row = this.deps.games.row(gameId);
     return !!row && WHITELIST_TEMPLATES.has(row.templateId) && this.deps.games.hasRcon(gameId);
@@ -668,7 +706,10 @@ export class ShareService {
           ext === '' || hasTailnetAddress(ext) ? null : port === undefined ? ext : `${ext}:${port}`,
         players: s.players && { ...s.players, names: s.players.names.map(maskTailnet) },
         whitelist: this.whitelistSupported(ctx.link.gameId),
+        sleeping: s.sleeping,
       },
+      // Only the link's own requests (never those of other friends).
+      whitelistRequests: this.deps.whitelist?.ofShare(ctx.link.id) ?? [],
     };
     return strictOut(shareStatusResponseSchema, status);
   }
@@ -814,6 +855,92 @@ export class ShareService {
       }
       throw e;
     }
+  }
+
+  /**
+   * M12: a friend asks to be put on the whitelist (right whitelist_request). Max 3
+   * open per link (429), 5 per hour (429), the same player twice is 409 busy. The
+   * admin gets a push and approves in the game's detail.
+   */
+  whitelistAsk(ctx: ShareContext, player: string): ShareStatus {
+    this.require(ctx, ['whitelist_request'], 'whitelist_request');
+    if (!sharePlayerNameSchema.safeParse(player).success) {
+      throw new ShareError(400, 'invalid_input');
+    }
+    const wl = this.deps.whitelist;
+    if (!wl?.supported(ctx.link.gameId)) throw new ShareError(403, 'forbidden');
+    const r = wl.ask(ctx.link, player);
+    if (!r.ok) {
+      if (r.reason === 'duplicate') throw new ShareError(409, 'busy');
+      throw new ShareError(
+        429,
+        'rate_limited',
+        r.retryAfter === undefined ? {} : { retryAfter: r.retryAfter },
+      );
+    }
+    this.record(ctx, 'whitelist_request', player, {
+      action: 'share.whitelist_request',
+      details: { player, requestId: r.request.id },
+    });
+    return this.statusOf(ctx);
+  }
+
+  /**
+   * M12: the world as tar.zst (right world_download), streamed from game.export.
+   * One per link and hour (429, counted from the share audit, so a restart does
+   * not reset it) and one at a time; larger than WORLD_DOWNLOAD_MAX_BYTES or any
+   * transfer error: 503. The audit entry is written once the archive is ready.
+   */
+  async world(ctx: ShareContext): Promise<WorldStream & { fileName: string }> {
+    this.require(ctx, ['world_download'], 'world_download');
+    const games = this.deps.games;
+    const row = games.row(ctx.link.gameId);
+    const t = row ? games.templates.get(row.templateId)?.template : undefined;
+    if (!row || !t) throw new ShareError(404, 'not_found');
+    const paths = this.worldPaths(row.id);
+    if (paths === null) throw new ShareError(403, 'forbidden');
+    const now = this.deps.now();
+    const last = this.db
+      .select({ ts: shareAudit.ts })
+      .from(shareAudit)
+      .where(
+        and(
+          eq(shareAudit.shareId, ctx.link.id),
+          eq(shareAudit.action, 'world_download'),
+          sql`${shareAudit.ts} > ${now - WORLD_DOWNLOAD_WINDOW_MS}`,
+        ),
+      )
+      .orderBy(desc(shareAudit.ts))
+      .get();
+    if (last) {
+      throw new ShareError(429, 'rate_limited', {
+        retryAfter: Math.max(1, Math.ceil((last.ts + WORLD_DOWNLOAD_WINDOW_MS - now) / 1000)),
+      });
+    }
+    if (this.worldInFlight.has(ctx.link.id) || games.isBusy(row.id)) {
+      throw new ShareError(409, 'busy');
+    }
+    const hub = this.deps.hub;
+    if (!hub?.isConnected(row.serverId)) throw new ShareError(503, 'unavailable');
+    this.worldInFlight.add(ctx.link.id);
+    // The attempt counts for the hourly limit (also when it fails or is aborted),
+    // so retries cannot make the agent build archives over and over.
+    this.record(ctx, 'world_download', null, { action: 'share.world_download' });
+    let dl: WorldStream;
+    try {
+      dl = await openWorldExport(hub, row.serverId, row.name, WORLD_DOWNLOAD_MAX_BYTES, paths);
+    } catch {
+      this.worldInFlight.delete(ctx.link.id);
+      writeAudit(this.db, this.deps.now(), {
+        actor: `share:${ctx.link.id}`,
+        action: 'game.world_download_failed',
+        target: row.id,
+        details: { person: ctx.link.person, via: ctx.via },
+      });
+      throw new ShareError(503, 'unavailable');
+    }
+    dl.stream.once('close', () => this.worldInFlight.delete(ctx.link.id));
+    return { ...dl, fileName: `${row.name}-welt.tar.zst` };
   }
 
   /** For tests: forget the read-audit throttle. */

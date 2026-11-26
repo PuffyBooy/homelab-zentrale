@@ -41,12 +41,14 @@ export interface GameCreateBody {
   values: Record<string, FieldValue>;
   ports: Record<string, number>;
   autoStopMinutes: number;
+  wakeOnConnect: boolean;
   externalAddress: string;
 }
 
 export interface GameUpdateBody {
   values: Record<string, FieldValue>;
   autoStopMinutes: number;
+  wakeOnConnect: boolean;
   /** Empty: the address uses the Tailscale IP. */
   externalAddress: string;
 }
@@ -213,10 +215,23 @@ export function gamesSentence(games: readonly GameSummary[]): StatusSentence {
   }
   const running = games.filter(isGameRunning);
   if (running.length === 0) {
+    const asleep = games.filter((g) => g.sleeping).length;
+    if (asleep === games.length) {
+      return {
+        em: null,
+        rest:
+          games.length === 1 ? 'Gameserver schläft.' : `Alle ${games.length} Gameserver schlafen.`,
+      };
+    }
+    const sleepNote = asleep ? ` · ${asleep} ${asleep === 1 ? 'schläft' : 'schlafen'}` : '';
     return {
       em: null,
       rest:
-        games.length === 1 ? 'Gameserver gestoppt.' : `Alle ${games.length} Gameserver gestoppt.`,
+        games.length === 1
+          ? 'Gameserver gestoppt.'
+          : asleep
+            ? `Alle ${games.length} Gameserver aus${sleepNote}.`
+            : `Alle ${games.length} Gameserver gestoppt.`,
     };
   }
   const players = playersOnline(running);
@@ -239,7 +254,14 @@ export function gameSentence(g: GameSummary): StatusSentence {
     return { em: `${g.name}: ${g.statusText}`, rest: ` · ${g.serverName}` };
   }
   if (g.status === 'busy') return { em: null, rest: `${g.name}: ${g.statusText}` };
-  if (g.status === 'off') return { em: null, rest: `${g.name} ist gestoppt.` };
+  if (g.status === 'off') {
+    return {
+      em: null,
+      rest: g.sleeping
+        ? `${g.name} schläft.${g.wakeOnConnect ? ' Verbinden weckt ihn.' : ''}`
+        : `${g.name} ist gestoppt.`,
+    };
+  }
   const p = g.players;
   return {
     em: null,
@@ -291,6 +313,7 @@ export function gameTileProps(
   | 'tpsDetail'
   | 'online'
   | 'host'
+  | 'statusLabel'
 > {
   return {
     name: g.name,
@@ -305,6 +328,7 @@ export function gameTileProps(
     tpsDetail: tpsText(g.tps),
     online: g.players?.names ?? [],
     host: g.serverName,
+    statusLabel: g.status === 'off' && g.sleeping ? 'Schläft' : undefined,
   };
 }
 
@@ -392,19 +416,38 @@ export function gamePorts(
   }));
 }
 
-export type ForwardPlace = 'home' | 'oracle' | 'unknown';
+export type ForwardPlace = 'home' | 'oracle' | 'cloud' | 'vps' | 'unknown';
+
+function looksLikeOracle(text: string): boolean {
+  return /oracle|\boci\b|oci-/.test(text);
+}
 
 /**
- * Where the ports have to be opened. Oracle Cloud VMs need a Security List rule,
- * servers at home a port forwarding on the router. Guessed from name and location;
- * when nothing fits, both hints are shown (docs/QUESTIONS.md, M6 Web).
+ * Where the ports have to be opened. The "Netz" field of the server (M12) decides:
+ * home = router, cloud = provider firewall (Oracle with its Security List), vps =
+ * provider firewall, other = both generic hints. Without the field: guessed from
+ * name and location; when nothing fits, both hints are shown (docs/QUESTIONS.md, M6 Web).
  */
 export function forwardPlace(
-  s: Pick<ServerSummary, 'name' | 'location'> | undefined,
+  s:
+    | (Pick<ServerSummary, 'name' | 'location'> & Partial<Pick<ServerSummary, 'network'>>)
+    | undefined,
 ): ForwardPlace {
   if (!s) return 'unknown';
   const text = `${s.name} ${s.location}`.toLowerCase();
-  if (/oracle|\boci\b|oci-/.test(text)) return 'oracle';
+  switch (s.network) {
+    case 'home':
+      return 'home';
+    case 'cloud':
+      return looksLikeOracle(text) ? 'oracle' : 'cloud';
+    case 'vps':
+      return 'vps';
+    case 'other':
+      return 'unknown';
+    default:
+      break;
+  }
+  if (looksLikeOracle(text)) return 'oracle';
   if (/heim|zuhause|daheim|home/.test(text)) return 'home';
   return 'unknown';
 }
@@ -544,9 +587,14 @@ export interface CreateDraft {
   /** Port per template port name, as typed. */
   ports: Record<string, string>;
   autoStopMinutes: string;
+  /** Wake on the first connection while asleep (only when the template supports it). */
+  wakeOnConnect: boolean;
   externalAddress: string;
   fields: FieldDraft;
 }
+
+/** Default for new games (M12): sleep after 15 min without players. */
+export const DEFAULT_SLEEP_MINUTES = 15;
 
 /** Flat error map: `name`, `serverId`, `autoStopMinutes`, `externalAddress`, `port:<name>`, `field:<KEY>`. */
 export type CreateErrors = Record<string, string>;
@@ -558,7 +606,8 @@ export function emptyCreateDraft(tpl: TemplateInfo, serverId = ''): CreateDraft 
     name: '',
     serverId,
     ports,
-    autoStopMinutes: '0',
+    autoStopMinutes: String(DEFAULT_SLEEP_MINUTES),
+    wakeOnConnect: tpl.wake,
     externalAddress: '',
     fields: fieldDefaults(tpl.fields),
   };
@@ -590,7 +639,7 @@ export function externalAddressError(raw: string): string | null {
 
 export function autoStopError(raw: string): string | null {
   const n = parseNumber(raw || '0');
-  if (!Number.isInteger(n) || n < 0 || n > 1440) return 'Ganze Minuten von 0 bis 1440 (0 = aus).';
+  if (!Number.isInteger(n) || n < 0 || n > 1440) return 'Ganze Minuten von 0 bis 1440 (0 = nie).';
   return null;
 }
 
@@ -652,6 +701,7 @@ export function validateCreate(
       values: fields.values,
       ports: ports.ports,
       autoStopMinutes: parseNumber(draft.autoStopMinutes || '0'),
+      wakeOnConnect: tpl.wake && draft.wakeOnConnect,
       externalAddress: draft.externalAddress.trim(),
     },
   };
@@ -659,6 +709,7 @@ export function validateCreate(
 
 export interface SettingsDraft {
   autoStopMinutes: string;
+  wakeOnConnect: boolean;
   externalAddress: string;
   fields: FieldDraft;
 }
@@ -667,13 +718,14 @@ export interface SettingsDraft {
 export function settingsDraft(g: GameSummary, tpl: Pick<TemplateInfo, 'fields'>): SettingsDraft {
   return {
     autoStopMinutes: String(g.autoStopMinutes),
+    wakeOnConnect: g.wakeOnConnect,
     externalAddress: g.externalAddress,
     fields: draftFromValues(tpl.fields, g.values),
   };
 }
 
 export function validateSettings(
-  tpl: Pick<TemplateInfo, 'fields'>,
+  tpl: Pick<TemplateInfo, 'fields' | 'wake'>,
   draft: SettingsDraft,
 ): { ok: true; body: GameUpdateBody } | { ok: false; errors: CreateErrors } {
   const errors: CreateErrors = {};
@@ -697,6 +749,7 @@ export function validateSettings(
     body: {
       values,
       autoStopMinutes: parseNumber(draft.autoStopMinutes || '0'),
+      wakeOnConnect: tpl.wake && draft.wakeOnConnect,
       // Always sent: empty switches back to the Tailscale IP.
       externalAddress: draft.externalAddress.trim(),
     },
@@ -714,7 +767,7 @@ export function deleteConfirmed(typed: string, name: string): boolean {
   return typed.trim() === name;
 }
 
-/** "Auto-Stopp nach 30 Min ohne Spieler" or "aus". */
+/** "nach 30 Min ohne Spieler" or "aus" (sleep mode, M12). */
 export function autoStopText(minutes: number): string {
   return minutes > 0 ? `nach ${minutes} Min ohne Spieler` : 'aus';
 }
@@ -819,14 +872,19 @@ export interface ConsoleEntry {
   error: string | null;
 }
 
-/** The game's container: `game-<name>` (templates/games) or compose project `<name>`. */
+/**
+ * The game's container: first the label `homelab.game` (M12, `container.game`), then
+ * the old heuristic `game-<name>` (templates/games) or compose project `<name>`.
+ */
 export function findGameContainer<
-  C extends Pick<ContainerSummary, 'serverId' | 'name' | 'composeProject'>,
+  C extends Pick<ContainerSummary, 'serverId' | 'name' | 'composeProject'> &
+    Partial<Pick<ContainerSummary, 'game'>>,
 >(game: Pick<GameSummary, 'serverId' | 'name'>, containers: readonly C[]): C | undefined {
   const own = containers.filter((c) => c.serverId === game.serverId);
   return (
-    own.find((c) => c.name === `game-${game.name}`) ??
-    own.find((c) => c.composeProject === game.name)
+    own.find((c) => c.game === game.name) ??
+    own.find((c) => c.game == null && c.name === `game-${game.name}`) ??
+    own.find((c) => c.game == null && c.composeProject === game.name)
   );
 }
 

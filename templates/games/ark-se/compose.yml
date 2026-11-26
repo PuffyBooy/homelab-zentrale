@@ -1,0 +1,44 @@
+# Rendered by the core (see templates/games/README.md).
+# - ARK: Survival Evolved (not Ascended). Game port and raw socket port
+#   (PORT_GAME..PORT_GAME_END) and the Steam query port are the same inside and outside.
+# - ${RCON_PASSWORD} below is a runtime placeholder: the core leaves it as is and
+#   docker compose fills it from the 0600 .env at `up` (the image wants ADMIN_PASSWORD).
+#   SERVER_PASSWORD (secret field) comes from .env via env_file. RCON only on 127.0.0.1.
+# - Saved/ (worlds, config) is in ./data and backed up; the ~20 GB server install lives
+#   in the named volume `server` and is removed with the game (compose down --volumes).
+# - The image is amd64 only.
+services:
+  server:
+    image: hermsi/ark-server:latest-1795427570
+    container_name: game-${GAME_NAME}
+    restart: unless-stopped
+    mem_limit: ${MEMORY}
+    stop_grace_period: 120s
+    env_file:
+      - .env
+    environment:
+      PUID: '1000'
+      PGID: '1000'
+      SESSION_NAME: ${SESSION_NAME}
+      SERVER_MAP: ${SERVER_MAP}
+      MAX_PLAYERS: ${MAX_PLAYERS}
+      ADMIN_PASSWORD: ${RCON_PASSWORD}
+      GAME_CLIENT_PORT: ${PORT_GAME}
+      UDP_SOCKET_PORT: ${PORT_GAME_END}
+      SERVER_LIST_PORT: ${PORT_QUERY}
+      RCON_PORT: '27020'
+      UPDATE_ON_START: 'false'
+      TZ: ${TZ}
+    ports:
+      - '${PORT_GAME}-${PORT_GAME_END}:${PORT_GAME}-${PORT_GAME_END}/udp'
+      - '${PORT_QUERY}:${PORT_QUERY}/udp'
+      - '127.0.0.1:${PORT_RCON}:27020/tcp'
+    volumes:
+      - server:/app
+      - ./data:/app/server/ShooterGame/Saved
+    labels:
+      homelab.game: ${GAME_NAME}
+      homelab.template: ark-se
+
+volumes:
+  server:

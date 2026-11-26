@@ -1,0 +1,52 @@
+{
+  "$schema": "../template.schema.json",
+  "id": "factorio",
+  "name": "Factorio",
+  "image": "factoriotools/factorio:2.1.25",
+  "ram": {
+    "min": "1G",
+    "recommended": "2G"
+  },
+  "ports": [
+    {
+      "name": "game",
+      "container": 34197,
+      "protocol": "udp",
+      "default": 34197,
+      "count": 1
+    }
+  ],
+  "query": {
+    "method": "none"
+  },
+  "rcon": {
+    "supported": false
+  },
+  "wake": "raw",
+  "arch": [
+    "amd64",
+    "arm64"
+  ],
+  "dataDir": "./data",
+  "worldPaths": ["saves"],
+  "fields": [
+    {
+      "key": "DLC_SPACE_AGE",
+      "label": "Space-Age-DLC aktivieren (alle Spieler brauchen es)",
+      "type": "boolean",
+      "default": false
+    },
+    {
+      "key": "MEMORY",
+      "label": "RAM",
+      "type": "select",
+      "options": [
+        "1G",
+        "2G",
+        "4G",
+        "8G"
+      ],
+      "default": "2G"
+    }
+  ]
+}

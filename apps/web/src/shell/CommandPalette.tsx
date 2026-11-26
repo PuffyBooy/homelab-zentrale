@@ -252,7 +252,8 @@ export function withoutGames(
   games: readonly GameSummary[],
 ): ContainerSummary[] {
   const own = new Set(games.map((g) => findGameContainer(g, containers)?.id));
-  return containers.filter((c) => !own.has(c.id));
+  // Containers with the label homelab.game belong to a game server, known or not.
+  return containers.filter((c) => c.game == null && !own.has(c.id));
 }
 
 export function filterCommands(commands: PaletteCommand[], query: string): PaletteCommand[] {

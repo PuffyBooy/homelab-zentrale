@@ -47,6 +47,7 @@ export async function makeApp(
     pushTransport?: AppDeps['pushTransport'];
     rdapFetch?: AppDeps['rdapFetch'];
     githubFetch?: AppDeps['githubFetch'];
+    gameFetch?: AppDeps['gameFetch'];
     haOptions?: AppDeps['haOptions'];
     consoleOptions?: AppDeps['consoleOptions'];
     /**
@@ -87,6 +88,7 @@ export async function makeApp(
     // Never reach the network from tests: RDAP fails unless a test injects one.
     rdapFetch: opts.rdapFetch ?? (() => Promise.reject(new Error('no network in tests'))),
     githubFetch: opts.githubFetch ?? (() => Promise.reject(new Error('no network in tests'))),
+    gameFetch: opts.gameFetch ?? (() => Promise.reject(new Error('no network in tests'))),
     pushTransport: opts.pushTransport ?? {
       send: () => Promise.reject(new Error('no network in tests')),
     },

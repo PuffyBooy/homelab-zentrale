@@ -6,6 +6,7 @@ import { DockerEventWatcher } from './collect/docker-events.js';
 import { hiddenDuringUpdate } from './actions/container-update.js';
 import { cleanupPartialBackups } from './actions/game-backup.js';
 import { cleanupStaleTransfers } from './actions/game-transfer.js';
+import { WakeManager } from './actions/game-wake.js';
 import { collectInventory } from './collect/inventory.js';
 import { SmartReader } from './collect/storage.js';
 import { SystemCollector } from './collect/system.js';
@@ -72,6 +73,18 @@ async function main(): Promise<void> {
         log,
       })
     : undefined;
+  // Wake listeners of sleeping games (game.wake.arm); the event goes out on the
+  // agent connection like every other event.
+  const wake = new WakeManager({
+    log,
+    emit: (event) => {
+      if (!conn.send({ type: 'event', ts: new Date().toISOString(), event })) {
+        log.warn('game_wake event not sent (offline); the core re-arms on reconnect', {
+          game: event.gameId,
+        });
+      }
+    },
+  });
   const dispatcher = new Dispatcher(
     {
       name: config.name,
@@ -92,6 +105,7 @@ async function main(): Promise<void> {
       spawn: spawnFile,
       dataDir: config.dataDir,
       ...(pty ? { pty } : {}),
+      wake,
     },
     (event) => conn.send(event),
   );
@@ -161,7 +175,12 @@ async function main(): Promise<void> {
     pty?.closeAll();
     conn.stop();
     for (const t of timers) clearTimeout(t);
-    process.exit(0);
+    // Free the game ports before exiting (bounded: exit closes them anyway).
+    const exit = setTimeout(() => process.exit(0), 1000);
+    void wake.closeAll().finally(() => {
+      clearTimeout(exit);
+      process.exit(0);
+    });
   };
   process.on('SIGTERM', () => shutdown('SIGTERM'));
   process.on('SIGINT', () => shutdown('SIGINT'));

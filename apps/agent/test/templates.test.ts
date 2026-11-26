@@ -20,6 +20,14 @@ const SPEC_IDS = [
   'terraria',
   'cs2',
   'palworld',
+  // M12
+  'satisfactory',
+  'factorio',
+  'enshrouded',
+  'project-zomboid',
+  'ark-se',
+  'rust',
+  'v-rising',
 ] as const;
 
 const ids = readdirSync(GAMES).filter((d) => statSync(path.join(GAMES, d)).isDirectory());
@@ -73,7 +81,7 @@ function portLines(body: string): string[] {
 const SECRET_KEY = /PASS|PW$|_PW_|SECRET|TOKEN/;
 
 describe('game templates', () => {
-  it('has the six templates from SPEC 6.2', () => {
+  it('has the templates from SPEC 6.2', () => {
     expect([...ids].sort()).toEqual([...SPEC_IDS].sort());
   });
 
@@ -119,7 +127,7 @@ describe('game templates', () => {
         expect(portNames).toContain(tpl.query.port);
       }
       if (tpl.query.method === 'gamedig') {
-        expect(GAMEDIG_TYPES.has(tpl.query.type ?? '')).toBe(true);
+        expect(tpl.query.type !== undefined && GAMEDIG_TYPES.has(tpl.query.type)).toBe(true);
       } else {
         expect(tpl.query.type).toBeUndefined();
       }
@@ -134,7 +142,8 @@ describe('game templates', () => {
     });
 
     it('every ${VAR} is a field key or a system value', () => {
-      const allowed = new Set<string>(['GAME_NAME']);
+      // TZ: system value from HZ_TIMEZONE (M12).
+      const allowed = new Set<string>(['GAME_NAME', 'TZ']);
       for (const p of tpl.ports) {
         allowed.add(`PORT_${p.name.toUpperCase()}`);
         if (p.count > 1) allowed.add(`PORT_${p.name.toUpperCase()}_END`);
@@ -154,6 +163,59 @@ describe('game templates', () => {
       }
       // No compose defaults/modifiers (${A:-b}) that the core would not understand.
       for (const v of used) expect(v).toMatch(/^[A-Z][A-Z0-9_]*$/);
+    });
+
+    it('uses the time zone of the core, never a fixed one', () => {
+      expect(t.body).toMatch(/^\s+TZ: \$\{TZ\}$/m);
+      expect(t.body).not.toMatch(/Europe\//);
+    });
+
+    it('wake mode, mods and architectures fit the game (M12)', () => {
+      const raw = t.raw as { wake?: unknown; arch?: unknown };
+      expect(raw.wake, 'wake is explicit').toBeTypeOf('string');
+      expect(raw.arch, 'arch is explicit').toBeDefined();
+      if (id === 'minecraft-java') expect(tpl.wake).toBe('minecraft');
+      else if (id === 'minecraft-bedrock') expect(tpl.wake).toBe('minecraft-bedrock');
+      else expect(['raw', 'none']).toContain(tpl.wake);
+      if (tpl.wake === 'minecraft') {
+        expect(tpl.ports.some((p) => !p.local && p.protocol !== 'udp')).toBe(true);
+      }
+      if (tpl.wake === 'minecraft-bedrock') {
+        expect(tpl.ports.some((p) => !p.local && p.protocol !== 'tcp')).toBe(true);
+      }
+      if (tpl.mods) {
+        expect(id).toBe('minecraft-java');
+        const type = tpl.fields.find((f) => f.key === tpl.mods?.typeField);
+        expect(type?.type).toBe('select');
+        if (type?.type === 'select') {
+          for (const v of [...tpl.mods.plugins, ...tpl.mods.mods])
+            expect(type.options).toContain(v);
+        }
+        expect(fieldKeys.has(tpl.mods.versionField)).toBe(true);
+      }
+      expect(new Set(tpl.arch).size).toBe(tpl.arch.length);
+      for (const cmd of [tpl.rcon.sayCommand, tpl.rcon.whitelistAddCommand]) {
+        if (cmd !== undefined) expect(tpl.rcon.supported).toBe(true);
+      }
+    });
+
+    it('world download covers only world folders below ./data (M12)', () => {
+      // Only templates whose world folders are known to hold no configs or logs.
+      const expected: Record<string, string[]> = {
+        'minecraft-java': ['world', 'world_nether', 'world_the_end'],
+        'minecraft-bedrock': ['worlds'],
+        valheim: ['worlds_local'],
+        palworld: ['SaveGames'],
+        factorio: ['saves'],
+        'project-zomboid': ['Saves'],
+        'ark-se': ['SavedArks'],
+      };
+      expect(tpl.worldPaths).toEqual(expected[id]);
+      for (const p of tpl.worldPaths ?? []) {
+        expect(p).not.toMatch(/config|log|properties|\.env|rcon|settings|server/i);
+      }
+      // A world download needs a ./data bind mount.
+      if (tpl.worldPaths) expect(t.body).toMatch(/^\s+- \.\/data:/m);
     });
 
     it('names, labels, restart policy and memory limit', () => {

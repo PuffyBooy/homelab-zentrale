@@ -1,0 +1,47 @@
+# Rendered by the core (see templates/games/README.md).
+# - Settings are command line arguments of RustDedicated. RCON stays off (no
+#   rcon.password), so no secret is ever on a command line.
+# - The image runs as uid 10001 and the map/identity lives in the named volume `server`
+#   (owned by that user). There is no ./data, so no backup (Rust wipes monthly anyway);
+#   the volume is removed with the game (compose down --volumes).
+# - Facepunch updates Rust monthly: update the build tag in template.json and here.
+# - The image is amd64 only.
+services:
+  server:
+    image: pfeiffermax/rust-game-server:build-26921919
+    container_name: game-${GAME_NAME}
+    restart: unless-stopped
+    mem_limit: ${MEMORY}
+    stop_grace_period: 60s
+    env_file:
+      - .env
+    environment:
+      TZ: ${TZ}
+    command:
+      - '+server.ip'
+      - '0.0.0.0'
+      - '+server.port'
+      - '${PORT_GAME}'
+      - '+server.queryport'
+      - '${PORT_QUERY}'
+      - '+server.hostname'
+      - '${SERVER_NAME}'
+      - '+server.maxplayers'
+      - '${MAX_PLAYERS}'
+      - '+server.worldsize'
+      - '${WORLD_SIZE}'
+      - '+server.seed'
+      - '${SEED}'
+      - '+server.identity'
+      - 'homelab'
+    ports:
+      - '${PORT_GAME}:${PORT_GAME}/udp'
+      - '${PORT_QUERY}:${PORT_QUERY}/udp'
+    volumes:
+      - server:/srv/rust/server
+    labels:
+      homelab.game: ${GAME_NAME}
+      homelab.template: rust
+
+volumes:
+  server:

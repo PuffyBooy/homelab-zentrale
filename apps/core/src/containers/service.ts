@@ -111,6 +111,7 @@ const signature = (v: Partial<Values>): string =>
     v.memBytes,
     v.portsJson,
     v.intent,
+    v.gameLabel,
   ]);
 
 /**
@@ -216,6 +217,7 @@ export class ContainerService {
       memBytes: row.memBytes,
       restartCount: row.restartCount,
       updatedAt: new Date(row.updatedAt).toISOString(),
+      game: row.gameLabel,
       ...(this.control?.(row) ?? DEFAULT_CONTROL),
     };
   }
@@ -324,6 +326,7 @@ export class ContainerService {
           alertClass: old?.alertClass ?? null,
           updatedAt: now,
           lastMemBytes: c.memBytes ?? old?.lastMemBytes ?? null,
+          gameLabel: c.game ?? null,
         };
         const result = this.write(tx, serverId, serverName, name, old, base);
         if (result.changed) changed.push(result.id);
@@ -345,7 +348,7 @@ export class ContainerService {
 
   /** Docker events between inventories. Returns true if a container changed. */
   onEvent(serverId: string, event: AgentEvent['event']): boolean {
-    if (event.kind === 'denied') return false;
+    if (event.kind !== 'container' && event.kind !== 'oom') return false;
     const db = this.deps.db;
     const now = this.deps.now();
     const name = cleanName(event.name);

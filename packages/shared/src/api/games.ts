@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { gamedigTypeSchema, worldPathSchema } from '../agent-protocol.js';
 import { prioritySchema, throttledSchema } from './throttle.js';
 
 /**
@@ -91,7 +92,7 @@ export const gameTemplateSchema = z.strictObject({
     /** Port name from `ports`. */
     port: z.string().optional(),
     /** GameDig game type (allowlist, enforced by the agent too). */
-    type: z.enum(['valheim', 'counterstrike2', 'palworld']).optional(),
+    type: gamedigTypeSchema.optional(),
   }),
   rcon: z.strictObject({
     supported: z.boolean(),
@@ -99,7 +100,52 @@ export const gameTemplateSchema = z.strictObject({
     port: z.number().int().min(1).max(65535).optional(),
     /** Command that answers with TPS (Paper: "tps"). */
     tpsCommand: z.string().max(40).optional(),
+    /**
+     * M12: RCON command to broadcast a message to players before a scheduled
+     * restart, `{msg}` is replaced (Minecraft: "say {msg}"). Without it no warning.
+     */
+    sayCommand: z
+      .string()
+      .max(40)
+      .regex(/^[A-Za-z0-9_/ -]*\{msg\}$/)
+      .optional(),
+    /** M12: RCON commands for whitelist requests ("whitelist add {player}"). */
+    whitelistAddCommand: z
+      .string()
+      .max(60)
+      .regex(/^[A-Za-z0-9_/ -]*\{player\}$/)
+      .optional(),
   }),
+  /**
+   * M12 sleep mode: how wake listeners answer while the game sleeps (see
+   * game.wake.arm). Default `raw`; `none` disables wake-on-connect for this template.
+   */
+  wake: z.enum(['minecraft', 'minecraft-bedrock', 'raw', 'none']).default('raw'),
+  /**
+   * M12 mods/plugins via Modrinth: env field that holds the server type and the
+   * values that mean Paper (plugins) or Fabric (mods), and the field with the
+   * Minecraft version. Only Minecraft Java uses it.
+   */
+  mods: z
+    .strictObject({
+      typeField: envKeySchema,
+      versionField: envKeySchema,
+      plugins: z.array(z.string().max(20)).max(5),
+      mods: z.array(z.string().max(20)).max(5),
+    })
+    .optional(),
+  /**
+   * M12: the world folders below dataDir that friends may download (share right
+   * world_download). Only these go into the archive; without it there is no
+   * world download for this template (configs in data/ can hold passwords).
+   */
+  worldPaths: z.array(worldPathSchema).min(1).max(10).optional(),
+  /** M12: CPU architectures the image runs on (docker arch names), default both. */
+  arch: z
+    .array(z.enum(['amd64', 'arm64']))
+    .min(1)
+    .max(2)
+    .default(['amd64', 'arm64']),
   /** World data, relative to the game folder; backed up by game.backup. */
   dataDir: z.string().regex(/^\.\/[A-Za-z0-9._/-]+$/),
   fields: z.array(templateFieldSchema).max(30),
@@ -125,6 +171,11 @@ export const gameTemplateListResponseSchema = z.strictObject({
       ),
       rcon: z.boolean(),
       fields: z.array(templateFieldSchema),
+      /** M12: sleep mode can wake this game on connect. */
+      wake: z.boolean(),
+      /** M12: Modrinth mods/plugins possible (Minecraft Java). */
+      mods: z.boolean(),
+      arch: z.array(z.enum(['amd64', 'arm64'])),
     }),
   ),
 });
@@ -158,7 +209,13 @@ export const gameCreateRequestSchema = z.strictObject({
   values: z.record(envKeySchema, fieldValueSchema),
   /** Port per template port name; default: the suggestion. */
   ports: z.record(z.string(), z.number().int().min(1024).max(65535)).optional(),
-  autoStopMinutes: z.number().int().min(0).max(1440).default(0),
+  /**
+   * Sleep mode (M12): stop after this many minutes without players, 0 = never.
+   * Default 15 for new games.
+   */
+  autoStopMinutes: z.number().int().min(0).max(1440).default(15),
+  /** M12: while asleep, wake on the first connection (template.wake != none). */
+  wakeOnConnect: z.boolean().default(true),
   /** Shown to friends, e.g. "mc.hoebe.at" (DDNS) or a public IP. Empty: Tailscale IP. */
   externalAddress: z.string().trim().max(253).default(''),
 });
@@ -167,6 +224,7 @@ export const gameCreateRequestSchema = z.strictObject({
 export const gameUpdateRequestSchema = z.strictObject({
   values: z.record(envKeySchema, fieldValueSchema).optional(),
   autoStopMinutes: z.number().int().min(0).max(1440).optional(),
+  wakeOnConnect: z.boolean().optional(),
   externalAddress: z.string().trim().max(253).optional(),
 });
 
@@ -197,6 +255,15 @@ export const gameSummarySchema = z.strictObject({
   ramLimitBytes: z.number().nullable(),
   rcon: z.boolean(),
   autoStopMinutes: z.number().int(),
+  /** M12: wake-on-connect is on (and the template supports it). */
+  wakeOnConnect: z.boolean(),
+  /**
+   * M12: stopped by sleep mode and wake listeners are open; status `off`,
+   * statusText "Schläft".
+   */
+  sleeping: z.boolean(),
+  /** M12: Modrinth mods/plugins possible for this game (Paper or Fabric). */
+  modsKind: z.enum(['plugins', 'mods']).nullable(),
   /** As set by the admin; empty: the address uses the Tailscale IP. */
   externalAddress: z.string(),
   values: z.record(z.string(), fieldValueSchema),

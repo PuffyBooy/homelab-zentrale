@@ -1,0 +1,96 @@
+{
+  "$schema": "../template.schema.json",
+  "id": "ark-se",
+  "name": "ARK: Survival Evolved",
+  "image": "hermsi/ark-server:latest-1795427570",
+  "ram": {
+    "min": "8G",
+    "recommended": "12G"
+  },
+  "ports": [
+    {
+      "name": "game",
+      "container": 7777,
+      "protocol": "udp",
+      "default": 7777,
+      "count": 2
+    },
+    {
+      "name": "query",
+      "container": 27015,
+      "protocol": "udp",
+      "default": 27015,
+      "count": 1
+    }
+  ],
+  "query": {
+    "method": "gamedig",
+    "port": "query",
+    "type": "ase"
+  },
+  "rcon": {
+    "supported": true,
+    "port": 27020,
+    "sayCommand": "broadcast {msg}"
+  },
+  "wake": "raw",
+  "arch": [
+    "amd64"
+  ],
+  "dataDir": "./data",
+  "worldPaths": ["SavedArks"],
+  "fields": [
+    {
+      "key": "SESSION_NAME",
+      "label": "Servername",
+      "type": "text",
+      "default": "Homelab",
+      "pattern": "[A-Za-z0-9 ._-]{1,40}"
+    },
+    {
+      "key": "SERVER_MAP",
+      "label": "Karte",
+      "type": "select",
+      "options": [
+        "TheIsland",
+        "TheCenter",
+        "Ragnarok",
+        "Valguero_P",
+        "CrystalIsles",
+        "LostIsland",
+        "Fjordur",
+        "ScorchedEarth_P",
+        "Aberration_P",
+        "Extinction"
+      ],
+      "default": "TheIsland"
+    },
+    {
+      "key": "SERVER_PASSWORD",
+      "label": "Server-Passwort (mind. 8 Zeichen)",
+      "type": "text",
+      "default": "",
+      "pattern": "[^\\s'\"$\\\\]{8,64}",
+      "secret": true
+    },
+    {
+      "key": "MAX_PLAYERS",
+      "label": "Max. Spieler",
+      "type": "number",
+      "default": 10,
+      "min": 1,
+      "max": 70
+    },
+    {
+      "key": "MEMORY",
+      "label": "RAM",
+      "type": "select",
+      "options": [
+        "8G",
+        "12G",
+        "16G"
+      ],
+      "default": "12G"
+    }
+  ]
+}

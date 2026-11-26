@@ -4,6 +4,8 @@ import { cx } from '@hz/ui';
 export interface SelectOption {
   value: string;
   label: string;
+  /** Shown but not selectable (e.g. a server with the wrong CPU architecture). */
+  disabled?: boolean | undefined;
 }
 
 export interface SelectFieldProps extends Omit<SelectHTMLAttributes<HTMLSelectElement>, 'id'> {
@@ -42,7 +44,7 @@ export function SelectField({
         aria-describedby={describedBy || undefined}
       >
         {options.map((o) => (
-          <option key={o.value} value={o.value}>
+          <option key={o.value} value={o.value} disabled={o.disabled}>
             {o.label}
           </option>
         ))}

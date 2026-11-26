@@ -573,6 +573,8 @@ describe('share gateway API', () => {
         'game.players.max',
         'game.players.names',
         'game.whitelist',
+        'game.sleeping',
+        'whitelistRequests',
       ]),
     );
     // Without an external address there is no address at all (never the Tailscale IP).

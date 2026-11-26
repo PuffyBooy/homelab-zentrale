@@ -3,6 +3,7 @@ import { access } from 'node:fs/promises';
 import Docker from 'dockerode';
 import {
   containerInfoSchema,
+  gameFolderNameSchema,
   type ContainerHealth,
   type ContainerInfo,
   type PortMapping,
@@ -157,6 +158,8 @@ export function mapContainer(
   if (details.restartCount !== undefined) info.restartCount = details.restartCount;
   const role = labels['hz.role'];
   if (role === 'core' || role === 'agent') info.role = role;
+  const game = labels['homelab.game'];
+  if (game !== undefined && gameFolderNameSchema.safeParse(game).success) info.game = game;
   if (details.cpuLimit !== undefined) info.cpuLimit = details.cpuLimit;
   if (state === 'running') {
     if (usage.cpu !== undefined) info.cpu = Math.min(100, Math.max(0, usage.cpu));

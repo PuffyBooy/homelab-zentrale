@@ -27,6 +27,13 @@ Die Zentrale hat Root-ähnliche Macht über alle Server. Diese Regeln sind **nic
 - Das Agent-Token ist pro Server eindeutig und widerrufbar. Bei Widerruf trennt der Core die Verbindung sofort.
 - Einrichtungscode-Tausch (Onboarding): 5 Versuche pro 15 Min pro IP, dazu eine globale Grenze von 30 Fehlversuchen pro 15 Min. Ist sie erreicht, lehnt der Core 15 Min lang jeden Tausch ab, auch mit gültigem Code. Ein Gerät im Tailnet kann das Onboarding damit absichtlich 15 Min blockieren; das nehmen wir bewusst in Kauf (ein Admin, eigenes Tailnet, die Zentrale ist nie öffentlich), weil es Raten über viele IPs hinweg verhindert.
 
+## Gameserver (M12)
+- Wake-Listener nur auf Host-Ports, die die `compose.yml` des Spiels veröffentlicht, nie Weiterleitung, Grenzen für Frames (1 KiB), Bytes, Zeit (5 s) und Verbindungen (16); Serverlisten-Pings wecken nicht.
+- Mods/Plugins nur von `cdn.modrinth.com` mit sha512 aus der Modrinth-API, feste Größe, O_EXCL, keine Symlinks.
+- Discord-Webhook-URL verschlüsselt, nur `discord.com`/`discordapp.com`, nie in Antwort, Log oder Fehlermeldung, Step-up beim Setzen; Nachrichten ohne Tailnet-Adressen, ohne Erwähnungen.
+- Welt-Download für Freunde nur mit Recht `world_download`, nur die Weltordner aus `worldPaths` der Vorlage (nie Konfigurationen mit Passwörtern oder Logs), 1 pro Link und Stunde.
+- Backup wiederherstellen nur mit Step-up und Namensbestätigung; jeder Archiv-Eintrag wird geprüft.
+
 ## Benutzerlinks
 - Token mit ≥ 128 Bit Zufall, gespeichert nur als Hash.
 - Ein Link erlaubt genau einen Gameserver und genau die gesetzten Rechte. Das wird serverseitig bei **jeder** Aktion geprüft.

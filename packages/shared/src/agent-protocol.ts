@@ -75,6 +75,24 @@ export const homelabPathSchema = z
  */
 export const gameFolderNameSchema = z.string().regex(/^[a-z0-9](?:[a-z0-9-]{0,30}[a-z0-9])$/);
 
+/**
+ * GameDig game types the agent may query (allowlist, gamedig 5 ids).
+ * M12 added the new templates (Satisfactory, Enshrouded, Project Zomboid,
+ * ARK: Survival Evolved = `ase`, Rust, V Rising).
+ */
+export const GAMEDIG_TYPES = [
+  'valheim',
+  'counterstrike2',
+  'palworld',
+  'satisfactory',
+  'enshrouded',
+  'projectzomboid',
+  'ase',
+  'rust',
+  'vrising',
+] as const;
+export const gamedigTypeSchema = z.enum(GAMEDIG_TYPES);
+
 /** Single file name (no directories). */
 export const fileNameSchema = z
   .string()
@@ -168,6 +186,11 @@ export const containerInfoSchema = z.strictObject({
   role: z.enum(['core', 'agent']).optional(),
   /** Current --cpus limit (HostConfig.NanoCpus / 1e9), null without a limit. */
   cpuLimit: nonNeg.nullable().optional(),
+  /**
+   * M12: value of the label `homelab.game` (the game's folder name), when it is a
+   * valid game folder name. The core links game containers by this label first.
+   */
+  game: gameFolderNameSchema.optional(),
 });
 export type ContainerInfo = z.infer<typeof containerInfoSchema>;
 
@@ -352,6 +375,18 @@ export const agentEventSchema = z.strictObject({
       kind: z.literal('oom'),
       dockerId: z.string().regex(/^[0-9a-f]{12,64}$/),
       name: z.string().max(128),
+    }),
+    /**
+     * M12: a sleeping game (game.wake.arm) got a connection that asks to play
+     * (Minecraft login, Bedrock open-connection request, any TCP data or a
+     * non-query UDP datagram). The agent has already closed all wake listeners of
+     * that game. No client address is sent.
+     */
+    z.strictObject({
+      kind: z.literal('game_wake'),
+      gameId: gameFolderNameSchema,
+      port: z.number().int().min(1024).max(65535),
+      protocol: z.enum(['tcp', 'udp']),
     }),
     z.strictObject({
       kind: z.literal('denied'),
@@ -680,6 +715,44 @@ export const repoUrlSchema = z
     { message: 'invalid repo url' },
   );
 
+// ---------------------------------------------------------------------------
+// M12: mods, restore
+
+/**
+ * A relative path below a game's data/ folder ("world", "Saves/Multiplayer"):
+ * segments of letters, digits, . _ -, no empty, "." or ".." segment.
+ */
+export const worldPathSchema = z
+  .string()
+  .max(120)
+  .regex(/^[A-Za-z0-9_-][A-Za-z0-9._-]*(?:\/[A-Za-z0-9_-][A-Za-z0-9._-]*)*$/)
+  .refine((p) => !p.split('/').some((seg) => seg === '.' || seg === '..'), {
+    message: 'invalid path',
+  });
+
+/** Paper plugins (data/plugins) or Fabric mods (data/mods). */
+export const modKindSchema = z.enum(['plugins', 'mods']);
+export type ModKind = z.infer<typeof modKindSchema>;
+/** Largest mod/plugin jar the agent downloads (100 MiB). */
+export const MOD_MAX_BYTES = 100 * 1024 * 1024;
+/** A jar file name: no path, no leading dot. */
+export const modFileNameSchema = z
+  .string()
+  .regex(/^[A-Za-z0-9][A-Za-z0-9._+-]{0,118}\.jar$/)
+  .refine((n) => !n.includes('..'), { message: 'invalid file name' });
+/** Only files of Modrinth's CDN: https://cdn.modrinth.com/data/<project>/versions/<version>/<file>. */
+export const modrinthCdnUrlSchema = z
+  .string()
+  .max(400)
+  .regex(
+    /^https:\/\/cdn\.modrinth\.com\/data\/[A-Za-z0-9]{8}\/versions\/[A-Za-z0-9]{8}\/[A-Za-z0-9._+%-]{1,200}\.jar$/,
+  )
+  .refine((u) => !u.includes('..') && !/%2f|%5c|%00/i.test(u), { message: 'invalid url' });
+/** Backup archive name as written by game.backup: <gameId>-YYYYMMDD-HHMMSS.tar.zst. */
+export const backupFileNameSchema = z
+  .string()
+  .regex(/^[a-z0-9](?:[a-z0-9-]{0,30}[a-z0-9])-\d{8}-\d{6}\.tar\.zst$/);
+
 const ptySize = { cols: z.number().int().min(10).max(500), rows: z.number().int().min(5).max(200) };
 
 /**
@@ -731,7 +804,7 @@ export const rpcParamsByAction = {
     gameDir: homelabPathSchema,
     method: z.enum(['minecraft', 'minecraft-bedrock', 'gamedig', 'none']),
     port: z.number().int().min(1).max(65535),
-    gamedigType: z.enum(['valheim', 'counterstrike2', 'palworld']).optional(),
+    gamedigType: gamedigTypeSchema.optional(),
     tpsCommand: z.enum(['tps']).optional(),
     timeoutMs: z.number().int().min(500).max(15_000).default(5000),
   }),
@@ -762,6 +835,13 @@ export const rpcParamsByAction = {
   'game.export': z.strictObject({
     gameId: gameFolderNameSchema,
     maxBytes: z.number().int().min(1).max(MIGRATION_MAX_BYTES).default(MIGRATION_MAX_BYTES),
+    /**
+     * M12 world download for friends: only these sub paths of data/ go into the
+     * archive (as data/<path>), nothing else (no server.properties, configs with
+     * RCON/admin passwords, logs with player IPs). Missing paths are skipped;
+     * symlinks are never followed. Without `paths`: the whole data/ (migration).
+     */
+    paths: z.array(worldPathSchema).min(1).max(10).optional(),
   }),
   /**
    * M11, stream. Receives an archive into
@@ -779,6 +859,83 @@ export const rpcParamsByAction = {
     bytes: z.number().int().min(1).max(MIGRATION_MAX_BYTES),
     sha256: sha256Schema,
     chunks: z.number().int().min(1).max(MAX_TRANSFER_CHUNKS),
+  }),
+  /**
+   * M12 sleep mode. Opens wake listeners on the given host ports of a stopped
+   * game (refused with `busy` while its container runs). Every port must be a host
+   * port the game's /opt/homelab/games/<gameId>/compose.yml publishes (checked by
+   * the agent, `not_allowed` otherwise). Listeners bind 0.0.0.0, never forward a
+   * byte, cap concurrent connections (16) and frame sizes (1 KiB), and answer:
+   * - minecraft (TCP): status ping -> MOTD `motd` and 0/0 players, no wake;
+   *   login -> disconnect "Server startet, bitte in 1 Minute neu verbinden" and wake.
+   * - minecraft-bedrock (UDP): unconnected ping -> pong with `motd`, no wake;
+   *   open connection request -> wake.
+   * - raw (TCP or UDP): first TCP data byte or first UDP datagram that is not a
+   *   Steam A2S query (0xFFFFFFFF 'T'/'U'/'V'/'W') -> wake.
+   * On wake the agent closes all listeners of the game, emits event `game_wake`
+   * and frees the ports before the core starts the game. Re-arming replaces the
+   * old listeners. Listeners are lost on agent restart (the core re-arms).
+   * Result: gameWakeArmDataSchema.
+   */
+  'game.wake.arm': z.strictObject({
+    gameId: gameFolderNameSchema,
+    mode: z.enum(['minecraft', 'minecraft-bedrock', 'raw']),
+    ports: z
+      .array(
+        z.strictObject({
+          port: z.number().int().min(1024).max(65535),
+          protocol: z.enum(['tcp', 'udp']),
+        }),
+      )
+      .min(1)
+      .max(4),
+    /** Shown in the Minecraft server list while asleep. */
+    motd: z
+      .string()
+      .max(60)
+      .regex(/^[\p{L}\p{N} .,:!?()_\u2013-]*$/u),
+  }),
+  /** Closes all wake listeners of a game (no error when none are open). */
+  'game.wake.disarm': z.strictObject({ gameId: gameFolderNameSchema }),
+  /**
+   * M12 mods/plugins (Paper: data/plugins, Fabric: data/mods). Lists *.jar files
+   * (regular files only, no symlinks, max 500). Result: gameModsListDataSchema.
+   */
+  'game.mods.list': z.strictObject({ gameId: gameFolderNameSchema, kind: modKindSchema }),
+  /**
+   * Downloads one jar from Modrinth's CDN (https only, no redirects to other
+   * hosts, at most sizeBytes and MOD_MAX_BYTES), verifies size and sha512, writes
+   * it with O_EXCL to a temp name in the same folder and renames it into
+   * data/<kind>/<fileName>. `busy` when the file already exists.
+   * Result: gameModFileSchema.
+   */
+  'game.mods.install': z.strictObject({
+    gameId: gameFolderNameSchema,
+    kind: modKindSchema,
+    url: modrinthCdnUrlSchema,
+    fileName: modFileNameSchema,
+    sha512: z.string().regex(/^[0-9a-f]{128}$/),
+    sizeBytes: z.number().int().min(1).max(MOD_MAX_BYTES),
+  }),
+  /** Deletes data/<kind>/<fileName> (regular file only). */
+  'game.mods.remove': z.strictObject({
+    gameId: gameFolderNameSchema,
+    kind: modKindSchema,
+    fileName: modFileNameSchema,
+  }),
+  /**
+   * M12, stream. Restores /opt/homelab/backups/<gameId>/<fileName> into
+   * /opt/homelab/games/<gameId>/data. Refused with `busy` while the game's
+   * container runs. Checks every member with checkArchiveMember, extracts into
+   * /opt/homelab/games/.restore-<streamId>/ (no owners/permissions from the
+   * archive), then swaps: data -> .data-before-restore (one kept, older one
+   * deleted), new data -> data. On any error the old data stays in place.
+   * Never starts the game. Last progress line: `result {json}`
+   * (gameRestoreDoneDataSchema).
+   */
+  'game.restore': z.strictObject({
+    gameId: gameFolderNameSchema,
+    fileName: backupFileNameSchema,
   }),
   /** Stream. */
   'deploy.run': z.strictObject({
@@ -821,6 +978,7 @@ export const streamingActions: readonly RpcAction[] = [
   'pty.open',
   'game.export',
   'game.import',
+  'game.restore',
 ];
 /** Actions that need HZ_AGENT_ALLOW_TERMINAL=1 on the agent and step-up in the core. */
 export const terminalActions: readonly RpcAction[] = [
@@ -938,6 +1096,30 @@ export const gameImportDoneDataSchema = z.strictObject({
 });
 export type GameImportDoneData = z.infer<typeof gameImportDoneDataSchema>;
 export const ptyOpenDataSchema = z.strictObject({ streamId: streamIdSchema });
+
+/** Result of game.wake.arm: the ports that are listening now. */
+export const gameWakeArmDataSchema = z.strictObject({
+  listening: z
+    .array(z.strictObject({ port: z.number().int(), protocol: z.enum(['tcp', 'udp']) }))
+    .max(4),
+});
+export type GameWakeArmData = z.infer<typeof gameWakeArmDataSchema>;
+export const gameModFileSchema = z.strictObject({
+  fileName: modFileNameSchema,
+  sizeBytes: z.number().int().nonnegative(),
+  sha512: z.string().regex(/^[0-9a-f]{128}$/),
+});
+export type GameModFile = z.infer<typeof gameModFileSchema>;
+/** Result of game.mods.list. A missing folder is an empty list. */
+export const gameModsListDataSchema = z.strictObject({
+  files: z.array(gameModFileSchema).max(500),
+});
+export type GameModsListData = z.infer<typeof gameModsListDataSchema>;
+/** game.restore: JSON after the `result ` prefix of the last progress line. */
+export const gameRestoreDoneDataSchema = z.strictObject({
+  entries: z.number().int().nonnegative().max(ARCHIVE_MAX_ENTRIES),
+});
+export type GameRestoreDoneData = z.infer<typeof gameRestoreDoneDataSchema>;
 export const gameStatusDataSchema = z.strictObject({
   online: z.boolean(),
   players: z

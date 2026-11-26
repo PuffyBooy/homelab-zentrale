@@ -1,0 +1,39 @@
+# Rendered by the core (see templates/games/README.md).
+# - Players and the Steam query use one UDP port; the container listens on PORT_GAME.
+# - Join password: role 0 ("Spieler"), SERVER_ROLE_0_PASSWORD (secret field) comes
+#   from .env; empty means everyone may join.
+# - Savegames are in ./data (backed up); the game files live in the named volume
+#   `server` and are removed with the game (compose down --volumes).
+# - The image is amd64 only (Proton).
+services:
+  server:
+    image: mornedhels/enshrouded-server:1.8.1
+    container_name: game-${GAME_NAME}
+    restart: unless-stopped
+    mem_limit: ${MEMORY}
+    stop_grace_period: 90s
+    env_file:
+      - .env
+    environment:
+      PUID: '1000'
+      PGID: '1000'
+      SERVER_NAME: ${SERVER_NAME}
+      SERVER_SLOT_COUNT: ${SERVER_SLOT_COUNT}
+      SERVER_QUERYPORT: ${PORT_GAME}
+      SERVER_SAVE_DIR: /opt/enshrouded/savegame
+      SERVER_ROLE_0_NAME: Spieler
+      SERVER_ROLE_0_CAN_EDIT_BASE: 'true'
+      SERVER_ROLE_0_CAN_EXTEND_BASE: 'true'
+      SERVER_ROLE_0_CAN_ACCESS_INVENTORIES: 'true'
+      TZ: ${TZ}
+    ports:
+      - '${PORT_GAME}:${PORT_GAME}/udp'
+    volumes:
+      - server:/opt/enshrouded
+      - ./data:/opt/enshrouded/savegame
+    labels:
+      homelab.game: ${GAME_NAME}
+      homelab.template: enshrouded
+
+volumes:
+  server:

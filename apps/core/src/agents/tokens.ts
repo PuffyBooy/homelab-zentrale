@@ -219,6 +219,7 @@ export class AgentTokens {
         allowTerminal: false,
         createdAt: now,
         lastSeen: now,
+        network: null,
       };
       tx.insert(servers).values(server).run();
       const agentToken = randomToken(32);

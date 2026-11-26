@@ -26,7 +26,7 @@ export type ComposeToken =
 
 export type VarKind =
   | { kind: 'field'; field: TemplateField }
-  /** Values the core sets (GAME_NAME, PORT_*). */
+  /** Values the core sets (GAME_NAME, TZ, PORT_*). */
   | { kind: 'system' }
   /**
    * Secrets (RCON_PASSWORD, `secret` text fields): never written into compose.yml.
@@ -60,11 +60,14 @@ export const portEndKey = (name: string): string => `PORT_${name.toUpperCase()}_
 export const RCON_PASSWORD_KEY = 'RCON_PASSWORD';
 export const RCON_PORT_KEY = 'PORT_RCON';
 export const GAME_NAME_KEY = 'GAME_NAME';
+/** M12: the core's time zone (HZ_TIMEZONE), so the game logs and schedules agree. */
+export const TZ_KEY = 'TZ';
 
 /** Every variable a template may use, with its kind. */
 export function templateVars(t: GameTemplate): Map<string, VarKind> {
   const vars = new Map<string, VarKind>();
   vars.set(GAME_NAME_KEY, { kind: 'system' });
+  vars.set(TZ_KEY, { kind: 'system' });
   for (const p of t.ports) {
     vars.set(portKey(p.name), { kind: 'system' });
     if (p.count > 1) vars.set(portEndKey(p.name), { kind: 'system' });

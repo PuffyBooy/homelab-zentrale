@@ -1,9 +1,11 @@
 import type { GameTemplate } from '@hz/shared';
+import { timeZone } from '../timezone.js';
 import { isSafeText } from './safe-text.js';
 import {
   GAME_NAME_KEY,
   RCON_PASSWORD_KEY,
   RCON_PORT_KEY,
+  TZ_KEY,
   portEndKey,
   portKey,
   type LoadedTemplate,
@@ -139,6 +141,7 @@ export interface RenderInput {
 function allVars(l: LoadedTemplate, input: RenderInput): Map<string, FieldValue> {
   const out = new Map<string, FieldValue>();
   out.set(GAME_NAME_KEY, input.name);
+  out.set(TZ_KEY, timeZone());
   for (const p of l.template.ports) {
     const host = input.ports.find((x) => x.name === p.name);
     if (!host) throw new ValueError(portKey(p.name), 'port missing');

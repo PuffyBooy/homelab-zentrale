@@ -8,6 +8,7 @@ import type {
   FastifyReply,
   FastifyRequest,
 } from 'fastify';
+import fastifyRateLimit from '@fastify/rate-limit';
 import { z } from 'zod';
 import {
   shareActionRequestSchema,
@@ -17,6 +18,7 @@ import {
   shareConsoleResponseSchema,
   shareErrorResponseSchema,
   shareStatusResponseSchema,
+  shareWhitelistAskSchema,
   shareWhitelistRequestSchema,
 } from '@hz/shared';
 import { originAllowed } from '../auth/guard.js';
@@ -39,6 +41,10 @@ import {
   type ShareService,
   type ShareVia,
 } from './service.js';
+
+const shareEmptyQuerySchema = z.strictObject({});
+/** Outer per-IP limit of the friend API per minute (the finer budgets are 10 + 30). */
+const SHARE_OUTER_IP_LIMIT = 600;
 
 /** Strict CSP for the share page: own files only, no inline code, no framing. */
 export const SHARE_CSP = [
@@ -129,7 +135,27 @@ interface FriendApiOptions {
  * tailnet (`/s/api`) and the gateway (`/api/share-gateway`). Order per request:
  * rate limit per IP, rate limit per token, token/state/PIN, permission, action.
  */
-function friendApi(app: FastifyInstance, o: FriendApiOptions): void {
+async function friendApi(app: FastifyInstance, o: FriendApiOptions): Promise<void> {
+  // Coarse outer limit per friend IP (above the finer budgets below), so every
+  // route of this API, including the M12 world download, is rate limited.
+  await app.register(fastifyRateLimit, {
+    max: SHARE_OUTER_IP_LIMIT,
+    timeWindow: SHARE_LIMIT_WINDOW_MS,
+    hook: 'preHandler',
+    keyGenerator: (request) => o.ip(request),
+    errorResponseBuilder: (_request, ctx) => ({
+      statusCode: 429,
+      ok: false,
+      error: 'rate_limited',
+      retryAfter: Math.max(1, Math.ceil(ctx.ttl / 1000)),
+    }),
+    addHeaders: {
+      'x-ratelimit-limit': false,
+      'x-ratelimit-remaining': false,
+      'x-ratelimit-reset': false,
+      'retry-after': true,
+    },
+  });
   // Two budgets like the gateway: API calls, and GET console polls.
   const limits = {
     api: {
@@ -187,6 +213,30 @@ function friendApi(app: FastifyInstance, o: FriendApiOptions): void {
     return strictOut(shareCommandResponseSchema, await o.shares.whitelist(ctx, op, player));
   });
 
+  // M12: whitelist request (the admin approves after a push).
+  app.post('/whitelist-request', async (request) => {
+    const ctx = await ctxOf(request);
+    const { player } = shareWhitelistAskSchema.parse(request.body);
+    return strictOut(shareStatusResponseSchema, o.shares.whitelistAsk(ctx, player));
+  });
+
+  // M12: world download, streamed (never buffered) from game.export.
+  app.get('/world', async (request, reply) => {
+    const ctx = await ctxOf(request);
+    shareEmptyQuerySchema.parse(request.query ?? {});
+    const dl = await o.shares.world(ctx);
+    reply.raw.once('close', () => {
+      if (!dl.stream.writableFinished) dl.stream.destroy();
+    });
+    return reply
+      .code(200)
+      .header('content-type', 'application/zstd')
+      .header('content-disposition', `attachment; filename="${dl.fileName}"`)
+      .header('content-length', String(dl.bytes))
+      .header('x-content-type-options', 'nosniff')
+      .send(dl.stream);
+  });
+
   // Nothing else exists under this API.
   app.route({
     method: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'],
@@ -234,7 +284,7 @@ export const shareTailnetRoutes: FastifyPluginAsync<ShareTailnetOptions> = async
         if (request.method !== 'POST' || request.headers.origin === undefined) return;
         if (!originAllowed(request, o.baseUrl)) throw new ShareError(403, 'forbidden');
       });
-      friendApi(api, {
+      await friendApi(api, {
         shares: o.shares,
         now: o.now,
         via: 'tailnet',
@@ -321,7 +371,7 @@ export const shareGatewayRoutes: FastifyPluginAsync<ShareGatewayOptions> = async
     request.shareClientIp = ip;
     return undefined;
   });
-  friendApi(app, {
+  await friendApi(app, {
     shares: o.shares,
     now: o.now,
     via: 'gateway',

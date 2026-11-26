@@ -66,7 +66,14 @@ export class ModuleService {
 const MODULE_PREFIXES: Record<ModuleId, readonly string[]> = {
   github: ['/api/github'],
   homeassistant: ['/api/ha'],
-  games: ['/api/games', '/api/shares', '/api/settings/share-gateway', '/api/share-gateway', '/s'],
+  games: [
+    '/api/games',
+    '/api/whitelist-requests',
+    '/api/shares',
+    '/api/settings/share-gateway',
+    '/api/share-gateway',
+    '/s',
+  ],
   storage: ['/api/storage'],
 };
 

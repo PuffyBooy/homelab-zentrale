@@ -111,6 +111,8 @@ export const PERM_ORDER: readonly SharePerm[] = [
   'console_read',
   'console_write',
   'whitelist',
+  'whitelist_request',
+  'world_download',
 ];
 
 export const PERM_TEXT: Record<SharePerm, string> = {
@@ -119,12 +121,23 @@ export const PERM_TEXT: Record<SharePerm, string> = {
   console_read: 'Konsole lesen',
   console_write: 'Konsole schreiben',
   whitelist: 'Whitelist bearbeiten',
+  whitelist_request: 'Whitelist-Anfrage',
+  world_download: 'Welt herunterladen',
 };
 
-/** Whitelist editing only exists for Minecraft Java. */
+const MINECRAFT_ONLY: readonly SharePerm[] = ['whitelist', 'whitelist_request'];
+
+/** Whitelist editing and whitelist requests only exist for Minecraft Java. */
 export function permsFor(templateId: string): SharePerm[] {
-  return PERM_ORDER.filter((p) => p !== 'whitelist' || templateId === 'minecraft-java');
+  return PERM_ORDER.filter((p) => !MINECRAFT_ONLY.includes(p) || templateId === 'minecraft-java');
 }
+
+/** Hint under a right in "Link erstellen". */
+export const PERM_HINT: Partial<Record<SharePerm, string>> = {
+  console_write: 'schließt Konsole lesen ein',
+  whitelist_request: 'Freund trägt seinen Namen ein, du bestätigst',
+  world_download: 'tar.zst, höchstens 1× pro Stunde',
+};
 
 /** "Starten/Stoppen · Konsole lesen", in the fixed order. */
 export function permsText(perms: readonly SharePerm[]): string {
@@ -207,6 +220,8 @@ export const AUDIT_TEXT: Record<ShareAuditEntry['action'], string> = {
   console_write: 'hat einen Befehl gesendet',
   whitelist_add: 'hat zur Whitelist hinzugefügt',
   whitelist_remove: 'hat von der Whitelist entfernt',
+  whitelist_request: 'hat eine Whitelist-Anfrage gestellt',
+  world_download: 'hat die Welt heruntergeladen',
   pin_failed: 'hat eine falsche PIN eingegeben',
   pin_locked: 'ist gesperrt (5 falsche PINs)',
   denied: 'wurde abgewiesen (kein Recht)',
@@ -246,6 +261,9 @@ export function togglePerm(perms: readonly SharePerm[], p: SharePerm, on: boolea
   if (on) {
     next.add(p);
     if (p === 'console_write') next.add('console_read');
+    // Editing the whitelist makes a request pointless, and the other way round.
+    if (p === 'whitelist') next.delete('whitelist_request');
+    if (p === 'whitelist_request') next.delete('whitelist');
   } else {
     next.delete(p);
     if (p === 'console_read') next.delete('console_write');

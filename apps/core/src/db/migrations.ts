@@ -716,4 +716,89 @@ CREATE TABLE server_storage (
 );
 `,
   },
+  {
+    version: 15,
+    name: 'games_complete',
+    // M12 "Gameserver komplett". Existing games keep their behaviour: wake_on_connect 0
+    // (new games get 1 from the request default). sleeping: stopped by the sleep mode and
+    // wake listeners requested (game.wake.arm). mods_restart_needed: jars changed since the
+    // last start. game_notify.webhook_enc: Discord URL via crypto.ts (AAD
+    // game_notify.discord:<game id>). game_player_hours: one bucket per game and UTC hour
+    // (sum of online players over the samples, peak). whitelist_requests: friends' requests
+    // (share links). containers.game_label: label homelab.game. servers.network: home |
+    // cloud | vps | other (port forwarding hint).
+    sql: `
+ALTER TABLE game_servers ADD COLUMN wake_on_connect INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE game_servers ADD COLUMN sleeping INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE game_servers ADD COLUMN mods_restart_needed INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE containers ADD COLUMN game_label TEXT;
+ALTER TABLE servers ADD COLUMN network TEXT;
+
+CREATE TABLE game_schedules (
+  id TEXT PRIMARY KEY,
+  game_id TEXT NOT NULL REFERENCES game_servers(id) ON DELETE CASCADE,
+  position INTEGER NOT NULL,
+  kind TEXT NOT NULL,
+  days_json TEXT NOT NULL,
+  time TEXT NOT NULL,
+  enabled INTEGER NOT NULL DEFAULT 1,
+  last_run_at INTEGER,
+  created_at INTEGER NOT NULL
+);
+CREATE INDEX game_schedules_game ON game_schedules(game_id, position);
+
+CREATE TABLE game_notify (
+  game_id TEXT PRIMARY KEY REFERENCES game_servers(id) ON DELETE CASCADE,
+  webhook_enc TEXT,
+  events_json TEXT NOT NULL DEFAULT '[]',
+  last_sent_at INTEGER,
+  last_error TEXT,
+  updated_at INTEGER NOT NULL
+);
+
+CREATE TABLE game_player_sessions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  game_id TEXT NOT NULL REFERENCES game_servers(id) ON DELETE CASCADE,
+  player TEXT NOT NULL,
+  started_at INTEGER NOT NULL,
+  last_seen INTEGER NOT NULL,
+  ended_at INTEGER
+);
+CREATE INDEX game_player_sessions_game ON game_player_sessions(game_id, started_at);
+CREATE INDEX game_player_sessions_open ON game_player_sessions(game_id, ended_at);
+
+CREATE TABLE game_player_hours (
+  game_id TEXT NOT NULL REFERENCES game_servers(id) ON DELETE CASCADE,
+  hour_ts INTEGER NOT NULL,
+  samples INTEGER NOT NULL,
+  players_sum INTEGER NOT NULL,
+  peak INTEGER NOT NULL,
+  peak_at INTEGER NOT NULL,
+  PRIMARY KEY (game_id, hour_ts)
+);
+CREATE INDEX game_player_hours_ts ON game_player_hours(hour_ts);
+
+CREATE TABLE game_mods (
+  game_id TEXT NOT NULL REFERENCES game_servers(id) ON DELETE CASCADE,
+  file_name TEXT NOT NULL,
+  project_id TEXT NOT NULL,
+  title TEXT NOT NULL,
+  installed_at INTEGER NOT NULL,
+  PRIMARY KEY (game_id, file_name)
+);
+
+CREATE TABLE whitelist_requests (
+  id TEXT PRIMARY KEY,
+  game_id TEXT NOT NULL REFERENCES game_servers(id) ON DELETE CASCADE,
+  share_id TEXT NOT NULL,
+  person TEXT NOT NULL,
+  player TEXT NOT NULL,
+  state TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  decided_at INTEGER
+);
+CREATE INDEX whitelist_requests_game ON whitelist_requests(game_id, created_at);
+CREATE INDEX whitelist_requests_share ON whitelist_requests(share_id, created_at);
+`,
+  },
 ];

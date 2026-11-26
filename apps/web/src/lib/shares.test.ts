@@ -45,7 +45,13 @@ describe('share texts', () => {
   it('offers the whitelist only for Minecraft Java', () => {
     expect(permsFor('minecraft-java')).toContain('whitelist');
     expect(permsFor('valheim')).not.toContain('whitelist');
-    expect(permsFor('valheim')).toHaveLength(4);
+    expect(permsFor('valheim')).toEqual([
+      'power',
+      'restart',
+      'console_read',
+      'console_write',
+      'world_download',
+    ]);
   });
 
   it('maps the state to shape and tag', () => {

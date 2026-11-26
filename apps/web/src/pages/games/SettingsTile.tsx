@@ -1,7 +1,7 @@
 import type { GameSummary } from '@hz/shared';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useRef, useState, type FormEvent, type ReactElement } from 'react';
-import { Alert, Button, Tile } from '@hz/ui';
+import { Alert, Button, Tile, Toggle } from '@hz/ui';
 import { Field } from '../../components/Field.js';
 import { FormError } from '../../components/FormError.js';
 import {
@@ -90,7 +90,7 @@ function SettingsForm({ game, tpl }: { game: GameSummary; tpl: TemplateInfo }): 
       />
       <div className="app-fields">
         <Field
-          label="Auto-Stopp (Minuten ohne Spieler)"
+          label="Schlafen nach … Min ohne Spieler"
           mono
           inputMode="numeric"
           value={draft.autoStopMinutes}
@@ -99,7 +99,7 @@ function SettingsForm({ game, tpl }: { game: GameSummary; tpl: TemplateInfo }): 
             setDraft((d) => ({ ...d, autoStopMinutes: v }));
             clear('autoStopMinutes');
           }}
-          hint="0 = nie automatisch stoppen"
+          hint="0 = nie. Stoppt sauber, die Welt bleibt."
           error={errors.autoStopMinutes}
           autoComplete="off"
         />
@@ -121,6 +121,17 @@ function SettingsForm({ game, tpl }: { game: GameSummary; tpl: TemplateInfo }): 
           spellCheck={false}
         />
       </div>
+      {tpl.wake ? (
+        <Toggle
+          label="Beim Verbinden aufwecken"
+          hint="Im Schlaf lauscht der Agent auf den Ports. Der erste Login startet den Server."
+          checked={draft.wakeOnConnect}
+          onChange={(on) => {
+            setDraft((d) => ({ ...d, wakeOnConnect: on }));
+            save.reset();
+          }}
+        />
+      ) : null}
       {save.error ? <FormError title={gameErrorText(save.error)} /> : null}
       {save.isSuccess ? (
         <Alert tone="ok" title="Gespeichert.">

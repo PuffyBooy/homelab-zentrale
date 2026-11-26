@@ -103,6 +103,8 @@ export const servers = sqliteTable('servers', {
   allowTerminal: integer('allow_terminal', { mode: 'boolean' }).notNull().default(false),
   createdAt: integer('created_at').notNull(),
   lastSeen: integer('last_seen'),
+  /** M12: home | cloud | vps | other, null = not set (port forwarding hint). */
+  network: text('network'),
 });
 
 /** Latest metrics and inventory of a server (one row per server). */
@@ -241,6 +243,8 @@ export const containers = sqliteTable(
     updatedAt: integer('updated_at').notNull(),
     /** Last known memory usage (kept while stopped), for the derived RAM reserve (M10). */
     lastMemBytes: real('last_mem_bytes'),
+    /** M12: label homelab.game (a valid game folder name) from the inventory. */
+    gameLabel: text('game_label'),
   },
   (t) => [
     unique().on(t.serverId, t.name),
@@ -472,6 +476,12 @@ export const gameServers = sqliteTable(
     allowStopWithPlayers: integer('allow_stop_with_players', { mode: 'boolean' })
       .notNull()
       .default(false),
+    /** M12: while asleep, wake listeners are armed (template.wake != none). */
+    wakeOnConnect: integer('wake_on_connect', { mode: 'boolean' }).notNull().default(false),
+    /** M12: stopped by the sleep mode, wake listeners requested. */
+    sleeping: integer('sleeping', { mode: 'boolean' }).notNull().default(false),
+    /** M12: mods/plugins changed since the last start ("Neustart nötig"). */
+    modsRestartNeeded: integer('mods_restart_needed', { mode: 'boolean' }).notNull().default(false),
   },
   (t) => [unique().on(t.serverId, t.name)],
 );
@@ -830,3 +840,119 @@ export const serverStorage = sqliteTable('server_storage', {
   storageJson: text('storage_json').notNull(),
   updatedAt: integer('updated_at').notNull(),
 });
+// ---- M12: game server features ------------------------------------------------
+
+/** Restart / backup at weekdays and HH:MM in HZ_TIMEZONE (games/schedules.ts). */
+export const gameSchedules = sqliteTable(
+  'game_schedules',
+  {
+    id: text('id').primaryKey(),
+    gameId: text('game_id')
+      .notNull()
+      .references(() => gameServers.id, { onDelete: 'cascade' }),
+    position: integer('position').notNull(),
+    /** restart | backup */
+    kind: text('kind').notNull(),
+    /** ISO weekdays 1..7 */
+    daysJson: text('days_json').notNull(),
+    /** HH:MM */
+    time: text('time').notNull(),
+    enabled: integer('enabled', { mode: 'boolean' }).notNull().default(true),
+    lastRunAt: integer('last_run_at'),
+    createdAt: integer('created_at').notNull(),
+  },
+  (t) => [index('game_schedules_game').on(t.gameId, t.position)],
+);
+
+/** Discord webhook per game; the URL is a secret (crypto.ts, AAD game_notify.discord:<id>). */
+export const gameNotify = sqliteTable('game_notify', {
+  gameId: text('game_id')
+    .primaryKey()
+    .references(() => gameServers.id, { onDelete: 'cascade' }),
+  webhookEnc: text('webhook_enc'),
+  eventsJson: text('events_json').notNull().default('[]'),
+  lastSentAt: integer('last_sent_at'),
+  /** Fixed German text, never the URL. */
+  lastError: text('last_error'),
+  updatedAt: integer('updated_at').notNull(),
+});
+
+/** One play session of a player name (from the status polls). */
+export const gamePlayerSessions = sqliteTable(
+  'game_player_sessions',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    gameId: text('game_id')
+      .notNull()
+      .references(() => gameServers.id, { onDelete: 'cascade' }),
+    player: text('player').notNull(),
+    startedAt: integer('started_at').notNull(),
+    lastSeen: integer('last_seen').notNull(),
+    endedAt: integer('ended_at'),
+  },
+  (t) => [
+    index('game_player_sessions_game').on(t.gameId, t.startedAt),
+    index('game_player_sessions_open').on(t.gameId, t.endedAt),
+  ],
+);
+
+/** Players online per game and UTC hour (sum over samples, peak). */
+export const gamePlayerHours = sqliteTable(
+  'game_player_hours',
+  {
+    gameId: text('game_id')
+      .notNull()
+      .references(() => gameServers.id, { onDelete: 'cascade' }),
+    hourTs: integer('hour_ts').notNull(),
+    samples: integer('samples').notNull(),
+    playersSum: integer('players_sum').notNull(),
+    peak: integer('peak').notNull(),
+    peakAt: integer('peak_at').notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.gameId, t.hourTs] }),
+    index('game_player_hours_ts').on(t.hourTs),
+  ],
+);
+
+/** Jars installed through the zentrale (Modrinth metadata). */
+export const gameMods = sqliteTable(
+  'game_mods',
+  {
+    gameId: text('game_id')
+      .notNull()
+      .references(() => gameServers.id, { onDelete: 'cascade' }),
+    fileName: text('file_name').notNull(),
+    projectId: text('project_id').notNull(),
+    title: text('title').notNull(),
+    installedAt: integer('installed_at').notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.gameId, t.fileName] })],
+);
+
+/** A friend's request to be put on the whitelist (share link with whitelist_request). */
+export const whitelistRequests = sqliteTable(
+  'whitelist_requests',
+  {
+    id: text('id').primaryKey(),
+    gameId: text('game_id')
+      .notNull()
+      .references(() => gameServers.id, { onDelete: 'cascade' }),
+    /** No foreign key: the request history stays when a link is deleted. */
+    shareId: text('share_id').notNull(),
+    person: text('person').notNull(),
+    player: text('player').notNull(),
+    /** pending | approved | rejected */
+    state: text('state').notNull(),
+    createdAt: integer('created_at').notNull(),
+    decidedAt: integer('decided_at'),
+  },
+  (t) => [
+    index('whitelist_requests_game').on(t.gameId, t.createdAt),
+    index('whitelist_requests_share').on(t.shareId, t.createdAt),
+  ],
+);
+
+export type GameScheduleRow = typeof gameSchedules.$inferSelect;
+export type GameNotifyRow = typeof gameNotify.$inferSelect;
+export type WhitelistRequestRow = typeof whitelistRequests.$inferSelect;

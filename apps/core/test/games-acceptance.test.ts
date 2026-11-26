@@ -156,7 +156,10 @@ describe('M6 acceptance: Minecraft Paper from the UI flow', () => {
       (await gameRequest(s, 'GET', `/api/games/${created.id}/backups`)).json(),
     ).backups;
     expect(backups).toHaveLength(1);
-    expect(backups[0]).toMatchObject({ fileName: 'survival-001.tar.zst', sizeBytes: 123_456 });
+    expect(backups[0]).toMatchObject({
+      fileName: 'survival-20261125-120001.tar.zst',
+      sizeBytes: 123_456,
+    });
     expect(s.t.app.hzCore.games.summary(created.id)?.lastBackupAt).toBe(backups[0]?.createdAt);
     const texts = s.t.app.hzCore.games.eventsOf(created.id).map((e) => `${e.kind}:${e.text}`);
     expect(texts).toEqual(
@@ -164,7 +167,7 @@ describe('M6 acceptance: Minecraft Paper from the UI flow', () => {
         'console:> list',
         'console:ran list',
         'progress:12,5 MiB geschrieben',
-        'progress:Backup erstellt: survival-001.tar.zst',
+        'progress:Backup erstellt: survival-20261125-120001.tar.zst',
       ]),
     );
     expect(texts.join('\n')).not.toContain('result ');
@@ -305,10 +308,12 @@ describe('games: status, actions, settings', () => {
   it('auto-stops a game after N minutes without players (info alert)', async () => {
     const s = await setup();
     s.behaviour.status = { ...ONLINE, players: { online: 0, max: 20, names: [] } };
-    const g = await readyGame(s, { autoStopMinutes: 2 });
+    // Without wake-on-connect (M12 default is on) the old behaviour: stopped, no listener.
+    const g = await readyGame(s, { autoStopMinutes: 2, wakeOnConnect: false });
     for (let i = 0; i < 4; i += 1) await tick(s, 30_000);
     await tick(s, 60_000);
     expect(rpcsOf(s, 'compose.down')).toHaveLength(1);
+    expect(rpcsOf(s, 'game.wake.arm')).toHaveLength(0);
     expect(s.t.app.hzCore.games.summary(g.id)?.statusText).toBe('Gestoppt');
     const a = s.t.app.hzCore.alerts.list({ state: 'all', limit: 50 });
     expect(a.find((x) => x.title === 'Gameserver survival automatisch gestoppt')).toMatchObject({
@@ -328,7 +333,7 @@ describe('games: status, actions, settings', () => {
     }
     const list = s.t.app.hzCore.games.backups(g.id);
     expect(list).toHaveLength(7);
-    expect(list[0]?.fileName).toBe('survival-009.tar.zst');
+    expect(list[0]?.fileName).toBe('survival-20261125-120009.tar.zst');
     expect(rpcsOf(s, 'game.backup')[0]?.params).toEqual({
       gameDir: '/opt/homelab/games/survival',
       keep: 7,

@@ -5,6 +5,8 @@ import { Link } from 'react-router';
 import { Alert, Button, StatusDot, Tile, Toggle } from '@hz/ui';
 import { Dialog } from '../../components/Dialog.js';
 import { Field } from '../../components/Field.js';
+import { SelectField } from '../../components/SelectField.js';
+import { NETWORK_OPTIONS, NETWORK_SHORT, parseNetwork } from '../../lib/gameFeatures.js';
 import { FormError } from '../../components/FormError.js';
 import { isApiError } from '../../lib/api.js';
 import { useServers } from '../../lib/data.js';
@@ -58,7 +60,9 @@ export function ServersSettingsTile(): ReactElement {
             <div className="hz-row-main">
               <span className="hz-row-name">{s.name}</span>
               <span className="hz-row-sub">
-                {s.location || 'kein Ort'} · Konsole {s.allowTerminal ? 'erlaubt' : 'aus'}
+                {s.location || 'kein Ort'}
+                {s.network ? ` · Netz ${NETWORK_SHORT[s.network]}` : ''} · Konsole{' '}
+                {s.allowTerminal ? 'erlaubt' : 'aus'}
               </span>
             </div>
             <div className="hz-row-actions">
@@ -188,6 +192,7 @@ function EditServerForm({
   const [draft, setDraft] = useState<ThresholdDraft>(() => thresholdDraft(detail.thresholds));
   const [errors, setErrors] = useState<Partial<Record<ThresholdKey, string>>>({});
   const [terminal, setTerminal] = useState(s.allowTerminal);
+  const [network, setNetwork] = useState<string>(s.network ?? '');
 
   const done = (next: ServerDetail): void => {
     qc.setQueryData(serverKey(s.id), next);
@@ -218,8 +223,10 @@ function EditServerForm({
     }
     setErrors({});
     const changed = changedThresholds(detail.thresholds, parsed.value);
+    const nextNetwork = parseNetwork(network);
     const body = {
       ...(location.trim() !== s.location ? { location: location.trim() } : {}),
+      ...(nextNetwork !== s.network ? { network: nextNetwork } : {}),
       ...(Object.keys(changed).length ? { thresholds: changed } : {}),
     };
     if (!Object.keys(body).length) {
@@ -254,6 +261,13 @@ function EditServerForm({
         onChange={(e) => setLocation(e.target.value)}
         placeholder="Zuhause"
         data-autofocus=""
+      />
+      <SelectField
+        label="Netz"
+        value={network}
+        onChange={(e) => setNetwork(e.target.value)}
+        options={[{ value: '', label: 'Nicht angegeben' }, ...NETWORK_OPTIONS]}
+        hint="Für den Hinweis zur Portweiterleitung bei Gameservern: Router oder Firewall des Anbieters."
       />
       <fieldset className="app-fieldset">
         <legend className="hz-label">Schwellen</legend>

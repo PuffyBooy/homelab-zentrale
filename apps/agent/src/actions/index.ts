@@ -22,6 +22,9 @@ import { gameBackup } from './game-backup.js';
 import { gameBackupsPurge } from './game-backups-purge.js';
 import { gameExport } from './game-export.js';
 import { gameImport } from './game-import.js';
+import { gameModsInstall, gameModsList, gameModsRemove } from './game-mods.js';
+import { gameRestore } from './game-restore.js';
+import { gameWakeArm, gameWakeDisarm } from './game-wake.js';
 import { gameRemove } from './game-remove.js';
 import { gameRcon, gameStatus } from './games.js';
 import { ptyClose, ptyInput, ptyOpen, ptyResize } from './pty.js';
@@ -68,6 +71,12 @@ export const handlers: ActionHandlers = {
   'pty.close': ptyClose,
   'game.export': (p, ctx, id) => gameExport(p, ctx, id),
   'game.import': (p, ctx, id) => gameImport(p, ctx, id),
+  'game.wake.arm': gameWakeArm,
+  'game.wake.disarm': gameWakeDisarm,
+  'game.mods.list': gameModsList,
+  'game.mods.install': gameModsInstall,
+  'game.mods.remove': gameModsRemove,
+  'game.restore': (p, ctx, id) => gameRestore(p, ctx, id),
 };
 
 export function hasGitSegment(p: unknown): boolean {

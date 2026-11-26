@@ -17,7 +17,7 @@ services:
       SERVER_PORT: ${PORT_GAME}
       SERVER_PUBLIC: ${SERVER_PUBLIC}
       BACKUPS: 'false'
-      TZ: Europe/Vienna
+      TZ: ${TZ}
     ports:
       - '${PORT_GAME}-${PORT_GAME_END}:${PORT_GAME}-${PORT_GAME_END}/udp'
     volumes:

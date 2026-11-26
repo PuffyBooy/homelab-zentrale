@@ -37,6 +37,8 @@ export interface GameServerProps {
   onCopy?: ((address: string) => void) | undefined;
   /** Footer buttons rendered as disabled (busy, not available yet). */
   disabledActions?: readonly GameServerAction[] | undefined;
+  /** Own text for the status tag, e.g. "Schläft" for a sleeping game (status off). */
+  statusLabel?: string | undefined;
 }
 
 /** 1:1 port of GameServer from design/reference/bundle.js, plus optional handlers. */
@@ -60,6 +62,7 @@ export function GameServer({
   onShare,
   onCopy,
   disabledActions,
+  statusLabel,
 }: GameServerProps): ReactElement {
   const pl = players || [0, 0];
   const off = (a: GameServerAction): true | undefined =>
@@ -71,7 +74,7 @@ export function GameServer({
           <Icon name="gamepad" size={12} />
           <span>{name}</span>
         </div>
-        <StatusDot status={status || 'ok'} />
+        <StatusDot status={status || 'ok'} label={statusLabel} />
       </header>
       <div className="hz-game-body">
         <div className="hz-game-top">

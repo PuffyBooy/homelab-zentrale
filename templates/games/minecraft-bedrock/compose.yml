@@ -20,7 +20,7 @@ services:
       LEVEL_SEED: ${LEVEL_SEED}
       ALLOW_LIST: ${ALLOW_LIST}
       ONLINE_MODE: ${ONLINE_MODE}
-      TZ: Europe/Vienna
+      TZ: ${TZ}
     ports:
       - '${PORT_GAME}:19132/udp'
     volumes:

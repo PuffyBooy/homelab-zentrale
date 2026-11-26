@@ -1,7 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import {
   controlsFor,
+  downloadErrorLine,
+  downloadName,
   errorLine,
+  formatBytes,
+  progressText,
   expiresText,
   failureOf,
   isConsoleResponse,
@@ -27,6 +31,7 @@ function status(
     person: 'Max',
     perms: ['power'],
     expiresAt: null,
+    whitelistRequests: [],
     ...over,
     game: {
       name: 'survival',
@@ -37,6 +42,7 @@ function status(
       address: 'mc.example.at:25565',
       players: { online: 2, max: 20, names: ['Lena', 'Tobi'] },
       whitelist: true,
+      sleeping: false,
       ...game,
     },
   };
@@ -64,6 +70,8 @@ describe('rights -> controls', () => {
       console: false,
       command: false,
       whitelist: false,
+      whitelistRequest: false,
+      worldDownload: false,
     });
     expect(controlsFor(status()).power).toBe('stop');
   });
@@ -187,6 +195,71 @@ describe('texts and data', () => {
     expect(isConsoleResponse({ lines: [{ id: '1', text: 'x', kind: 'out', ts: '' }] })).toBe(true);
     expect(isConsoleResponse({ lines: [{ id: '1', text: 'x', kind: 'html', ts: '' }] })).toBe(
       false,
+    );
+  });
+});
+
+describe('M12: sleep mode, world download, whitelist requests', () => {
+  it('says that a sleeping server wakes on start', () => {
+    const s = status({}, { status: 'off', statusText: 'Schläft', sleeping: true, players: null });
+    expect(statusLine(s.game)).toBe('Schläft – Starten weckt den Server');
+    expect(controlsFor(s).power).toBe('start');
+    expect(statusLine(status({}, { status: 'off', statusText: 'Gestoppt' }).game)).toBe('Gestoppt');
+  });
+
+  it('shows download and request only with their rights', () => {
+    const none = controlsFor(status());
+    expect(none.worldDownload).toBe(false);
+    expect(none.whitelistRequest).toBe(false);
+    const both = controlsFor(status({ perms: ['world_download', 'whitelist_request'] }));
+    expect(both.worldDownload).toBe(true);
+    expect(both.whitelistRequest).toBe(true);
+    // Editing the whitelist makes the request form pointless.
+    expect(
+      controlsFor(status({ perms: ['whitelist', 'whitelist_request'] })).whitelistRequest,
+    ).toBe(false);
+    // Not Minecraft: no whitelist at all.
+    expect(
+      controlsFor(status({ perms: ['whitelist_request'] }, { whitelist: false })).whitelistRequest,
+    ).toBe(false);
+  });
+
+  it('checks the new status fields', () => {
+    expect(isShareStatus(status({ perms: ['world_download', 'whitelist_request'] }))).toBe(true);
+    const withReq = status({
+      whitelistRequests: [
+        { player: 'Sam', state: 'pending', createdAt: '2026-11-26T20:00:00.000Z' },
+      ],
+    });
+    expect(isShareStatus(withReq)).toBe(true);
+    expect(
+      isShareStatus({
+        ...withReq,
+        whitelistRequests: [{ player: 'Sam', state: 'maybe', createdAt: 'x' }],
+      }),
+    ).toBe(false);
+    const noSleep: Record<string, unknown> = { ...status().game };
+    delete noSleep.sleeping;
+    expect(isShareStatus({ ...status(), game: noSleep })).toBe(false);
+  });
+
+  it('formats sizes and picks a safe file name', () => {
+    expect(formatBytes(0)).toBe('0 B');
+    expect(formatBytes(1.5 * 1024 ** 3)).toBe('1,5 GB');
+    expect(formatBytes(512 * 1024 ** 2)).toBe('512 MB');
+    expect(progressText(1024 ** 3, 2 * 1024 ** 3)).toBe('1 GB von 2 GB');
+    expect(downloadName('attachment; filename="survival-welt.tar.zst"', 'survival')).toBe(
+      'survival-welt.tar.zst',
+    );
+    expect(downloadName('attachment; filename="../../etc/passwd"', 'survival')).toBe(
+      'survival-welt.tar.zst',
+    );
+    expect(downloadName(null, 'my game')).toBe('mygame-welt.tar.zst');
+  });
+
+  it('explains the hourly limit', () => {
+    expect(downloadErrorLine({ status: 429, error: 'rate_limited', retryAfter: 1800 })).toBe(
+      'Die Welt geht nur 1× pro Stunde. Wieder möglich in 30 Min.',
     );
   });
 });
