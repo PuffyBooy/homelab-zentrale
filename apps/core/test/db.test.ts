@@ -38,6 +38,8 @@ const tables = [
   schema.deploys,
   schema.gameServers,
   schema.gameBackups,
+  schema.shareLinks,
+  schema.shareAudit,
 ];
 
 describe('database', () => {

@@ -3,6 +3,7 @@ import { useEffect, useState, type ReactElement } from 'react';
 import { GameServer } from '@hz/ui';
 import { FormError } from '../../components/FormError.js';
 import { disabledTileActions, gameTileProps } from '../../lib/games.js';
+import { ShareCreateDialog } from './ShareCreateDialog.js';
 import { gameErrorText, useGameAction } from './useGameAction.js';
 
 export interface GameTileProps {
@@ -13,11 +14,12 @@ export interface GameTileProps {
 
 /**
  * GameServer tile with the real actions. A click on the address copies it; screen
- * readers hear "Adresse kopiert". "Teilen" stays disabled until the share links (M7).
+ * readers hear "Adresse kopiert". "Teilen" opens "Link erstellen" (share links, M7).
  */
 export function GameTile({ game, onConsole }: GameTileProps): ReactElement {
   const act = useGameAction();
   const [copied, setCopied] = useState(false);
+  const [sharing, setSharing] = useState(false);
 
   useEffect(() => {
     if (!copied) return;
@@ -37,6 +39,7 @@ export function GameTile({ game, onConsole }: GameTileProps): ReactElement {
         onStop={() => act.mutate({ id: game.id, action: 'stop' })}
         onRestart={() => act.mutate({ id: game.id, action: 'restart' })}
         onConsole={onConsole}
+        onShare={() => setSharing(true)}
         onCopy={() => setCopied(true)}
         disabledActions={disabled}
       />
@@ -44,6 +47,7 @@ export function GameTile({ game, onConsole }: GameTileProps): ReactElement {
         {copied ? `Adresse ${game.address} kopiert` : ''}
       </span>
       {act.error ? <FormError title={gameErrorText(act.error)} /> : null}
+      {sharing ? <ShareCreateDialog game={game} onClose={() => setSharing(false)} /> : null}
     </>
   );
 }

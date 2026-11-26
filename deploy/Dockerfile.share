@@ -1,0 +1,46 @@
+# syntax=docker/dockerfile:1.7
+# Optional public share gateway (apps/share) for oracle-a1. Multi-arch (linux/amd64,
+# linux/arm64). Build context is the repo root:
+#   docker compose -f deploy/docker-compose.share.yml build
+#   docker buildx build --platform linux/amd64,linux/arm64 -f deploy/Dockerfile.share .
+# Runtime: only the compiled gateway, its production deps (@hz/shared, zod) and the
+# built mini UI in dist/ui. No npm, no corepack, runs as `node`, read-only friendly.
+
+FROM node:22-bookworm-slim AS base
+ENV PNPM_HOME=/pnpm PATH=/pnpm:$PATH CI=1
+RUN corepack enable
+WORKDIR /repo
+
+FROM base AS build
+COPY . .
+# Full install: the mini UI build may use workspace design files and dev tools.
+RUN --mount=type=cache,id=pnpm,target=/pnpm/store pnpm install --frozen-lockfile
+RUN pnpm --filter @hz/share... build \
+  && pnpm --filter @hz/share run --if-present build:ui \
+  && test -f apps/share/dist/index.js \
+  && test -f apps/share/dist/ui/index.html
+RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
+  pnpm --filter @hz/share --prod deploy --legacy /out \
+  && rm -rf /out/dist /out/src /out/test /out/ui \
+  && cp -r apps/share/dist /out/dist \
+  && find /out/dist -name '*.map' -delete
+
+FROM node:22-bookworm-slim AS runtime
+# HZ_SHARE_HOST stays at the default 127.0.0.1: Caddy on the same host (host network)
+# is the only client. A bare `docker run -p` never exposes it either.
+ENV NODE_ENV=production \
+    HZ_SHARE_PORT=8090 \
+    HZ_SHARE_UI_DIR=/app/dist/ui
+# The runtime never needs npm, corepack or yarn; removing them drops their dependency CVEs.
+RUN rm -rf /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/corepack \
+    /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/corepack /opt/yarn* \
+    /usr/local/bin/yarn /usr/local/bin/yarnpkg
+WORKDIR /app
+# Owned by root, read-only for the `node` user: the gateway never writes files.
+COPY --from=build /out /app
+USER node
+EXPOSE 8090
+# A well-formed share path always returns the page (the token is checked by the API only).
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+  CMD node -e "fetch('http://127.0.0.1:'+(process.env.HZ_SHARE_PORT||8090)+'/s/'+'h'.repeat(43)).then(r=>r.ok?process.exit(0):process.exit(1)).catch(()=>process.exit(1))"
+CMD ["node", "dist/index.js"]

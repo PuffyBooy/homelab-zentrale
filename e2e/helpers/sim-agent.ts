@@ -62,6 +62,8 @@ export interface SimAgentOptions {
   containers?: SimContainer[];
   /** Interval of followed log lines. */
   logEveryMs?: number;
+  /** Simulate game servers: compose.write, compose.down and game.status. */
+  games?: boolean;
 }
 
 type Msg = { type: string; [k: string]: unknown };
@@ -317,6 +319,7 @@ export class SimAgent {
       this.startLogs(id, params);
       return;
     }
+    if (this.o.games && this.answerGame(id, action, params)) return;
     if (action.startsWith('container.') || action.startsWith('compose.')) {
       if (!this.act(action, params)) {
         this.send({
@@ -356,6 +359,60 @@ export class SimAgent {
         error: { code: 'not_allowed', message: 'not simulated' },
       });
     }
+  }
+
+  /** Game server actions (only with `games`); false when the action is not one of them. */
+  private answerGame(id: string, action: string, params: Record<string, unknown>): boolean {
+    const dir = String(params.dir ?? params.gameDir ?? '');
+    const name = dir.split('/').pop() ?? 'game';
+    const list = this.containers.filter((c) => c.composeDir === dir);
+    if (action === 'compose.write') {
+      if (!list.length) {
+        this.containers.push({
+          dockerId: hexId(),
+          name: `game-${name}`,
+          image: 'itzg/minecraft-server:e2e',
+          imageId: imageId(),
+          composeProject: name,
+          composeService: 'server',
+          composeDir: dir,
+          state: 'created',
+          health: 'none',
+          statusText: 'Created',
+          ports: [],
+        });
+      }
+      this.sendInventory();
+      this.send({ type: 'rpc.result', id, ok: true, data: {} });
+      return true;
+    }
+    if (action === 'compose.down' && list.length) {
+      for (const c of list) {
+        this.endStreamsOf(c.dockerId);
+        c.state = 'exited';
+        c.exitCode = 0;
+        c.statusText = 'Exited (0) 1 second ago';
+      }
+      this.sendInventory();
+      this.send({ type: 'rpc.result', id, ok: true, data: {} });
+      return true;
+    }
+    if (action === 'game.status') {
+      const up = list.some((c) => c.state === 'running');
+      this.send({
+        type: 'rpc.result',
+        id,
+        ok: true,
+        data: {
+          online: up,
+          players: up ? { online: 1, max: 20, names: ['Lena'] } : null,
+          version: '1.21.4',
+          tps: up ? 19.9 : null,
+        },
+      });
+      return true;
+    }
+    return false;
   }
 
   private send(msg: object): void {

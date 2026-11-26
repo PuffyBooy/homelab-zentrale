@@ -88,3 +88,9 @@ jobs:
         run: >
           docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v trivy-cache:/root/.cache
           aquasec/trivy:0.65.0 image --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 hz-core:scan
+      - name: Build share gateway image
+        run: docker build -f deploy/Dockerfile.share -t hz-share:scan .
+      - name: Image scan (share gateway, public on oracle-a1)
+        run: >
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v trivy-cache:/root/.cache
+          aquasec/trivy:0.65.0 image --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 hz-share:scan

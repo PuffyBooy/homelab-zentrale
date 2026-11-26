@@ -119,3 +119,62 @@ Alles über die Docker-API am Socket, außer `compose.*`, das die Docker-CLI im 
 docker logs -f homelab-agent        # JSON-Zeilen, ohne Tokens
 pnpm exec tsx test/docker/agent-smoke.ts   # Core + Agent als Container, Enrollment, Container, Offline-Meldung
 ```
+
+## Share-Gateway auf oracle-a1
+
+Optional und standardmäßig aus. Ohne Gateway funktionieren Benutzerlinks nur im Tailnet (`https://heimserver.<tailnet>.ts.net/s/<token>`). Mit Gateway können Freunde ohne Tailscale einen einzelnen Gameserver über einen öffentlichen DDNS-Namen steuern. **Der Core bleibt dabei nicht öffentlich**: Öffentlich ist nur `oracle-a1` mit Caddy und dem kleinen Gateway (`apps/share`), das über Tailscale ausschließlich mit `/api/share-gateway/*` des Core spricht.
+
+```
+Freund ── HTTPS ──▶ Caddy (oracle-a1, :443) ──▶ Gateway 127.0.0.1:8090 ── Tailscale ──▶ Core /api/share-gateway/*
+```
+
+### Schritte
+
+1. **DDNS-Name**: kostenlos z. B. bei DuckDNS einen Namen anlegen (`spiel.example.duckdns.org`) und auf die öffentliche IPv4 von `oracle-a1` zeigen lassen.
+2. **Oracle Security List**: in der Oracle-Cloud-Konsole (VCN → Subnetz → Security List) eingehend TCP **80** und **443** von `0.0.0.0/0` erlauben. Port 80 braucht Caddy nur für das Let's-Encrypt-Zertifikat und die Weiterleitung auf HTTPS. Sonst nichts öffnen, vor allem nicht 8090.
+3. **iptables auf der VM** (Oracle-Ubuntu-Images blocken alles außer 22):
+   ```bash
+   sudo iptables -I INPUT 6 -m state --state NEW -p tcp --dport 80 -j ACCEPT
+   sudo iptables -I INPUT 6 -m state --state NEW -p tcp --dport 443 -j ACCEPT
+   sudo netfilter-persistent save
+   ```
+4. **Caddy installieren** (offizielles Paket, Debian/Ubuntu):
+   ```bash
+   sudo apt install -y debian-keyring debian-archive-keyring apt-transport-https curl
+   curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | sudo gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
+   curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | sudo tee /etc/apt/sources.list.d/caddy-stable.list
+   sudo apt update && sudo apt install -y caddy
+   ```
+   Dann `deploy/Caddyfile.share` nach `/etc/caddy/Caddyfile` kopieren, `spiel.example.duckdns.org` durch den eigenen Namen ersetzen und `sudo systemctl reload caddy`. Caddy leitet nur `/s/*` weiter, alles andere ist 404. Das Zugriffslog enthält keine URIs (dort stünde das Token).
+5. **Gateway-Token**: in der Zentrale unter Einstellungen → Share-Gateway „Token erzeugen“ (mit Step-up). Das Token wird nur einmal angezeigt; ein neues macht das alte sofort ungültig.
+6. **Umgebung** auf `oracle-a1` anlegen (nie ins Repo):
+   ```bash
+   sudo install -d -m 0700 /etc/homelab-share
+   sudo install -m 0600 /dev/null /etc/homelab-share/share.env
+   sudoedit /etc/homelab-share/share.env
+   ```
+   ```
+   HZ_SHARE_CORE_URL=https://heimserver.<tailnet>.ts.net
+   HZ_SHARE_GATEWAY_TOKEN=<Token aus Schritt 5>
+   ```
+   `HZ_SHARE_CORE_URL` ist die `ts.net`-Adresse des Core (dieselbe wie im Browser). Tailscale läuft auf `oracle-a1` bereits (für den Agent), dadurch ist der Core von dort erreichbar. Erlaubt sind nur `https://<name>.ts.net` und für Tests `http://127.0.0.1`.
+7. **Starten**, in einem Checkout dieses Repos auf `oracle-a1`:
+   ```bash
+   docker compose -f deploy/docker-compose.share.yml up -d --build
+   curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8090/s/$(printf 'a%.0s' $(seq 43))   # 200
+   ```
+8. **In der Zentrale einschalten**: Einstellungen → Share-Gateway, „Aktiv“ und die öffentliche Adresse `https://spiel.example.duckdns.org` eintragen. Erst dann nimmt der Core Anfragen des Gateways an, und neue Benutzerlinks bekommen zusätzlich den öffentlichen Link. Ausschalten sperrt das Gateway sofort.
+
+### Was das Gateway tut
+
+| Teil | Verhalten |
+| --- | --- |
+| Routen | `GET /s/<token>` (Seite, für jedes gültig geformte Token gleich), `GET /s/assets/<datei>` (nur Dateien aus dem UI-Build, beim Start in den Speicher geladen, feste MIME-Liste), `GET /s/api/status`, `POST /s/api/action`, `GET /s/api/console?after=`, `POST /s/api/console`, `POST /s/api/whitelist`. Alles andere ist 404, auch `/`, `/api` und `/admin`. |
+| Weiterleitung | An `<HZ_SHARE_CORE_URL>/api/share-gateway/<gleicher Name>` mit `Authorization: Bearer <Gateway-Token>`, dem Freundes-Token als `X-Share-Token`, der PIN als `X-Share-Pin` (genau 4 Ziffern) und der Client-IP als `X-Share-Client-Ip`. Andere Header (Cookies, Origin …) gehen nicht weiter. Bodys höchstens 4 KB, nur JSON, mit den Schemas aus `packages/shared` geprüft und neu serialisiert. Zeitlimit 10 s, keine Redirects. |
+| Antworten | Nur was den strikten Schemas entspricht (`packages/shared/src/api/share.ts`); zusätzliche Felder, unbekannte Statuscodes oder eine Tailscale-Adresse (`100.64.0.0/10`, `fd7a:115c:a1e0::/48`, `*.ts.net`) im Status ergeben 502 `{"ok":false,"error":"unavailable"}`. In Konsolen- und Befehlsausgaben (freier Spieltext) werden solche Adressen durch `[intern]` ersetzt. Header des Core werden nie weitergegeben. |
+| Rate-Limits | Pro IP (IPv6 pro /64) und Minute: **10** API-Anfragen (`/s/api/*`, auch unbekannte Pfade), **30** Konsolen-Abfragen (`GET /s/api/console`, die Seite fragt alle 3 s nach, das wären 20/min und würde die 10 sofort aufbrauchen), **120** Seiten- und Asset-Abrufe; insgesamt höchstens 600 API-Anfragen pro Minute. Danach 429 mit `Retry-After`. Die Tabellen sind auf 10 000 Einträge begrenzt. Die PIN-Sperre (5 Fehlversuche → 15 Min) macht der Core. |
+| Client-IP | Nur wenn die Verbindung von Loopback kommt (Caddy), gilt der **letzte** Eintrag von `X-Forwarded-For`; sonst die Socket-Adresse. |
+| Header | Strenge CSP (`default-src 'self'`, kein Inline-Script, `frame-ancestors 'none'`), HSTS, `nosniff`, `no-referrer`, `X-Robots-Tag: noindex`; HTML und API mit `no-store`. |
+| Logs | JSON-Zeilen auf stderr, nur Methode, Routenname (`/s/:token`), Status, Dauer, IP. Nie Tokens, PINs, Header oder die rohe URL. |
+
+Der Container läuft als `node`, mit schreibgeschütztem Dateisystem, `cap_drop: ALL`, `no-new-privileges`, im Host-Netz nur auf `127.0.0.1:8090`. Das Image (`deploy/Dockerfile.share`) gibt es für `linux/amd64` und `linux/arm64` (Oracle A1 ist ARM).

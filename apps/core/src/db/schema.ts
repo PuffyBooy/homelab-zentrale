@@ -496,3 +496,53 @@ export type DeployTargetRow = typeof deployTargets.$inferSelect;
 export type DeployRow = typeof deploys.$inferSelect;
 export type GameServerRow = typeof gameServers.$inferSelect;
 export type GameBackupRow = typeof gameBackups.$inferSelect;
+
+// ---- M7: share links -------------------------------------------------------------
+
+export const shareLinks = sqliteTable(
+  'share_links',
+  {
+    id: text('id').primaryKey(),
+    gameId: text('game_id')
+      .notNull()
+      .references(() => gameServers.id, { onDelete: 'cascade' }),
+    person: text('person').notNull(),
+    /** SHA-256 of `share:<token>`. The token itself is never stored. */
+    tokenHash: text('token_hash').notNull().unique(),
+    /** argon2id of the 4-digit PIN, or null. */
+    pinHash: text('pin_hash'),
+    /** SharePerm[] */
+    permsJson: text('perms_json').notNull(),
+    expiresAt: integer('expires_at'),
+    revokedAt: integer('revoked_at'),
+    lastUsedAt: integer('last_used_at'),
+    /** Wrong PINs in a row (reset by a right PIN or the end of a lock). */
+    pinFailures: integer('pin_failures').notNull().default(0),
+    lockedUntil: integer('locked_until'),
+    createdAt: integer('created_at').notNull(),
+  },
+  (t) => [index('share_links_game').on(t.gameId)],
+);
+
+export const shareAudit = sqliteTable(
+  'share_audit',
+  {
+    id: text('id').primaryKey(),
+    /** No foreign key: the history stays when a revoked link is deleted. */
+    shareId: text('share_id').notNull(),
+    gameId: text('game_id')
+      .notNull()
+      .references(() => gameServers.id, { onDelete: 'cascade' }),
+    person: text('person').notNull(),
+    action: text('action').notNull(),
+    detail: text('detail'),
+    ts: integer('ts').notNull(),
+    ip: text('ip'),
+    /** tailnet | gateway */
+    via: text('via').notNull(),
+  },
+  (t) => [index('share_audit_game_ts').on(t.gameId, t.ts), index('share_audit_ts').on(t.ts)],
+);
+
+export type ShareLinkRow = typeof shareLinks.$inferSelect;
+export type ShareAuditRow = typeof shareAudit.$inferSelect;

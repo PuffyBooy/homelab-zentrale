@@ -38,6 +38,8 @@ export const configSchema = z.object({
   // Game templates (templates/games/<id>/). Default: the repo's templates dir; the
   // Docker image sets it to the copy shipped in the image.
   HZ_GAME_TEMPLATES_DIR: optionalEnv(z.string().min(1).max(4096)),
+  // Built mini UI of the share page (apps/share). Default: apps/share/dist/ui of the repo.
+  HZ_SHARE_UI_DIR: optionalEnv(z.string().min(1).max(4096)),
   // Fixed setup token, only for automated tests (e2e). Rejected unless NODE_ENV=test.
   HZ_SETUP_TOKEN: z
     .string()
@@ -73,6 +75,8 @@ export interface Config {
   agentImage: string;
   /** templates/games directory; undefined = the repo default (app.ts). */
   gameTemplatesDir: string | undefined;
+  /** Share page UI directory; undefined = the repo default (app.ts). */
+  shareUiDir: string | undefined;
   env: 'development' | 'production' | 'test';
   /** Only set with NODE_ENV=test. */
   setupToken: string | undefined;
@@ -120,6 +124,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     demo: c.HZ_DEMO,
     agentImage: c.HZ_AGENT_IMAGE,
     gameTemplatesDir: c.HZ_GAME_TEMPLATES_DIR,
+    shareUiDir: c.HZ_SHARE_UI_DIR,
     env: c.NODE_ENV,
     setupToken: c.HZ_SETUP_TOKEN,
     vapid:

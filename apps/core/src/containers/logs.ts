@@ -64,6 +64,10 @@ function cut(text: string): string {
  */
 export class ContainerLogs {
   private readonly topics = new Map<string, Topic>();
+  /** Topics with live subscribers (open/close from the live hub). */
+  private readonly liveOpen = new Set<string>();
+  /** Topics kept running for the share console: until (core clock). */
+  private readonly leases = new Map<string, number>();
   private publisher: LogPublisher | null = null;
   private fallback: ((containerId: string) => string[] | null) | null = null;
 
@@ -103,6 +107,31 @@ export class ContainerLogs {
 
   /** First subscriber: start the stream. */
   open(topic: string): void {
+    this.liveOpen.add(topic);
+    this.ensure(topic);
+  }
+
+  /**
+   * Keeps the stream of `topic` running for `ms` without a live subscriber
+   * (share console polling). Renewed by every call; `expireLeases` ends it.
+   */
+  lease(topic: string, ms: number): void {
+    if (!this.has(topic)) return;
+    this.leases.set(topic, this.deps.now() + ms);
+    this.ensure(topic);
+  }
+
+  /** Ends streams whose lease ran out and that no live subscriber watches. */
+  expireLeases(): void {
+    const now = this.deps.now();
+    for (const [topic, until] of this.leases) {
+      if (until > now) continue;
+      this.leases.delete(topic);
+      if (!this.liveOpen.has(topic)) this.stop(topic);
+    }
+  }
+
+  private ensure(topic: string): void {
     if (this.topics.has(topic)) return;
     const id = TOPIC_RE.exec(topic)?.[1];
     if (!id) return;
@@ -120,8 +149,14 @@ export class ContainerLogs {
     this.start(topic, t, LOG_TAIL);
   }
 
-  /** Last subscriber left: cancel the stream and forget the lines. */
+  /** Last subscriber left: cancel the stream and forget the lines (unless leased). */
   close(topic: string): void {
+    this.liveOpen.delete(topic);
+    if (this.leases.has(topic)) return;
+    this.stop(topic);
+  }
+
+  private stop(topic: string): void {
     const t = this.topics.get(topic);
     if (!t) return;
     this.topics.delete(topic);
@@ -131,7 +166,9 @@ export class ContainerLogs {
   }
 
   closeAll(): void {
-    for (const topic of [...this.topics.keys()]) this.close(topic);
+    this.leases.clear();
+    this.liveOpen.clear();
+    for (const topic of [...this.topics.keys()]) this.stop(topic);
   }
 
   snapshot(topic: string): LogSnapshot | undefined {

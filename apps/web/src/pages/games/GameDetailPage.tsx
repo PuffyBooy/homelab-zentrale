@@ -23,6 +23,7 @@ import { DeleteGameDialog } from './DeleteGameDialog.js';
 import { ForwardHint } from './ForwardHint.js';
 import { GameTile } from './GameTile.js';
 import { SettingsTile } from './SettingsTile.js';
+import { ShareAuditTile, ShareLinksTile } from './ShareLinksTile.js';
 import { SetupTile } from './SetupTile.js';
 
 const SETUP_PARAM = 'setup';
@@ -139,6 +140,8 @@ function Detail({ game }: { game: GameSummary }): ReactElement {
       <div className="hz-span-4 app-anchor" id="konsole" ref={consoleAnchor}>
         <ConsoleTile ref={consoleInput} game={game} events={list} />
       </div>
+      <ShareLinksTile game={game} now={now} />
+      <ShareAuditTile game={game} now={now} />
       <BackupsTile game={game} now={now} />
       <SettingsTile game={game} tpl={tpl} />
       <Tile title="Von außen erreichbar" icon="globe" span={2}>

@@ -1002,7 +1002,8 @@ export class GameService {
   async action(
     id: string,
     action: 'start' | 'stop' | 'restart' | 'backup',
-    actor: 'admin' | 'system' = 'admin',
+    /** `admin`, `system` or `share:<id>` (a friend's link). */
+    actor: 'admin' | 'system' | `share:${string}` = 'admin',
   ): Promise<GameSummary> {
     const row = this.requireRow(id);
     if (action === 'backup') {
@@ -1219,6 +1220,42 @@ export class GameService {
     this.event(id, 'console', `> ${command}`);
     this.event(id, 'console', output);
     return output;
+  }
+
+  // ---- share links (M7) -------------------------------------------------------------
+
+  /** Id of the game's container in the core (for its log topic), or null. */
+  containerIdOf(id: string): string | null {
+    const row = this.row(id);
+    return row ? (this.containerOf(row)?.id ?? null) : null;
+  }
+
+  /** Removes the game's secrets from text shown to someone else (share console). */
+  scrubFor(id: string, text: string): string {
+    const row = this.row(id);
+    return row ? scrub(text, this.secretsOf(row)) : text;
+  }
+
+  /** Whether the template speaks RCON and the game has a password. */
+  hasRcon(id: string): boolean {
+    const row = this.row(id);
+    if (!row || row.rconSecretEnc === null) return false;
+    return this.templates.get(row.templateId)?.template.rcon.supported ?? true;
+  }
+
+  /**
+   * Game events with sequence >= `from` (console and error lines only), for the
+   * share console. Event ids are the sequence numbers.
+   */
+  consoleEvents(id: string, from: number): GameEvent[] {
+    return (this.events.get(id) ?? []).filter(
+      (e) => (e.kind === 'console' || e.kind === 'error') && Number(e.id) >= from,
+    );
+  }
+
+  /** Next event sequence number of the game (cursor for the share console). */
+  nextEventSeq(id: string): number {
+    return this.seq.get(id) ?? 0;
   }
 
   // ---- settings ---------------------------------------------------------------------------

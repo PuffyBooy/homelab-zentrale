@@ -7,7 +7,16 @@
   "scripts": {
     "dev": "tsx watch --conditions=@hz/source src/index.ts",
     "start": "node dist/index.js",
-    "typecheck": "tsc -p tsconfig.json",
-    "build": "tsc -p tsconfig.build.json"
+    "typecheck": "tsc -p tsconfig.json && tsc -p ui/tsconfig.json && tsc -p ui/tsconfig.vite.json",
+    "build": "tsc -p tsconfig.build.json && vite build",
+    "build:ui": "vite build",
+    "dev:ui": "vite"
+  },
+  "devDependencies": {
+    "vite": "^8.3.8"
+  },
+  "dependencies": {
+    "@hz/shared": "workspace:*",
+    "zod": "^4.6.7"
   }
 }
