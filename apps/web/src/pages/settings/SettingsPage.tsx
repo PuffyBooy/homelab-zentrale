@@ -17,6 +17,7 @@ import { errorText } from '../../lib/errors.js';
 import { describeUserAgent, formatAgo, formatDateTime, formatTime } from '../../lib/format.js';
 import { useAuthState } from '../../lib/useAuthState.js';
 import { GithubTile } from './GithubTiles.js';
+import { HaEntitiesTile, HaSettingsTile } from './HaTiles.js';
 import { NotifyTile, PushTile } from './PushTiles.js';
 import { ShareGatewayTile } from './ShareGatewayTile.js';
 
@@ -30,6 +31,8 @@ export function SettingsPage(): ReactElement {
       <NotifyTile />
       <GithubTile />
       <ShareGatewayTile />
+      <HaSettingsTile />
+      <HaEntitiesTile />
     </div>
   );
 }

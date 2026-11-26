@@ -9,6 +9,7 @@ import { GameCreatePage } from '../pages/games/GameCreatePage.js';
 import { GameDetailPage } from '../pages/games/GameDetailPage.js';
 import { GamesPage } from '../pages/games/GamesPage.js';
 import { GithubPage } from '../pages/github/GithubPage.js';
+import { HomePage } from '../pages/home/HomePage.js';
 import { RepoDetailPage } from '../pages/github/RepoDetailPage.js';
 import { LoginPage } from '../pages/login/LoginPage.js';
 import { OverviewPage } from '../pages/overview/OverviewPage.js';
@@ -34,6 +35,7 @@ const BUILT = new Set([
   '/games',
   '/github',
   '/websites',
+  '/home',
   '/alerts',
 ]);
 
@@ -85,6 +87,7 @@ export function AppRoutes(): ReactElement {
         <Route path="github/:id" element={<RepoDetailPage />} />
         <Route path="websites" element={<WebsitesPage />} />
         <Route path="websites/:id" element={<CheckDetailPage />} />
+        <Route path="home" element={<HomePage />} />
         <Route path="alerts" element={<AlertsPage />} />
         {navItems
           .filter((it) => it.href && !BUILT.has(it.href))

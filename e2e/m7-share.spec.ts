@@ -68,13 +68,14 @@ async function themes(p: Page, name: string, fullPage = true): Promise<void> {
 }
 
 async function gameStatus(): Promise<string> {
+  const t0 = Date.now();
   const res = await apiCall<{ games: { id: string; status: string; statusText: string }[] }>(
     'GET',
     '/api/games',
   );
   const g = res.data.games.find((x) => x.id === gameId);
   if (g && g.status !== 'ok' && g.status !== 'off')
-    console.warn(`game ${g.status}: ${g.statusText}`);
+    console.warn(`game ${g?.status ?? 'missing'}: ${g?.statusText ?? ''} (${Date.now() - t0} ms)`);
   return g?.status ?? 'missing';
 }
 

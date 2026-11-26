@@ -3,6 +3,7 @@ import type {
   CheckSummary,
   ContainerSummary,
   GameSummary,
+  HaState,
   RepoSummary,
   ServerSummary,
 } from '@hz/shared';
@@ -10,6 +11,7 @@ import { checkMatchesServer, checkSentence, checksSentence, KIND_LABEL } from '.
 import { containerSentence, containerStateText } from '../lib/containers.js';
 import { formatTime, plural } from '../lib/format.js';
 import { gameSentence, gamesSentence, isGameRunning, playersOnline } from '../lib/games.js';
+import { STATUS_TEXT, groupByRoom, haSentence } from '../lib/ha.js';
 import { githubSentence, repoOnServer, repoSentence } from '../lib/github.js';
 import type { LiveState } from '../lib/live.js';
 import {
@@ -39,6 +41,8 @@ export interface PageData {
   repos?: RepoSummary[] | undefined;
   /** Only read on the game server pages. */
   games?: GameSummary[] | undefined;
+  /** Only read on the Wohnung page. */
+  ha?: HaState | undefined;
   /** Server filter from the ServerSwitch, or the id of the detail page. */
   filter?: string | undefined;
   live?: LiveState | undefined;
@@ -90,6 +94,11 @@ export function gameDetailId(pathname: string): string | null {
 /** Pages that read the game list in the shell header. */
 export function needsGames(pathname: string): boolean {
   return pathname === '/games' || pathname === '/games/new' || gameDetailId(pathname) !== null;
+}
+
+/** Pages that read the Home Assistant state in the shell header. */
+export function needsHa(pathname: string): boolean {
+  return pathname === '/home';
 }
 
 /** Pages that read the repo list in the shell header. */
@@ -247,10 +256,21 @@ export function pageMeta(pathname: string, data: PageData = {}): PageMeta {
     };
   }
 
+  if (pathname === '/home') {
+    if (data.ha === undefined)
+      return { title: plain('Wohnung'), sub: 'lädt …', serverSwitch: false };
+    const rooms = groupByRoom(data.ha).length;
+    const parts = ['Wohnung', `Home Assistant ${STATUS_TEXT[data.ha.status]}`];
+    if (data.ha.status !== 'off') parts.push(plural(rooms, 'Raum', 'Räume'));
+    if (data.ha.status === 'connected')
+      parts.push(`live · ${formatTime(new Date(data.ha.updatedAt))}`);
+    return { title: haSentence(data.ha), sub: parts.join(' · '), serverSwitch: false };
+  }
+
   if (pathname === settingsItem.href) {
     return {
       title: plain('Einstellungen'),
-      sub: 'Konto, Sitzungen, Push und GitHub',
+      sub: 'Konto, Sitzungen, Push, GitHub und Home Assistant',
       serverSwitch: false,
     };
   }

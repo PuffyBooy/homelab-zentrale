@@ -145,16 +145,19 @@ export function installAuthGuard(
   });
 }
 
+/** True if the session has a valid step-up (fresh TOTP within the last 15 min). */
+export function hasStepUp(request: FastifyRequest, now: Clock): boolean {
+  const until = request.auth?.session.stepUpUntil ?? null;
+  return request.auth !== null && until !== null && until > now();
+}
+
 /** preHandler for routes that need a fresh TOTP (docs/SECURITY.md, step-up). */
 export function requireStepUp(now: Clock) {
   return async (
     request: FastifyRequest,
     reply: FastifyReply,
   ): Promise<FastifyReply | undefined> => {
-    const until = request.auth?.session.stepUpUntil ?? null;
-    if (!request.auth || until === null || until <= now()) {
-      return sendError(reply, 403, 'step_up_required');
-    }
+    if (!hasStepUp(request, now)) return sendError(reply, 403, 'step_up_required');
     return undefined;
   };
 }

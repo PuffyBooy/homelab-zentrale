@@ -136,6 +136,8 @@ export const errorCodeSchema = z.enum([
   'ci_not_green',
   /** GitHub could not be reached or refused the request (502); details in /api/github/settings. */
   'github_error',
+  /** Home Assistant is not connected or refused/timed out the service call (502). */
+  'ha_error',
 ]);
 export type ErrorCode = z.infer<typeof errorCodeSchema>;
 export const errorResponseSchema = z.strictObject({

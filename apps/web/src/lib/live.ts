@@ -4,6 +4,7 @@ import {
   checkSummarySchema,
   containerSummarySchema,
   gameSummarySchema,
+  haStateSchema,
   logLineSchema,
   logSnapshotSchema,
   liveServerMessageSchema,
@@ -15,6 +16,7 @@ import {
   type CheckSummary,
   type ContainerSummary,
   type GameSummary,
+  type HaState,
   type LiveServerMessage,
   type LogLine,
   type RepoSummary,
@@ -55,6 +57,7 @@ import {
   gameSnapshotToBuffer,
   type GameEventBuffer,
 } from './games.js';
+import { haStateKey } from './ha.js';
 import {
   appendLogLines,
   containerLogsKey,
@@ -244,6 +247,16 @@ export function applyLiveMessage(qc: QueryClient, msg: LiveServerMessage): Apply
         void qc.invalidateQueries({ queryKey: backupsKey(g.id) });
       }
     }
+    return result;
+  }
+
+  if (topic === 'ha') {
+    // Single-object topic like server:<id>: the snapshot and every upsert is one HaState.
+    const payload = msg.type === 'snapshot' ? msg.data : msg.upsert?.[msg.upsert.length - 1];
+    if (payload === undefined) return result;
+    const parsed = haStateSchema.safeParse(payload);
+    if (parsed.success) qc.setQueryData<HaState>(haStateKey, parsed.data);
+    else void qc.invalidateQueries({ queryKey: haStateKey, exact: true });
     return result;
   }
 

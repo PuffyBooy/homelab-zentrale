@@ -14,8 +14,9 @@ Alles hier braucht deine Zugänge oder ist nicht rückgängig zu machen. Bis dah
 6. **Agent neu ausrollen (ab M3, erneut ab M6):** Auf Servern, die schon einen Agent haben, `deploy/install-agent.sh` erneut ausführen (neues Image mit `ping`, Schutz-Label `hz.role`, ab M6 `tar`/`zstd` für Gameserver-Backups). Valheim und CS2 gibt es nur für amd64, also nicht auf dem Raspberry Pi und der Oracle-ARM-VM.
 7. **Gameserver für Freunde erreichbar machen (ab M6):** Die Zentrale zeigt pro Gameserver, welche Ports weitergeleitet werden müssen. Das machst du selbst: am Heimserver im Deco-Router (Portweiterleitung auf die feste LAN-IP des Heimservers), bei Oracle in der Security List der VM *und* in iptables auf der VM. Für eine schöne Adresse (z. B. `mc.<deine-domain>`) einen DNS-/DDNS-Eintrag anlegen und im Gameserver unter Einstellungen als externe Adresse eintragen. Die Zentrale selbst bleibt dabei nur über Tailscale erreichbar.
 8. **Share-Gateway (optional, ab M7):** Nur wenn Freunde ohne Tailscale Links nutzen sollen. Anleitung in `deploy/README.md` → „Share-Gateway auf oracle-a1“: DDNS-Namen anlegen, in der Oracle Security List und in iptables 80/443 öffnen, Caddy installieren, in der Zentrale unter Einstellungen → Share-Gateway einen Token erzeugen und auf oracle-a1 in `/etc/homelab-share/share.env` eintragen, dann einschalten. Ohne Gateway funktionieren Links nur im Tailnet (sicherer Standard). Die Zentrale selbst bleibt dabei nie öffentlich.
+9. **Home Assistant verbinden (ab M8):** In HA unter Profil → Sicherheit einen Long-Lived Access Token anlegen. In der Zentrale unter Einstellungen → Home Assistant die URL (z. B. `http://<heimserver-LAN-IP>:8123`) und den Token eintragen (fragt nach dem TOTP-Code), dann unter „Wohnung: Räume und Geräte“ Räume anlegen und Geräte auswählen. Türöffner (BTicino/Shelly) als Art „Taster“ eintragen. Strompreis €/kWh und die Sensoren für Leistung (W) und Energie (kWh) wählen.
 
-**Noch von Hand abzunehmen** (braucht echte Zugänge): Push am Handy (M4); ein echter Deploy eines Test-Repos mit `compose.yml` auf den Heimserver-Agent (M5, automatisiert nur mit Fake-GitHub, Fake-Agent und echtem git gegen ein lokales Repo getestet).
+**Noch von Hand abzunehmen** (braucht echte Zugänge): Push am Handy (M4); ein echter Deploy eines Test-Repos mit `compose.yml` auf den Heimserver-Agent (M5, automatisiert nur mit Fake-GitHub, Fake-Agent und echtem git gegen ein lokales Repo getestet). Der echte Türöffner (BTicino/Shelly) mit deiner HA (M8, im CI nur mit der HA-Demo getestet). Benutzerlink von außen über das Gateway auf oracle-a1 (M7, im CI nur lokal getestet).
 
 ## Offene Fragen
 
@@ -32,6 +33,7 @@ Alles hier braucht deine Zugänge oder ist nicht rückgängig zu machen. Bis dah
 - **Backups beim Löschen:** Vor dem Löschen eines Gameservers wird immer gesichert; die Backup-Dateien bleiben unter `/opt/homelab/backups/` am Server liegen, auch wenn der Eintrag weg ist. Sollen sie nach X Tagen automatisch weg?
 - **Step-up für Benutzerlinks?** Links erstellen und widerrufen braucht derzeit keine erneute TOTP-Eingabe (SECURITY.md nennt es nicht); Gateway-Einstellungen und Gateway-Token schon. Soll auch das Erstellen eines Links Step-up brauchen?
 - **Neustart-Recht allein:** Ein Link nur mit „Neustart“ darf einen gestoppten Server nicht starten (sonst wäre es heimlich „Starten“). Passt das?
+- **Türöffner mit Step-up:** Tür öffnen fragt nach der Bestätigung zusätzlich nach dem TOTP-Code (gilt 15 Min), damit ein gestohlenes Session-Cookie die Haustür nicht öffnen kann. Zu umständlich?
 - **Level für Updates/Neustart nötig:** derzeit `warn` (wie SPEC 5.1). Mit Push ab M4 wären das gesammelte Pushes alle 30 Min. Lieber `info` (kein Push)?
 
 ## Annahmen

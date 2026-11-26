@@ -4,6 +4,7 @@ import { checkSummarySchema } from './api/checks.js';
 import { containerSummarySchema } from './api/containers.js';
 import { gameSummarySchema } from './api/games.js';
 import { repoSummarySchema } from './api/github.js';
+import { haStateSchema } from './api/ha.js';
 import { serverDetailSchema, serverSummarySchema } from './api/servers.js';
 
 /**
@@ -59,6 +60,12 @@ export const liveTopicItemSchemas = {
  * server is deleted, the update is `remove: [<id>]`.
  */
 export const liveServerTopicItemSchema = serverDetailSchema;
+
+/**
+ * Topic `ha`: like `server:<id>`, the snapshot `data` is one HaState (not a
+ * list) and every update carries the full new state as the only `upsert` item.
+ */
+export const liveHaTopicItemSchema = haStateSchema;
 
 /** Close codes of the live socket. */
 export const LIVE_CLOSE_SESSION_ENDED = 4001;

@@ -10,3 +10,4 @@ export * from './api/push.js';
 export * from './api/github.js';
 export * from './api/games.js';
 export * from './api/share.js';
+export * from './api/ha.js';

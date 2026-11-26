@@ -32,6 +32,9 @@ import type { FetchLike as GithubFetch } from './github/client.js';
 import { gameRoutes } from './games/routes.js';
 import { GameService } from './games/service.js';
 import { loadTemplates } from './games/templates.js';
+import type { HaClientOptions } from './homeassistant/client.js';
+import { haRoutes } from './homeassistant/routes.js';
+import { HaService } from './homeassistant/service.js';
 import { errorHandler, sendError } from './http/errors.js';
 import { LiveHub, type LiveOptions } from './live/hub.js';
 import { liveRoutes } from './live/routes.js';
@@ -80,6 +83,8 @@ export interface AppDeps {
   /** GitHub API transport and base URL (tests: a fake GitHub). */
   githubFetch?: GithubFetch;
   githubBaseUrl?: string;
+  /** Home Assistant client timers (tests: short backoff and heartbeat). */
+  haOptions?: HaClientOptions;
 }
 
 /** Core services, decorated on the app as `hzCore` (routes, tests). */
@@ -99,6 +104,7 @@ export interface CoreServices {
   github: GithubService;
   games: GameService;
   shares: ShareService;
+  ha: HaService;
   db: DbHandle;
 }
 
@@ -141,6 +147,7 @@ const REDACT = [
     'subscription',
     'keys',
     'pin',
+    'access_token',
   ].flatMap((k) => [k, `*.${k}`, `body.${k}`, `req.body.${k}`]),
 ];
 
@@ -420,6 +427,23 @@ export async function buildApp(config: Config, deps: AppDeps = {}): Promise<Fast
     log: app.log.child({ mod: 'share' }),
   });
 
+  // ---- M8: Home Assistant -------------------------------------------------------
+  const ha = new HaService({
+    db: db.db,
+    box,
+    now,
+    alerts,
+    log: app.log.child({ mod: 'ha' }),
+    ...(deps.haOptions ? { options: deps.haOptions } : {}),
+  });
+  // Topic `ha`: the snapshot is one HaState, every update the full new state.
+  live.addProvider({
+    matches: (topic) => topic === 'ha',
+    snapshot: () => ha.state(),
+    item: () => ha.state(),
+  });
+  ha.onChange(() => live.mark('ha', 'ha', 'upsert'));
+
   app.decorate('hzCore', {
     scheduler,
     tokens,
@@ -436,6 +460,7 @@ export async function buildApp(config: Config, deps: AppDeps = {}): Promise<Fast
     github,
     games,
     shares,
+    ha,
     db,
   });
 
@@ -453,6 +478,7 @@ export async function buildApp(config: Config, deps: AppDeps = {}): Promise<Fast
   checks.start();
   github.start();
   games.start();
+  scheduler.every('ha.tick', 1_000, () => ha.tick());
   scheduler.every('push.warnBundle', 60_000, () => notifier.flush());
   scheduler.at('report.weekly', nextWeeklyReport, () => {
     if (!readNotifySettings(db.db).weeklyReport) return;
@@ -476,6 +502,7 @@ export async function buildApp(config: Config, deps: AppDeps = {}): Promise<Fast
     metrics.rollup5m(48 * HOUR);
     metrics.rollup1h(30 * DAY);
     if (deps.startScheduler !== false) scheduler.start();
+    ha.start();
   });
   app.addHook('preClose', async () => {
     scheduler.stop();
@@ -484,6 +511,7 @@ export async function buildApp(config: Config, deps: AppDeps = {}): Promise<Fast
       Promise.all([checks.idle(), push.idle(), github.idle(), games.idle()]),
       new Promise((r) => setTimeout(r, 3_000).unref()),
     ]);
+    ha.stop();
     github.deployer.shutdown();
     hub.shutdown();
     live.closeAll();
@@ -520,6 +548,7 @@ export async function buildApp(config: Config, deps: AppDeps = {}): Promise<Fast
     shares,
     baseUrl: config.baseUrl,
   });
+  await app.register(haRoutes, { prefix: '/api', db: db.db, now, ha });
   await app.register(shareGatewayRoutes, { prefix: '/api/share-gateway', shares, now });
   await app.register(shareTailnetRoutes, {
     prefix: '/s',
