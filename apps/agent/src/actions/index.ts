@@ -18,6 +18,7 @@ import { containerLogs } from './logs.js';
 import { deployRun } from './deploy.js';
 import { deployKey } from './deploy-key.js';
 import { gameBackup } from './game-backup.js';
+import { gameBackupsPurge } from './game-backups-purge.js';
 import { gameRemove } from './game-remove.js';
 import { gameRcon, gameStatus } from './games.js';
 import { ptyClose, ptyInput, ptyOpen, ptyResize } from './pty.js';
@@ -46,6 +47,7 @@ export const handlers: ActionHandlers = {
   'compose.write': composeWrite,
   'game.rcon': gameRcon,
   'game.backup': (p, ctx, id) => gameBackup(p, ctx, id),
+  'game.backups.purge': (p, ctx) => gameBackupsPurge(p, ctx),
   'game.status': gameStatus,
   'game.remove': gameRemove,
   'deploy.run': deployRun,

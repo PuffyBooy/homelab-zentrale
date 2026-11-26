@@ -15,6 +15,8 @@ import {
   useServers,
 } from '../lib/data.js';
 import { interceptLinks } from '../lib/links.js';
+import { visibleNavItems } from '../lib/modules.js';
+import { useModules } from '../lib/useModules.js';
 import { LiveClient, LiveProvider, useLiveState, useLiveTopic } from '../lib/live.js';
 import { ALL_SERVERS, sentenceText, switchEntries } from '../lib/servers.js';
 import { EnrollProvider } from '../pages/servers/enroll.js';
@@ -58,6 +60,8 @@ function ShellBody(): ReactElement {
   const navigate = useNavigate();
   const [paletteOpen, setPaletteOpen] = useState(false);
   const active = activeNavId(pathname);
+  const modules = useModules();
+  const visible = useMemo(() => visibleNavItems(navItems, modules), [modules]);
 
   useLiveTopic('servers');
   useLiveTopic('alerts');
@@ -66,9 +70,9 @@ function ShellBody(): ReactElement {
   const alerts = useActiveAlerts();
   const containers = useContainers(needsContainers(pathname));
   const checks = useChecks(needsChecks(pathname));
-  const repos = useRepos(needsRepos(pathname));
-  const games = useGames(needsGames(pathname));
-  const ha = useHaState(needsHa(pathname));
+  const repos = useRepos(needsRepos(pathname) && modules.github);
+  const games = useGames(needsGames(pathname) && modules.games);
+  const ha = useHaState(needsHa(pathname) && modules.homeassistant);
   const [filter, setFilter] = useServerFilter();
   const detailId = serverDetailId(pathname);
 
@@ -82,14 +86,15 @@ function ShellBody(): ReactElement {
     ha: ha.data,
     filter: detailId ?? filter,
     live,
+    modules,
     updatedAt: servers.dataUpdatedAt ? new Date(servers.dataUpdatedAt) : null,
   });
   const title = sentenceText(meta.title);
 
   const items = useMemo(() => {
     const open = openCount(alerts.data ?? []);
-    return navItems.map((it) => (it.id === 'alerts' && open ? { ...it, count: open } : it));
-  }, [alerts.data]);
+    return visible.map((it) => (it.id === 'alerts' && open ? { ...it, count: open } : it));
+  }, [alerts.data, visible]);
 
   const go = useCallback((to: string) => void navigate(to), [navigate]);
 
@@ -109,13 +114,16 @@ function ShellBody(): ReactElement {
     function onKey(e: KeyboardEvent): void {
       // The web console gets every key (Ctrl+K is "kill line" in the shell).
       if (e.target instanceof Element && e.target.closest('[data-hz-terminal]')) return;
-      const action = shortcutAction({
-        key: e.key,
-        ctrlKey: e.ctrlKey,
-        metaKey: e.metaKey,
-        altKey: e.altKey,
-        target: e.target instanceof HTMLElement ? e.target : null,
-      });
+      const action = shortcutAction(
+        {
+          key: e.key,
+          ctrlKey: e.ctrlKey,
+          metaKey: e.metaKey,
+          altKey: e.altKey,
+          target: e.target instanceof HTMLElement ? e.target : null,
+        },
+        visible,
+      );
       if (!action) return;
       if (action.kind === 'palette') {
         e.preventDefault();
@@ -129,7 +137,7 @@ function ShellBody(): ReactElement {
     }
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [go]);
+  }, [go, visible]);
 
   useEffect(() => {
     document.title = `${title} · Homelab-Zentrale`;
@@ -180,8 +188,18 @@ function ShellBody(): ReactElement {
         </header>
         <Outlet />
       </main>
-      <BottomBar active={active} onNavigate={go} onSearch={() => setPaletteOpen(true)} />
-      <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} onRun={go} />
+      <BottomBar
+        items={visible}
+        active={active}
+        onNavigate={go}
+        onSearch={() => setPaletteOpen(true)}
+      />
+      <CommandPalette
+        open={paletteOpen}
+        onClose={() => setPaletteOpen(false)}
+        onRun={go}
+        modules={modules}
+      />
       <AlertToasts onOpen={go} />
     </div>
   );

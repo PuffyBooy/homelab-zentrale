@@ -14,6 +14,7 @@ import {
   formatWhen,
   plural,
   retryMinutes,
+  setDisplayTimeZone,
 } from './format.js';
 
 describe('format', () => {
@@ -86,5 +87,24 @@ describe('format', () => {
   it('pluralises', () => {
     expect(plural(1, 'Problem', 'Probleme')).toBe('1 Problem');
     expect(plural(2, 'Problem', 'Probleme')).toBe('2 Probleme');
+  });
+});
+
+describe('display time zone', () => {
+  it('formats in the zone of the core and falls back to the device zone', () => {
+    const d = new Date('2026-11-25T22:04:00Z');
+    const now = new Date('2026-11-25T22:30:00Z');
+    try {
+      setDisplayTimeZone('Europe/Vienna');
+      expect(formatTime(d)).toBe('23:04');
+      expect(formatWhen(d, now)).toBe('23:04');
+      setDisplayTimeZone('America/New_York');
+      expect(formatTime(d)).toBe('17:04');
+      expect(formatWhen(new Date('2026-11-25T03:00:00Z'), now)).toBe('24.11. 22:00');
+      setDisplayTimeZone('Not/AZone');
+      expect(formatTime(d)).toBe(formatTime(new Date(d)));
+    } finally {
+      setDisplayTimeZone(undefined);
+    }
   });
 });

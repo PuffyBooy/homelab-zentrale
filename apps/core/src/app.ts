@@ -6,7 +6,7 @@ import fastifyHelmet from '@fastify/helmet';
 import fastifyStatic from '@fastify/static';
 import fastifyWebsocket from '@fastify/websocket';
 import Fastify, { type FastifyInstance, type FastifyServerOptions } from 'fastify';
-import { MAX_MESSAGE_BYTES } from '@hz/shared';
+import { MAX_MESSAGE_BYTES, type ModuleId } from '@hz/shared';
 import { AgentHub, type HubOptions } from './agents/hub.js';
 import { agentRoutes } from './agents/routes.js';
 import { AgentTokens } from './agents/tokens.js';
@@ -58,6 +58,9 @@ import { consoleApiRoutes, consoleSocketRoutes } from './terminal/routes.js';
 import { ConsoleService, type ConsoleOptions } from './terminal/service.js';
 import { wallRoutes } from './wall/routes.js';
 import { WallService } from './wall/service.js';
+import { setTimeZone } from './timezone.js';
+import { moduleRoutes } from './modules/routes.js';
+import { installModuleGate, ModuleService } from './modules/service.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 
@@ -113,6 +116,7 @@ export interface CoreServices {
   ha: HaService;
   consoles: ConsoleService;
   wall: WallService;
+  modules: ModuleService;
   db: DbHandle;
 }
 
@@ -226,6 +230,8 @@ export function staticCacheControl(filePath: string): string {
 }
 
 export async function buildApp(config: Config, deps: AppDeps = {}): Promise<FastifyInstance> {
+  // Before anything computes wall-clock times (scheduler, formatters).
+  setTimeZone(config.timeZone);
   const db = deps.db ?? openDatabase(join(config.dataDir, 'hz.sqlite'));
   const now = deps.now ?? systemClock;
 
@@ -278,6 +284,11 @@ export async function buildApp(config: Config, deps: AppDeps = {}): Promise<Fast
     config,
   });
   app.decorate('hzAuth', auth);
+  // Optional modules: routes of a switched-off module answer 404 module_disabled
+  // (after the auth guard, so anonymous requests still get 401).
+  const modules = new ModuleService(db.db, now);
+  installModuleGate(app, modules);
+  auth.bootstrap = () => ({ modules: modules.get(), timeZone: config.timeZone });
 
   await app.register(healthRoutes, { prefix: '/api' });
 
@@ -372,6 +383,7 @@ export async function buildApp(config: Config, deps: AppDeps = {}): Promise<Fast
   });
   const notifier = new Notifier({
     alerts,
+    db: db.db,
     push,
     now,
     settings: () => readNotifySettings(db.db),
@@ -479,7 +491,12 @@ export async function buildApp(config: Config, deps: AppDeps = {}): Promise<Fast
   const wall = new WallService({
     db: db.db,
     now,
-    sources: { servers: () => servers.list(), games: () => games.list(), ha: () => ha.state() },
+    sources: {
+      modules: () => modules.get(),
+      servers: () => servers.list(),
+      games: () => games.list(),
+      ha: () => ha.state(),
+    },
   });
   auth.wallDevices = (token) => wall.resolve(token);
 
@@ -502,6 +519,7 @@ export async function buildApp(config: Config, deps: AppDeps = {}): Promise<Fast
     ha,
     consoles,
     wall,
+    modules,
     db,
   });
 
@@ -517,11 +535,34 @@ export async function buildApp(config: Config, deps: AppDeps = {}): Promise<Fast
     shares.prune();
   });
   scheduler.every('logs.leases', 30_000, () => logs.expireLeases());
+  // Module switches: stop/start pollers, connections and jobs without restart.
+  const topicModule = (topic: string): ModuleId | null => {
+    if (topic === 'github' || github.deployer.matches(topic)) return 'github';
+    if (topic === 'games' || games.matches(topic)) return 'games';
+    if (topic === 'ha') return 'homeassistant';
+    return null;
+  };
+  live.setTopicFilter((topic) => {
+    const m = topicModule(topic);
+    return m === null || modules.enabled(m);
+  });
+  github.setEnabled(modules.enabled('github'));
+  games.setEnabled(modules.enabled('games'));
+  ha.setEnabled(modules.enabled('homeassistant'));
+  modules.onChange((m, on) => {
+    if (m === 'github') github.setEnabled(on);
+    else if (m === 'games') games.setEnabled(on);
+    else ha.setEnabled(on);
+    app.log.info({ module: m, on }, 'module switched');
+  });
   checks.start();
   github.start();
   games.start();
   scheduler.every('ha.tick', 1_000, () => ha.tick());
-  scheduler.every('push.warnBundle', 60_000, () => notifier.flush());
+  scheduler.every('push.warnBundle', 60_000, () => {
+    notifier.flush();
+    notifier.flushDigest();
+  });
   scheduler.at('report.weekly', nextWeeklyReport, () => {
     if (!readNotifySettings(db.db).weeklyReport) return;
     const list = servers.list();
@@ -530,7 +571,7 @@ export async function buildApp(config: Config, deps: AppDeps = {}): Promise<Fast
       checks: checks.uptimes(7 * DAY),
       serversOffline: list.filter((s) => s.reasons.some((r) => r.code === 'offline')).length,
       serversTotal: list.length,
-      deploys: github.deployStats(7 * DAY),
+      deploys: modules.enabled('github') ? github.deployStats(7 * DAY) : null,
     });
     alerts.log('report:weekly', 'info', title, body, null, 'system');
   });
@@ -596,6 +637,7 @@ export async function buildApp(config: Config, deps: AppDeps = {}): Promise<Fast
     metrics,
     alerts,
   });
+  await app.register(moduleRoutes, { prefix: '/api', db: db.db, now, modules });
   await app.register(alertRoutes, { prefix: '/api', db: db.db, now, alerts });
   await app.register(containerRoutes, { prefix: '/api', db: db.db, now, containers, servers, hub });
   await app.register(checkRoutes, { prefix: '/api', db: db.db, now, checks });

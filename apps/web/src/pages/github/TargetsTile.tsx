@@ -174,7 +174,7 @@ function TargetBlock({
 
 /**
  * Deploy key (SPEC 7): the agent creates an ed25519 key on the target server, the
- * private half never leaves it. Alex adds the public half at GitHub as read-only key.
+ * private half never leaves it. The admin adds the public half at GitHub as read-only key.
  */
 export function DeployKeyStep({
   repo,

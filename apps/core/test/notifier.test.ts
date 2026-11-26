@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { notifySettingsSchema, type NotifySettings, type PushPayload } from '@hz/shared';
 import { AlertService } from '../src/alerts/service.js';
 import { weeklyReportText } from '../src/alerts/weekly-report.js';
-import { fromVienna } from '../src/calendar.js';
+import { fromLocal } from '../src/calendar.js';
 import { openDatabase, type DbHandle } from '../src/db/index.js';
 import { decide, Notifier } from '../src/push/notifier.js';
 import { authHeaders, completeSetup, makeApp, type TestApp } from './helpers.js';
@@ -21,32 +21,40 @@ afterEach(async () => {
 });
 
 const DEFAULTS: NotifySettings = notifySettingsSchema.parse({});
-const DAY_TIME = fromVienna(2026, 11, 26, 14, 0);
-const NIGHT = fromVienna(2026, 11, 26, 23, 30);
+const DAY_TIME = fromLocal(2026, 11, 26, 14, 0);
+const NIGHT = fromLocal(2026, 11, 26, 23, 30);
 const MIN = 60_000;
 
 const silentLog = {
   warn: () => undefined,
 } as unknown as ConstructorParameters<typeof Notifier>[0]['log'];
 
-function setup(settings: Partial<NotifySettings> = {}) {
-  h = openDatabase(':memory:');
+function setup(settings: Partial<NotifySettings> = {}, db?: DbHandle) {
+  h = db ?? openDatabase(':memory:');
   const clock = { t: DAY_TIME };
   const alerts = new AlertService(h.db, () => clock.t);
   const sent: PushPayload[] = [];
+  const sentTo: { ids: string[]; payload: PushPayload }[] = [];
+  const devices = { ids: ['dev-a', 'dev-b'] };
   const notifier = new Notifier({
     alerts,
+    db: h.db,
     push: {
       sendAll: (p) => {
         sent.push(p);
         return Promise.resolve(1);
       },
+      sendTo: (ids, p) => {
+        sentTo.push({ ids: [...ids].sort(), payload: p });
+        return Promise.resolve(ids.length);
+      },
+      deviceIds: () => [...devices.ids],
     },
     now: () => clock.t,
     settings: () => ({ ...DEFAULTS, ...settings }),
     log: silentLog,
   });
-  return { alerts, clock, sent, notifier };
+  return { alerts, clock, sent, sentTo, devices, notifier, h };
 }
 
 describe('push policy: decide()', () => {
@@ -73,22 +81,22 @@ describe('push policy: decide()', () => {
     }
   });
 
-  it('warn is bundled by day and dropped in quiet hours', () => {
+  it('warn is bundled by day and deferred to the digest in quiet hours', () => {
     expect(decide({ kind: 'opened', alert: alert('warn') }, DEFAULTS, DAY_TIME)).toBe('bundle');
-    expect(decide({ kind: 'opened', alert: alert('warn') }, DEFAULTS, NIGHT)).toBe('drop');
+    expect(decide({ kind: 'opened', alert: alert('warn') }, DEFAULTS, NIGHT)).toBe('defer');
   });
 
   it('OK of a crit pushes even at night, OK of a warn only by day (bundled)', () => {
     const recCrit = { kind: 'recovered' as const, alert: alert('ok'), resolved: alert('crit') };
     const recWarn = { kind: 'recovered' as const, alert: alert('ok'), resolved: alert('warn') };
     expect(decide(recCrit, DEFAULTS, NIGHT)).toBe('now');
-    expect(decide(recWarn, DEFAULTS, NIGHT)).toBe('drop');
+    expect(decide(recWarn, DEFAULTS, NIGHT)).toBe('defer');
     expect(decide(recWarn, DEFAULTS, DAY_TIME)).toBe('bundle');
   });
 
   it('info (weekly report) by day only; ack, close and same-level changes never push', () => {
     expect(decide({ kind: 'logged', alert: alert('info') }, DEFAULTS, DAY_TIME)).toBe('now');
-    expect(decide({ kind: 'logged', alert: alert('info') }, DEFAULTS, NIGHT)).toBe('drop');
+    expect(decide({ kind: 'logged', alert: alert('info') }, DEFAULTS, NIGHT)).toBe('defer');
     expect(decide({ kind: 'acked', alert: alert('crit') }, DEFAULTS, DAY_TIME)).toBe('drop');
     expect(decide({ kind: 'closed', alert: alert('crit') }, DEFAULTS, DAY_TIME)).toBe('drop');
     expect(
@@ -98,7 +106,7 @@ describe('push policy: decide()', () => {
 
   it('respects custom quiet hours', () => {
     const s = { ...DEFAULTS, quietStart: '12:00', quietEnd: '15:00' };
-    expect(decide({ kind: 'opened', alert: alert('warn') }, s, DAY_TIME)).toBe('drop');
+    expect(decide({ kind: 'opened', alert: alert('warn') }, s, DAY_TIME)).toBe('defer');
     expect(decide({ kind: 'opened', alert: alert('warn') }, s, NIGHT)).toBe('bundle');
   });
 });
@@ -146,16 +154,17 @@ describe('Notifier: bundling', () => {
     expect(sent.map((p) => p.title)).toEqual(['first', 'escalated']);
   });
 
-  it('entries waiting when quiet hours start are dropped', () => {
+  it('entries waiting when quiet hours start move into the morning digest', () => {
     const { alerts, clock, sent, notifier } = setup();
-    clock.t = fromVienna(2026, 11, 26, 22, 40);
+    clock.t = fromLocal(2026, 11, 26, 22, 40);
     alerts.raise('a', 'warn', 'first', 'b', null, 'server');
     clock.t += MIN;
     alerts.raise('b', 'warn', 'second', 'b', null, 'server');
-    clock.t = fromVienna(2026, 11, 26, 23, 15);
+    clock.t = fromLocal(2026, 11, 26, 23, 15);
     notifier.flush();
     expect(sent.map((p) => p.title)).toEqual(['first']);
     expect(notifier.queued).toBe(0);
+    expect(notifier.deferred).toBe(1);
   });
 
   it('OK of a warn is bundled, OK of a crit is immediate', () => {
@@ -166,6 +175,78 @@ describe('Notifier: bundling', () => {
     alerts.resolve('w', { title: 'wieder schnell', body: 'b' });
     alerts.resolve('c', { title: 'wieder erreichbar', body: 'b' });
     expect(sent.map((p) => p.title)).toEqual(['langsam', 'down', 'wieder erreichbar']);
+  });
+});
+
+describe('Notifier: quiet hours digest', () => {
+  it('collects warn/info at night and sends one digest at the end of the quiet hours', () => {
+    const { alerts, clock, sent, sentTo, notifier } = setup();
+    clock.t = NIGHT;
+    alerts.raise('a', 'warn', 'Disk auf heimserver bei 86 %', 'b', null, 'server');
+    clock.t += MIN;
+    alerts.raise('b', 'warn', 'shop antwortet langsam (192.0.2.10:443)', 'b', null, 'check');
+    alerts.log('c', 'info', 'Gameserver mc automatisch gestoppt', 'b', null, 'game');
+    alerts.raise('d', 'crit', 'shop ist nicht erreichbar', 'b', null, 'check');
+    // crit stays immediate, nothing else goes out at night.
+    expect(sent.map((p) => p.title)).toEqual(['shop ist nicht erreichbar']);
+    expect(notifier.deferred).toBe(3);
+    clock.t = fromLocal(2026, 11, 27, 6, 59);
+    notifier.flushDigest();
+    expect(sentTo).toHaveLength(0);
+    clock.t = fromLocal(2026, 11, 27, 7, 0);
+    notifier.flushDigest();
+    expect(sentTo).toHaveLength(1);
+    expect(sentTo[0]?.ids).toEqual(['dev-a', 'dev-b']);
+    expect(sentTo[0]?.payload).toEqual({
+      title: 'Über Nacht: 3 Meldungen',
+      body: 'Disk auf heimserver bei 86 %\nshop antwortet langsam (…)\nGameserver mc automatisch gestoppt',
+      level: 'warn',
+      url: '/alerts',
+      tag: 'night-digest',
+    });
+    expect(notifier.deferred).toBe(0);
+    notifier.flushDigest();
+    expect(sentTo).toHaveLength(1);
+  });
+
+  it('sends nothing when nothing was held back', () => {
+    const { clock, sentTo, notifier } = setup();
+    clock.t = fromLocal(2026, 11, 27, 7, 0);
+    notifier.flushDigest();
+    expect(sentTo).toEqual([]);
+  });
+
+  it('only devices that existed when the push was held back get the digest', () => {
+    const { alerts, clock, sentTo, devices, notifier } = setup();
+    devices.ids = [];
+    clock.t = NIGHT;
+    alerts.raise('a', 'warn', 'before any device', 'b', null, 'server');
+    expect(notifier.deferred).toBe(0);
+    devices.ids = ['dev-a'];
+    alerts.raise('b', 'warn', 'only a', 'b', null, 'server');
+    devices.ids = ['dev-a', 'dev-new'];
+    clock.t = fromLocal(2026, 11, 27, 8, 0);
+    notifier.flushDigest();
+    expect(sentTo.map((x) => x.ids)).toEqual([['dev-a']]);
+    expect(sentTo[0]?.payload.title).toBe('Über Nacht: 1 Meldung');
+    expect(sentTo[0]?.payload.level).toBe('warn');
+  });
+
+  it('survives a restart (persisted) and lists at most 5 titles', () => {
+    const first = setup();
+    first.clock.t = NIGHT;
+    for (let i = 0; i < 7; i++) {
+      first.alerts.log(`k${i}`, 'info', `Meldung ${i}`, 'b', null, 'game');
+    }
+    // A new notifier on the same database (core restarted).
+    const again = setup({}, first.h);
+    again.clock.t = fromLocal(2026, 11, 27, 7, 1);
+    again.notifier.flushDigest();
+    expect(again.sentTo[0]?.payload).toMatchObject({
+      title: 'Über Nacht: 7 Meldungen',
+      level: 'info',
+      body: 'Meldung 0\nMeldung 1\nMeldung 2\nMeldung 3\nMeldung 4\n… und 2 weitere',
+    });
   });
 });
 

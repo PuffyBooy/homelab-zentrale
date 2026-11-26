@@ -1,7 +1,7 @@
 import { nextWallClock } from '../calendar.js';
 import { formatPercent } from '../checks/evaluate.js';
 
-/** Sunday 19:00 Europe/Vienna (SPEC 9). */
+/** Sunday 19:00 local time (HZ_TIMEZONE, SPEC 9). */
 export const WEEKLY_REPORT_RULE = { weekday: 0, hour: 19, minute: 0 } as const;
 
 export function nextWeeklyReport(from: number): number {

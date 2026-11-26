@@ -46,7 +46,7 @@ export type SharePerm = z.infer<typeof sharePermSchema>;
 
 export const shareExpirySchema = z.enum(['1d', '7d', '14d', '30d', 'never']);
 
-/** "Max", "Lena K." — shown to Alex and on the friend's page. */
+/** "Max", "Lena K." — shown to the admin and on the friend's page. */
 export const sharePersonSchema = z
   .string()
   .trim()
@@ -195,7 +195,7 @@ export const shareStatusResponseSchema = z.strictObject({
     status: gameStatusSchema,
     /** German, same texts as the admin UI. */
     statusText: z.string(),
-    /** Only the external address Alex entered ("mc.example.at:25565"); never a Tailscale IP. */
+    /** Only the external address the admin entered ("mc.example.at:25565"); never a Tailscale IP. */
     address: z.string().nullable(),
     players: z
       .strictObject({ online: z.number().int(), max: z.number().int(), names: z.array(z.string()) })

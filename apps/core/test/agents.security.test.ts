@@ -11,6 +11,7 @@ import {
   metricsMsg,
   stepUp,
   until,
+  withStepUp,
   WsClient,
 } from './agent-helpers.js';
 import { authHeaders, completeSetup, makeApp, type TestApp } from './helpers.js';
@@ -52,7 +53,7 @@ describe('enrollment', () => {
     expect(servers[0]).toMatchObject({
       id: e.serverId,
       name: 'heimserver',
-      location: 'Wien',
+      location: 'home',
       connected: true,
     });
     // Reconnect with the permanent token.
@@ -123,12 +124,14 @@ describe('enrollment', () => {
     const a = track(await WsClient.connect(`${url}/agent`));
     a.send(helloMsg(t1));
     await a.nextOfType('welcome');
-    const res = await t.app.inject({
-      method: 'POST',
-      url: '/api/servers/enroll',
-      headers: authHeaders(cookie),
-      payload: { name: 'heimserver' },
-    });
+    const res = await withStepUp(t, () =>
+      t.app.inject({
+        method: 'POST',
+        url: '/api/servers/enroll',
+        headers: authHeaders(cookie),
+        payload: { name: 'heimserver' },
+      }),
+    );
     expect(res.statusCode).toBe(409);
     expect(res.json()).toEqual({ ok: false, error: 'conflict' });
 
@@ -154,6 +157,106 @@ describe('enrollment', () => {
     ]);
     expect(dump).not.toContain(token);
     expect(dump).not.toContain(agentToken);
+  });
+});
+
+describe('re-enrollment of a revoked server', () => {
+  async function revoke(t: TestApp, secret: string, cookie: string, serverId: string) {
+    await stepUp(t, secret, cookie);
+    const res = await t.app.inject({
+      method: 'POST',
+      url: `/api/servers/${serverId}/revoke-agent`,
+      headers: authHeaders(cookie),
+      payload: {},
+    });
+    expect(res.statusCode).toBe(200);
+  }
+
+  it('takes over the row (same id, history kept), the old token stays invalid', async () => {
+    const { t, url, cookie, secret } = await setup();
+    const e = await enrollAgent(t, url, cookie, 'heimserver');
+    track(e.agent);
+    e.agent.send(metricsMsg());
+    await until(
+      () =>
+        (t.db.sqlite.prepare('SELECT COUNT(*) n FROM metrics_raw').get() as { n: number }).n === 1,
+    );
+    t.db.sqlite.prepare('UPDATE servers SET allow_terminal = 1 WHERE id = ?').run(e.serverId);
+    await revoke(t, secret, cookie, e.serverId);
+    await e.agent.closed;
+    expect(t.app.hzCore.tokens.hasActiveToken(e.serverId)).toBe(false);
+
+    const token = await createEnrollToken(t, cookie, 'heimserver');
+    const a = track(await WsClient.connect(`${url}/agent`));
+    a.send(helloMsg(token, { version: '0.3.0' }));
+    const enrolled = await a.nextOfType('enrolled');
+    await a.nextOfType('welcome');
+    expect(enrolled.serverId).toBe(e.serverId);
+    const newToken = enrolled.agentToken as string;
+    expect(newToken).not.toBe(e.agentToken);
+
+    // Same row, history kept, revoked state cleared.
+    expect(t.app.hzCore.servers.list()).toHaveLength(1);
+    expect(t.app.hzCore.servers.row(e.serverId)?.agentVersion).toBe('0.3.0');
+    // A new machine under the old name does not inherit the web console.
+    expect(t.app.hzCore.servers.row(e.serverId)?.allowTerminal).toBe(false);
+    expect(t.db.sqlite.prepare('SELECT COUNT(*) n FROM metrics_raw').get()).toEqual({ n: 1 });
+    expect(t.app.hzCore.tokens.hasActiveToken(e.serverId)).toBe(true);
+
+    // Audit: server.reenrolled (not a second server.enrolled).
+    const actions = t.db.sqlite
+      .prepare("SELECT action, target FROM audit_log WHERE action LIKE 'server.%enrolled'")
+      .all();
+    expect(actions).toEqual([
+      { action: 'server.enrolled', target: e.serverId },
+      { action: 'server.reenrolled', target: e.serverId },
+    ]);
+
+    // The old (revoked) token stays invalid after the takeover.
+    const old = track(await WsClient.connect(`${url}/agent`));
+    old.send(helloMsg(e.agentToken));
+    expect(await old.nextOfType('reject')).toEqual({ type: 'reject', code: 'revoked' });
+    expect((await old.closed).code).toBe(AGENT_CLOSE.REVOKED);
+    // The current connection was not replaced by the rejected one.
+    expect(t.app.hzCore.hub.connectedIds()).toEqual([e.serverId]);
+
+    // The new token works after a reconnect; only hashes are stored.
+    a.close();
+    await a.closed;
+    track(await connectAgent(url, newToken));
+    const dump = JSON.stringify(t.db.sqlite.prepare('SELECT * FROM agent_tokens').all());
+    expect(dump).not.toContain(newToken);
+  });
+
+  it('a name of a server that is not revoked still fails (409, name_taken)', async () => {
+    const { t, url, cookie } = await setup();
+    const e = await enrollAgent(t, url, cookie, 'heimserver');
+    track(e.agent);
+    const res = await withStepUp(t, () =>
+      t.app.inject({
+        method: 'POST',
+        url: '/api/servers/enroll',
+        headers: authHeaders(cookie),
+        payload: { name: 'heimserver' },
+      }),
+    );
+    expect(res.statusCode).toBe(409);
+  });
+
+  it('a pending token loses the takeover when the server became active again', async () => {
+    const { t, url, cookie, secret } = await setup();
+    const e = await enrollAgent(t, url, cookie, 'heimserver');
+    track(e.agent);
+    await revoke(t, secret, cookie, e.serverId);
+    await e.agent.closed;
+    const first = await createEnrollToken(t, cookie, 'heimserver');
+    // Simulate a race: another active token appears for the server.
+    t.db.sqlite
+      .prepare('UPDATE agent_tokens SET revoked_at = NULL WHERE server_id = ?')
+      .run(e.serverId);
+    const a = track(await WsClient.connect(`${url}/agent`));
+    a.send(helloMsg(first));
+    expect(await a.nextOfType('reject')).toEqual({ type: 'reject', code: 'name_taken' });
   });
 });
 
@@ -417,12 +520,16 @@ describe('secrets', () => {
     t = await makeApp({ captureLogs: true });
     const { cookie } = await completeSetup(t);
     const url = await listen(t);
-    const enroll = await t.app.inject({
-      method: 'POST',
-      url: '/api/servers/enroll',
-      headers: authHeaders(cookie),
-      payload: { name: 'heimserver' },
-    });
+    const app = t;
+    const enroll = await withStepUp(app, () =>
+      app.app.inject({
+        method: 'POST',
+        url: '/api/servers/enroll',
+        headers: authHeaders(cookie),
+        payload: { name: 'heimserver' },
+      }),
+    );
+    expect(enroll.statusCode).toBe(200);
     const token = enroll.json<{ token: string }>().token;
     const a = track(await WsClient.connect(`${url}/agent`));
     a.send(helloMsg(token));

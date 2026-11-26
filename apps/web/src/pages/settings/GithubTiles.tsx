@@ -236,7 +236,7 @@ function AddRepoDialog({ onClose }: { onClose: () => void }): ReactElement {
           label="Suchen"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder="soundos"
+          placeholder="my-app"
           autoComplete="off"
           spellCheck={false}
           data-autofocus=""

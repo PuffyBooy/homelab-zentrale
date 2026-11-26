@@ -44,7 +44,7 @@ describe('AlertService', () => {
     const a = svc.raise(
       'check:1:down',
       'crit',
-      'sc-ball.at ist offline',
+      'beispiel.at ist offline',
       'Seit 23:04.',
       null,
       'check',
@@ -53,7 +53,7 @@ describe('AlertService', () => {
     const b = svc.raise('check:1:down', 'crit', 'anders', 'anders', null, 'check');
     expect(b).toMatchObject({ created: false, changed: false });
     expect(b.alert.id).toBe(a.alert.id);
-    expect(b.alert.title).toBe('sc-ball.at ist offline');
+    expect(b.alert.title).toBe('beispiel.at ist offline');
     svc.ack(a.alert.id);
     expect(svc.raise('check:1:down', 'crit', 'x', 'y', null, 'check').created).toBe(false);
     expect(svc.list({ state: 'all', limit: 100 })).toHaveLength(1);

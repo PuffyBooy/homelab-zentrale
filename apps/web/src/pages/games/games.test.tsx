@@ -70,7 +70,7 @@ describe('GameTile', () => {
     expect(out).toContain('hz-status hz-status-ok');
     expect(out).toContain('>UP<');
     expect(out).toContain('title="Adresse kopieren"');
-    expect(out).toContain('<span>mc.hoebe.at:25565</span>');
+    expect(out).toContain('<span>mc.example.org:25565</span>');
     expect(out).toContain('>5,8 / 8 GB<');
     expect(out).toContain('>19,8<');
     expect(out).not.toContain('disabled=""');
@@ -133,15 +133,15 @@ describe('ForwardHint', () => {
     const out = html(<ForwardHint ports={ports} server={server({ name: 'oracle-a1' })} />);
     expect(out).toContain('2456–2458/UDP');
     expect(out).toContain('Security List');
-    expect(out).not.toContain('Deco');
+    expect(out).not.toContain('Zuhause (Router)');
   });
 
-  it('shows the Deco router at home and both without a guess', () => {
+  it('shows the home router at home and both without a guess', () => {
     const home = html(<ForwardHint ports={ports} server={server({ name: 'heimserver' })} />);
-    expect(home).toContain('Deco');
+    expect(home).toContain('Zuhause (Router)');
     expect(home).not.toContain('Security List');
     const both = html(<ForwardHint ports={ports} server={undefined} />);
-    expect(both).toContain('Deco');
+    expect(both).toContain('Zuhause (Router)');
     expect(both).toContain('Security List');
   });
 });

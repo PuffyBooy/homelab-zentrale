@@ -10,13 +10,13 @@ describe('GameServer', () => {
         name="survival"
         game="Minecraft Paper"
         version="1.21.4"
-        address="mc.hoebe.at"
+        address="mc.example.org"
         status="ok"
         players={[4, 20]}
         ram={72}
         ramDetail="5,8 / 8 GB"
         tps={19.8}
-        online={['Alex', 'Lukas']}
+        online={['Sam', 'Lukas']}
         host="oracle-a1"
       />,
     );
@@ -28,7 +28,7 @@ describe('GameServer', () => {
     expect(out).toContain('>5,8 / 8 GB<');
     expect(out).toContain('aria-label="TPS"');
     expect(out).toContain('aria-valuenow="99"');
-    expect(out).toContain('<div class="hz-game-online"><span>Alex</span><span>Lukas</span></div>');
+    expect(out).toContain('<div class="hz-game-online"><span>Sam</span><span>Lukas</span></div>');
     expect(out).toContain('<span>Stop</span>');
     expect(out).not.toContain('hz-btn-primary');
     expect(out).toContain('<span class="hz-game-host">oracle-a1</span>');
@@ -73,7 +73,7 @@ describe('GameServer additions (handlers, formatted TPS)', () => {
   const base = {
     name: 'survival',
     game: 'Minecraft Paper',
-    address: 'mc.hoebe.at:25565',
+    address: 'mc.example.org:25565',
     host: 'h',
   };
 
@@ -85,8 +85,8 @@ describe('GameServer additions (handlers, formatted TPS)', () => {
     const addr = tree.find((e) => e.props.className === 'hz-addr');
     expect(addr).toBeDefined();
     (addr?.props.onClick as () => void)();
-    expect(writeText).toHaveBeenCalledWith('mc.hoebe.at:25565');
-    expect(onCopy).toHaveBeenCalledWith('mc.hoebe.at:25565');
+    expect(writeText).toHaveBeenCalledWith('mc.example.org:25565');
+    expect(onCopy).toHaveBeenCalledWith('mc.example.org:25565');
     vi.unstubAllGlobals();
   });
 

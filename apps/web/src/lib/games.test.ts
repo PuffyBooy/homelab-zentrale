@@ -180,7 +180,7 @@ describe('create form', () => {
     const d = {
       ...emptyCreateDraft(tpl, 'srv-1'),
       name: 'survival',
-      externalAddress: ' mc.hoebe.at ',
+      externalAddress: ' mc.example.org ',
     };
     const r = validateCreate(tpl, d);
     expect(r).toEqual({
@@ -198,7 +198,7 @@ describe('create form', () => {
         },
         ports: { game: 25565 },
         autoStopMinutes: 0,
-        externalAddress: 'mc.hoebe.at',
+        externalAddress: 'mc.example.org',
       },
     });
   });
@@ -209,7 +209,7 @@ describe('create form', () => {
       name: 'Survival World',
       ports: { game: '80' },
       autoStopMinutes: '-5',
-      externalAddress: 'mc hoebe',
+      externalAddress: 'mc example',
       fields: { ...fieldDefaults(tpl.fields), MAX_PLAYERS: '0' },
     };
     const r = validateCreate(tpl, d);
@@ -257,9 +257,9 @@ describe('create form', () => {
 
   it('checks external address and settings', () => {
     expect(externalAddressError('')).toBeNull();
-    expect(externalAddressError('mc.hoebe.at')).toBeNull();
+    expect(externalAddressError('mc.example.org')).toBeNull();
     expect(externalAddressError('130.61.4.2:25565')).toBeNull();
-    expect(externalAddressError('https://mc.hoebe.at')).not.toBeNull();
+    expect(externalAddressError('https://mc.example.org')).not.toBeNull();
     const s = validateSettings(tpl, {
       autoStopMinutes: '30',
       externalAddress: '',
@@ -268,8 +268,8 @@ describe('create form', () => {
     expect(s.ok && s.body.autoStopMinutes).toBe(30);
     // Empty is sent, so the address can go back to the Tailscale IP.
     expect(s.ok && s.body.externalAddress).toBe('');
-    expect(settingsDraft(game({ externalAddress: 'mc.hoebe.at' }), tpl).externalAddress).toBe(
-      'mc.hoebe.at',
+    expect(settingsDraft(game({ externalAddress: 'mc.example.org' }), tpl).externalAddress).toBe(
+      'mc.example.org',
     );
     expect(
       validateSettings(tpl, { autoStopMinutes: '1441', externalAddress: '', fields: {} }).ok,
@@ -387,7 +387,7 @@ describe('tile props', () => {
     expect(Math.round(p.ram ?? 0)).toBe(73);
     expect(p.tpsDetail).toBe('19,8');
     expect(p.players).toEqual([4, 20]);
-    expect(p.online).toEqual(['Alex', 'Lukas', 'mia_07', 'Tobi']);
+    expect(p.online).toEqual(['Sam', 'Lukas', 'mia_07', 'Tobi']);
     expect(p.host).toBe('oracle-a1');
   });
 
@@ -427,7 +427,7 @@ describe('ports and forwarding hint', () => {
 
   it('guesses where to forward', () => {
     expect(forwardPlace(server({ name: 'oracle-a1', location: 'Frankfurt' }))).toBe('oracle');
-    expect(forwardPlace(server({ name: 'heimserver', location: 'Wien' }))).toBe('home');
+    expect(forwardPlace(server({ name: 'heimserver', location: 'Zuhause' }))).toBe('home');
     expect(forwardPlace(server({ name: 'web-vps', location: 'Nürnberg' }))).toBe('unknown');
     expect(forwardPlace(undefined)).toBe('unknown');
   });
@@ -465,7 +465,7 @@ describe('live events of game:<id>', () => {
 
   it('merges console events and own commands in time order', () => {
     const lines = consoleLines(
-      [ev('1', 'console', 'Alex joined', '2026-11-26T22:00:00.000Z'), ev('2', 'progress', 'x')],
+      [ev('1', 'console', 'Sam joined', '2026-11-26T22:00:00.000Z'), ev('2', 'progress', 'x')],
       [
         {
           id: 'c1',
@@ -485,7 +485,7 @@ describe('live events of game:<id>', () => {
       ],
     );
     expect(lines).toEqual([
-      { text: 'Alex joined' },
+      { text: 'Sam joined' },
       { text: 'list', kind: 'cmd' },
       { text: 'There are 1 of 20' },
       { text: 'tps', kind: 'cmd' },
@@ -567,7 +567,7 @@ describe('console with the container log', () => {
       lines: [
         { seq: 0, stream: 'stdout', text: 'Starting server' },
         { seq: 1, stream: 'stderr', text: 'Can not bind' },
-        { seq: 2, stream: 'stdout', text: 'Alex joined the game' },
+        { seq: 2, stream: 'stdout', text: 'Sam joined the game' },
       ],
       ended: false,
       at: { 2: '2026-11-26T22:01:30.000Z' },
@@ -585,7 +585,7 @@ describe('console with the container log', () => {
       { text: 'Can not bind', kind: 'err' },
       { text: 'list', kind: 'cmd' },
       { text: 'There are 0 of 20' },
-      { text: 'Alex joined the game' },
+      { text: 'Sam joined the game' },
       { text: 'tps', kind: 'cmd' },
       { text: '…', kind: 'dim' },
     ]);

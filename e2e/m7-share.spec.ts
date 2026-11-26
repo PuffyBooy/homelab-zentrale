@@ -1,6 +1,6 @@
 import { mkdirSync } from 'node:fs';
 import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
-import { answerStepUp, ORIGIN, signIn, type Totp } from './helpers/auth.js';
+import { answerStepUpIfAsked, enrollServer, ORIGIN, signIn, type Totp } from './helpers/auth.js';
 import { SimAgent } from './helpers/sim-agent.js';
 
 /**
@@ -101,10 +101,8 @@ test.beforeAll(async ({ browser }) => {
   page = await admin.newPage();
   totp = await signIn(page);
 
-  const enroll = await apiCall<{ token: string }>('POST', '/api/servers/enroll', {
-    name: AGENT_NAME,
-    location: 'Oracle Cloud',
-  });
+  // Enrollment needs step-up (decision 2026-11-26); it also covers creating the link below.
+  const enroll = await enrollServer(page, totp, AGENT_NAME, 'Oracle Cloud');
   expect(enroll.status).toBe(200);
   agent = new SimAgent({ url: AGENT_URL, name: AGENT_NAME, token: enroll.data.token, games: true });
   await agent.connect();
@@ -157,6 +155,8 @@ test('Teilen on the tile creates a link with only Starten/Stoppen, shown once', 
   await dialog.getByLabel('Läuft ab nach').selectOption('7d');
   await shot(page, 'e2e-share-create-dark', false);
   await dialog.getByRole('button', { name: 'Link erstellen' }).click();
+  // Creating a link needs step-up; asked only if the one from the enrollment ran out.
+  await answerStepUpIfAsked(page, totp);
 
   const done = page.getByRole('dialog', { name: 'Link für Lena' });
   await expect(done.getByText('Der Link wird nur jetzt angezeigt.')).toBeVisible();
@@ -245,8 +245,7 @@ test('a revoked link shows "Link widerrufen" with the next poll', async () => {
   const confirm = page.getByRole('dialog', { name: 'Link von Lena widerrufen' });
   await expect(confirm.getByRole('button', { name: 'Abbrechen' })).toBeFocused();
   await confirm.getByRole('button', { name: 'Widerrufen' }).click();
-  const stepUp = page.getByRole('dialog', { name: 'Mit Code bestätigen' });
-  if (await stepUp.isVisible().catch(() => false)) await answerStepUp(page, totp);
+  await answerStepUpIfAsked(page, totp);
   await expect(tile.getByTestId('share-row')).toContainText('WIDERRUFEN');
   await expect(tile.getByRole('button', { name: 'Link von Lena entfernen' })).toBeVisible();
 
@@ -268,6 +267,42 @@ test('a revoked link shows "Link widerrufen" with the next poll', async () => {
   await expect(tile.getByText('Noch kein Link.')).toBeVisible();
   const audit = page.locator('.hz-tile').filter({ hasText: 'Wer hat was gemacht' });
   await expect(audit.getByText('Lena hat gestartet')).toBeVisible();
+});
+
+test('ports change: a taken port is shown inline, then the forwarding hint', async () => {
+  await page.goto(`/games/${gameId}`);
+  const form = page.getByTestId('ports-form');
+  const input = form.getByLabel('Port game (TCP)');
+  await expect(input).toBeVisible();
+  const from = Number(await input.inputValue());
+  expect(from).toBeGreaterThanOrEqual(1024);
+
+  // 8123 listens on the simulated server (sim-agent listeningPorts): 409, shown in the form.
+  await input.fill('8123');
+  await form.getByRole('button', { name: 'Ports ändern' }).click();
+  await answerStepUpIfAsked(page, totp);
+  await expect(form.getByRole('alert')).toContainText('schon belegt');
+
+  const to = from + 35;
+  await input.fill(String(to));
+  await expect(form.getByRole('alert')).toHaveCount(0);
+  await form.getByRole('button', { name: 'Ports ändern' }).click();
+  await answerStepUpIfAsked(page, totp);
+  await expect(form.getByTestId('forwarding-hint')).toContainText(
+    `Portweiterleitung anpassen: game ${from} → ${to} (TCP)`,
+    { timeout: 30_000 },
+  );
+  await expect(input).toHaveValue(String(to));
+  // Screenshots of the new form go with M9 (docs/screenshots/m9).
+  mkdirSync('docs/screenshots/m9', { recursive: true });
+  for (const scheme of ['dark', 'light'] as const) {
+    await page.emulateMedia({ colorScheme: scheme });
+    await expect(page.locator('html')).toHaveAttribute('data-theme', scheme);
+    await form.screenshot({ path: `docs/screenshots/m9/e2e-game-ports-${scheme}.png` });
+  }
+  await page.evaluate("document.documentElement.dataset.theme = 'wall'");
+  await form.screenshot({ path: 'docs/screenshots/m9/e2e-game-ports-wall.png' });
+  await page.emulateMedia({ colorScheme: 'dark' });
 });
 
 test('an unknown token says "Link ungültig" without any API request', async () => {

@@ -235,11 +235,11 @@ describe('applyLiveMessage', () => {
   });
 
   it('writes the github snapshot, merges updates and drops invalid repos', () => {
-    const a = repo({ fullName: 'PuffyBooy/soundos' });
+    const a = repo({ fullName: 'PuffyBooy/my-app' });
     const b = repo({ fullName: 'PuffyBooy/lernplattform' });
     applyLiveMessage(qc, { type: 'snapshot', topic: 'github', data: { repos: [a, b, { id: 1 }] } });
     expect(qc.getQueryData<RepoSummary[]>(reposKey)?.map((r) => r.fullName)).toEqual([
-      'PuffyBooy/soundos',
+      'PuffyBooy/my-app',
       'PuffyBooy/lernplattform',
     ]);
     const a2 = { ...a, targets: [target({ repoId: a.id, behind: 1 })] };

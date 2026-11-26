@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { visibleNavItems } from './lib/modules.js';
 import { activeNavId, isTypingTarget, navItems, shortcutAction, shortcutTarget } from './nav.js';
 
 const key = (k: string, extra: Partial<Parameters<typeof shortcutAction>[0]> = {}) => ({
@@ -64,5 +65,21 @@ describe('shortcuts', () => {
       kind: 'palette',
     });
     expect(shortcutAction(key('k'))).toBeNull();
+  });
+
+  it('numbers only the visible items when modules are off', () => {
+    const items = visibleNavItems(navItems, { github: false, homeassistant: false, games: true });
+    expect(items.map((i) => i.id)).toEqual([
+      'overview',
+      'servers',
+      'containers',
+      'games',
+      'websites',
+      'alerts',
+      'console',
+    ]);
+    expect(shortcutTarget('5', items)).toBe('/websites');
+    expect(shortcutTarget('`', items)).toBe('/console');
+    expect(shortcutAction(key('6'), items)).toEqual({ kind: 'navigate', to: '/alerts' });
   });
 });

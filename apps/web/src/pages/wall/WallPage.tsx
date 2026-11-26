@@ -20,7 +20,8 @@ type Session = 'pending' | 'ready' | 'invalid';
 
 /**
  * /wall (SPEC 12): read-only tablet view. No navigation, no admin data. A device link
- * /wall?t=<token> is swapped for the `hz_wall` cookie once and the token leaves the URL.
+ * /wall?t=<token> is swapped for the `hz_wall` cookie (one-time token) and the token
+ * leaves the URL.
  */
 export function WallPage(): ReactElement {
   const location = useLocation();
@@ -51,9 +52,11 @@ export function WallPage(): ReactElement {
     // The token leaves the address bar (and history) before anything else happens.
     void navigate('/wall', { replace: true });
     if (!token) return;
+    // A failed exchange (link already used) is not the end: a kiosk reloading its start
+    // URL still has the cookie, so GET /api/wall/state decides (401 -> not connected).
     startWallSession(token).then(
       () => setSession('ready'),
-      () => setSession('invalid'),
+      () => setSession('ready'),
     );
   }, [location.search, navigate]);
 

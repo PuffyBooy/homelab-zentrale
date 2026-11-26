@@ -1,21 +1,24 @@
 import { mkdirSync } from 'node:fs';
 import { expect, test, type BrowserContext, type Page } from '@playwright/test';
-import { ORIGIN, signIn } from './helpers/auth.js';
+import { answerStepUp, ORIGIN, signIn, type Totp } from './helpers/auth.js';
 
 /**
  * M5 smoke (web part), against the real core without GitHub access: without a token
  * the settings tile says so and checks the token format before sending, the GitHub
  * page shows the empty state with the way to the settings, and the overview tile
  * points there too. Deploys need GitHub and a git server; the deploy rules are unit
- * tested (apps/web/src/lib/github.test.ts, RepoListRow.test.tsx).
+ * tested (apps/web/src/lib/github.test.ts, RepoListRow.test.tsx). GitHub is an optional
+ * module, off on a fresh install: switching it on (step-up) shows the nav item without a
+ * reload, switching it off hides it again.
  */
 
 const SHOTS = 'docs/screenshots/m5';
 
-test.describe.configure({ mode: 'serial', timeout: 60_000 });
+test.describe.configure({ mode: 'serial', timeout: 90_000 });
 
 let context: BrowserContext;
 let page: Page;
+let totp: Totp;
 
 async function shot(name: string): Promise<void> {
   mkdirSync(SHOTS, { recursive: true });
@@ -37,13 +40,56 @@ async function themes(name: string): Promise<void> {
 }
 
 test.beforeAll(async ({ browser }) => {
+  // signIn may wait for a fresh TOTP window (hooks have their own 30-s default).
+  test.setTimeout(90_000);
   context = await browser.newContext({ baseURL: ORIGIN, colorScheme: 'dark' });
   page = await context.newPage();
-  await signIn(page);
+  totp = await signIn(page);
 });
 
 test.afterAll(async () => {
   await context.close();
+});
+
+test('module switch hides and shows GitHub in nav, palette and overview', async () => {
+  const nav = page.getByRole('navigation', { name: 'Hauptnavigation' });
+  const githubLink = nav.getByRole('link', { name: /GitHub/ });
+  await page.goto('/settings#module');
+  const sw = page.getByTestId('modules').getByRole('switch', { name: 'GitHub' });
+  await expect(sw).toBeVisible();
+  // Reused core: start from "off".
+  if ((await sw.getAttribute('aria-checked')) === 'true') await sw.click();
+  await expect(sw).toHaveAttribute('aria-checked', 'false');
+  await expect(githubLink).toHaveCount(0);
+  await expect(page.locator('#github')).toHaveCount(0);
+
+  // Palette: no GitHub page while off.
+  await page.keyboard.press('Control+k');
+  const palette = page.getByRole('dialog', { name: 'Befehlspalette' });
+  await palette.getByRole('combobox').fill('GitHub');
+  await expect(palette.getByRole('option', { name: /GitHub/ })).toHaveCount(0);
+  await page.keyboard.press('Escape');
+
+  // Direct navigation shows the empty state with the way back.
+  await page.goto('/github');
+  await expect(page.getByTestId('module-off')).toContainText('Modul ausgeschaltet.');
+  await expect(page.locator('.hz-page-title')).toHaveText('GitHub ist ausgeschaltet.');
+  await page.getByRole('link', { name: 'Einstellungen → Module' }).click();
+  await expect(page).toHaveURL(`${ORIGIN}/settings#module`);
+
+  // Switching on needs a fresh code; the nav follows without a reload.
+  await sw.click();
+  await answerStepUp(page, totp);
+  await expect(sw).toHaveAttribute('aria-checked', 'true');
+  await expect(githubLink).toBeVisible();
+  await expect(page.locator('#github')).toBeVisible();
+
+  // Off again needs no code, on again uses the step-up that is still active.
+  await sw.click();
+  await expect(githubLink).toHaveCount(0);
+  await sw.click();
+  await expect(page.getByRole('dialog', { name: 'Mit Code bestätigen' })).toHaveCount(0);
+  await expect(githubLink).toBeVisible();
 });
 
 test('GitHub page without token shows the empty state and leads to the settings', async () => {

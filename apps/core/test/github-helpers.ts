@@ -99,7 +99,7 @@ export class FakeGithub {
     list.unshift({
       sha,
       message: `${message}\n\nbody line`,
-      author: 'Alex',
+      author: 'Admin',
       date: new Date(this.now()).toISOString(),
     });
     repo.branches.set(branch, list);
@@ -177,7 +177,7 @@ export class FakeGithub {
 
   private route(u: URL): unknown {
     const p = u.pathname;
-    if (p === '/user') return { login: 'alex-hz', id: 1 };
+    if (p === '/user') return { login: 'admin-hz', id: 1 };
     if (p === '/user/repos') {
       const page = Number(u.searchParams.get('page') ?? '1');
       if (page > 1) return [];
@@ -200,10 +200,10 @@ export class FakeGithub {
         node_id: 'x',
         commit: {
           message: c.message,
-          author: { name: c.author, email: 'alex@example.invalid', date: c.date },
+          author: { name: c.author, email: 'admin@example.invalid', date: c.date },
           committer: { name: c.author, date: c.date },
         },
-        author: { login: 'alex-hz' },
+        author: { login: 'admin-hz' },
         html_url: `https://github.com/${repo.fullName}/commit/${c.sha}`,
       }));
     }

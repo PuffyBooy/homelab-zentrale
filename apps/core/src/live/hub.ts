@@ -92,6 +92,13 @@ export class LiveHub {
     this.providers.push(p);
   }
 
+  /** Topics of switched-off modules: no subscribe, no snapshot, no update. */
+  private allowed: (topic: string) => boolean = () => true;
+
+  setTopicFilter(fn: (topic: string) => boolean): void {
+    this.allowed = fn;
+  }
+
   private provider(topic: string): TopicProvider | undefined {
     return this.providers.find((p) => p.matches(topic));
   }
@@ -168,6 +175,10 @@ export class LiveHub {
   }
 
   private subscribe(client: Client, topic: string): void {
+    if (!this.allowed(topic)) {
+      this.send(client, { type: 'error', code: 'unknown_topic' });
+      return;
+    }
     if (!client.topics.has(topic) && client.topics.size >= MAX_TOPICS_PER_SOCKET) {
       this.send(client, { type: 'error', code: 'invalid' });
       return;
@@ -216,7 +227,7 @@ export class LiveHub {
    * `upsert`, batched at most every appendThrottleMs.
    */
   append(topic: string, items: unknown[]): void {
-    if (items.length === 0 || !this.hasSubscribers(topic)) return;
+    if (items.length === 0 || !this.allowed(topic) || !this.hasSubscribers(topic)) return;
     let list = this.appended.get(topic);
     if (!list) {
       list = [];
@@ -235,13 +246,14 @@ export class LiveHub {
     this.appendTimers.delete(topic);
     const items = this.appended.get(topic);
     this.appended.delete(topic);
-    if (!items || items.length === 0) return;
+    if (!items || items.length === 0 || !this.allowed(topic)) return;
     const msg: LiveServerMessage = { type: 'update', topic, upsert: items };
     for (const c of this.clients) if (c.topics.has(topic)) this.send(c, msg);
   }
 
   /** Sends pending appends first, then a new snapshot to every subscriber. */
   resnapshot(topic: string): void {
+    if (!this.allowed(topic)) return;
     this.flushAppended(topic);
     const data = this.snapshot(topic);
     if (data === undefined) return;
@@ -252,7 +264,7 @@ export class LiveHub {
 
   /** Records a change; the update goes out at most once per throttle interval. */
   mark(topic: string, id: string, op: 'upsert' | 'remove'): void {
-    if (!this.hasSubscribers(topic)) return;
+    if (!this.allowed(topic) || !this.hasSubscribers(topic)) return;
     let p = this.pending.get(topic);
     if (!p) {
       p = new Map();
@@ -274,7 +286,7 @@ export class LiveHub {
     this.timers.delete(topic);
     const p = this.pending.get(topic);
     this.pending.delete(topic);
-    if (!p || p.size === 0) return;
+    if (!p || p.size === 0 || !this.allowed(topic)) return;
     this.lastFlush.set(topic, Date.now());
     const upsert: unknown[] = [];
     const remove: string[] = [];

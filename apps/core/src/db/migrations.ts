@@ -491,4 +491,71 @@ CREATE TABLE wall_devices (
 CREATE INDEX alerts_state_opened ON alerts(state, opened_at);
 `,
   },
+  {
+    version: 10,
+    name: 'decisions_2026_11',
+    // Quiet-hours digest (push): warn/info pushes suppressed in the quiet hours wait
+    // here until the quiet hours end; device_ids_json: push devices that existed when
+    // the push was suppressed (only they get the digest). Titles only, no bodies.
+    // Purge of backups of deleted game servers: one row per deleted game, dropped
+    // once the agent purged the backups older than 30 days after deleted_at.
+    // game_name is the folder name (/opt/homelab/backups/<game_name>/).
+    // Wall devices: one-time token. token_hash NULL = the link was used; the cookie
+    // carries a separate random session secret (session_hash); used_token_hash lets a
+    // kiosk reload with the already used link pass when it still has its cookie.
+    // Existing devices keep working: their old cookie (the token itself) becomes
+    // their session secret, and their link stays usable once.
+    // Optional modules: an existing install keeps GitHub/HA on when configured.
+    sql: `
+CREATE TABLE push_digest_items (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  ts INTEGER NOT NULL,
+  level TEXT NOT NULL,
+  title TEXT NOT NULL,
+  device_ids_json TEXT NOT NULL
+);
+
+CREATE TABLE deleted_game_backups (
+  id TEXT PRIMARY KEY,
+  server_id TEXT NOT NULL REFERENCES servers(id) ON DELETE CASCADE,
+  game_id TEXT NOT NULL,
+  game_name TEXT NOT NULL,
+  deleted_at INTEGER NOT NULL,
+  last_attempt_at INTEGER,
+  last_error TEXT
+);
+CREATE INDEX deleted_game_backups_server ON deleted_game_backups(server_id);
+
+CREATE TABLE wall_devices_new (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  token_hash TEXT UNIQUE,
+  session_hash TEXT UNIQUE,
+  used_token_hash TEXT,
+  created_at INTEGER NOT NULL,
+  last_seen_at INTEGER,
+  paired_at INTEGER
+);
+INSERT INTO wall_devices_new (id, name, token_hash, session_hash, used_token_hash, created_at, last_seen_at, paired_at)
+  -- Devices already seen keep their cookie (the old token becomes the session secret),
+  -- but the old link must not pair a second time: it moves to used_token_hash.
+  SELECT id, name,
+         CASE WHEN last_seen_at IS NULL THEN token_hash ELSE NULL END,
+         CASE WHEN last_seen_at IS NULL THEN NULL ELSE token_hash END,
+         CASE WHEN last_seen_at IS NULL THEN NULL ELSE token_hash END,
+         created_at, last_seen_at, last_seen_at
+  FROM wall_devices;
+DROP TABLE wall_devices;
+ALTER TABLE wall_devices_new RENAME TO wall_devices;
+
+INSERT OR IGNORE INTO settings (key, value_json, updated_at)
+  SELECT 'modules', json_object(
+    'github', json(CASE WHEN EXISTS (SELECT 1 FROM settings WHERE key = 'github.token') THEN 'true' ELSE 'false' END),
+    'homeassistant', json(CASE WHEN EXISTS (
+      SELECT 1 FROM settings WHERE key = 'ha.settings' AND json_extract(value_json, '$.url') IS NOT NULL
+    ) THEN 'true' ELSE 'false' END),
+    'games', json('true')
+  ), CAST(strftime('%s', 'now') AS INTEGER) * 1000;
+`,
+  },
 ];

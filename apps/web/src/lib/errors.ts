@@ -44,6 +44,8 @@ export function errorText(err: unknown): string {
       return 'GitHub nicht erreichbar oder Anfrage abgelehnt. Details unter Einstellungen → GitHub.';
     case 'ha_error':
       return 'Home Assistant nicht erreichbar oder hat abgelehnt. Details unter Einstellungen → Home Assistant.';
+    case 'module_disabled':
+      return 'Modul ausgeschaltet. Einschalten unter Einstellungen → Module.';
     case 'bad_response':
       return 'Antwort der Zentrale unerwartet. Versionen von Core und Web prüfen.';
     default:

@@ -4,15 +4,15 @@ Diese Datei gilt für jeden Agent, der an diesem Repo arbeitet (Codex, Claude Co
 
 ## Was gebaut wird
 
-Die **Homelab-Zentrale** ist ein privates Kontrollzentrum für einen einzigen Admin (Alex). Sie zeigt und steuert:
+Die **Homelab-Zentrale** ist ein privates Kontrollzentrum für einen einzigen Admin. Jeder kann sie auf eigenen Servern deployen; GitHub, Home Assistant und Gameserver sind Module, die man an- und ausschaltet. Sie zeigt und steuert:
 
-- alle Server (Heimserver in Wien, Oracle-Cloud-VM, Raspberry Pi, weitere VPS)
+- alle Server (z. B. Heimserver, Cloud-VM, Raspberry Pi, weitere VPS)
 - Docker-Container auf allen Servern
 - Gameserver, die man in Minuten aus Vorlagen aufsetzt, plus Benutzerlinks für Freunde
-- das GitHub-Konto (Repos, CI, Deploy per Knopf, Rollback)
+- optional das GitHub-Konto (Repos, CI, Deploy per Knopf, Rollback)
 - Websites und Ports (Uptime, HTTP-Code, Antwortzeit, SSL- und Domain-Ablauf)
 - Meldungen mit Push aufs Handy
-- die Wohnung über Home Assistant
+- optional die Wohnung über Home Assistant
 - eine Web-Konsole und einen Wandmodus fürs Tablet
 
 Die vollständige Beschreibung steht in `docs/SPEC.md`. Wie es gebaut wird, steht in `docs/ARCHITECTURE.md`, in welcher Reihenfolge in `docs/ROADMAP.md`.
@@ -53,7 +53,8 @@ pnpm dev          # core + web + ein lokaler agent im Watch-Modus
 pnpm check        # lint + typecheck + test (muss vor jedem Commit grün sein)
 pnpm build
 pnpm e2e          # Playwright-Smoke-Tests
-docker compose -f deploy/docker-compose.core.yml up -d --build
+docker compose -f deploy/docker-compose.core.yml up -d   # fertiges Image aus GHCR
+docker compose -f deploy/docker-compose.core.yml -f deploy/docker-compose.core.build.yml up -d --build   # lokal bauen
 ```
 
 Diese Skripte legst du in Meilenstein 0 an.

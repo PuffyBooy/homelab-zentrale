@@ -1,11 +1,11 @@
 import { eq } from 'drizzle-orm';
-import { viennaTime } from '../calendar.js';
+import { localTime } from '../calendar.js';
 import type { Db } from '../db/index.js';
 import { haEnergyMonths, type HaEnergyMonthRow } from '../db/schema.js';
 
-/** "2026-11" for a timestamp, in Europe/Vienna. */
+/** "2026-11" for a timestamp, in the configured time zone (HZ_TIMEZONE). */
 export function viennaMonth(ms: number): string {
-  const w = viennaTime(ms);
+  const w = localTime(ms);
   return `${w.year}-${String(w.month).padStart(2, '0')}`;
 }
 
@@ -83,7 +83,7 @@ interface Suspect {
 
 /**
  * "kWh im Monat" from a total energy meter (state_class total_increasing):
- * current value minus the value at the start of the month (Europe/Vienna).
+ * current value minus the value at the start of the local month (HZ_TIMEZONE).
  *
  * - First reading of a month: the month starts at the last reading of the
  *   previous month (same sensor, not above the current value), else here.

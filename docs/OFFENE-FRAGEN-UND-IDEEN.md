@@ -1,8 +1,8 @@
-# Offene Fragen, To-dos für Alex und Ideen
+# Offene Fragen, To-dos für den Admin und Ideen
 
 Diese Datei wird bei jedem Meilenstein aktualisiert. Technische Detailfragen der Agents stehen zusätzlich in `docs/QUESTIONS.md`.
 
-## Was Alex selbst tun muss
+## Was der Admin selbst tun muss
 
 Alles hier braucht deine Zugänge oder ist nicht rückgängig zu machen. Bis dahin läuft der Code mit Platzhaltern bzw. Demo-Daten (`HZ_DEMO=1`).
 
@@ -12,35 +12,37 @@ Alles hier braucht deine Zugänge oder ist nicht rückgängig zu machen. Bis dah
 4. **Push aufs Handy (ab M4):** In `.env` `HZ_VAPID_SUBJECT=mailto:<deine Adresse>` setzen (Apple lehnt Pushes ohne echte Adresse ab). Die VAPID-Schlüssel erzeugt der Core beim ersten Start selbst und speichert sie verschlüsselt; wer sie fest haben will, erzeugt sie mit `pnpm --filter @hz/core vapid` und trägt `HZ_VAPID_PUBLIC`/`HZ_VAPID_PRIVATE` ein. Dann am Handy die Zentrale über `https://…ts.net` öffnen, „Zum Home-Bildschirm“ (iOS braucht die installierte PWA für Push) und unter Einstellungen → Push „Auf diesem Gerät aktivieren“, danach „Testnachricht senden“.
 5. **GitHub verbinden (ab M5):** Auf github.com unter Settings → Developer settings → Fine-grained tokens einen Token anlegen: nur die gewünschten Repos, Rechte *Contents: Read*, *Actions: Read*, *Metadata: Read*. In der Zentrale unter Einstellungen → GitHub eintragen (fragt nach dem TOTP-Code). Für private Repos pro Deploy-Ziel „Deploy-Key erzeugen“ und den angezeigten Schlüssel im Repo unter Settings → Deploy keys eintragen (ohne Schreibrecht). Zielordner unter `/opt/homelab/apps/` am besten vom ersten Deploy anlegen lassen; ein von Hand angelegter Ordner muss leer sein (außer `.env`) und root gehören, sonst lehnt git ihn ab. Gelöschte Deploy-Ziele lassen ihren privaten Key auf dem Server unter `/data/deploy-keys/` liegen (bei GitHub den Deploy-Key dann auch entfernen).
 6. **Agent neu ausrollen (ab M3, erneut ab M6):** Auf Servern, die schon einen Agent haben, `deploy/install-agent.sh` erneut ausführen (neues Image mit `ping`, Schutz-Label `hz.role`, ab M6 `tar`/`zstd` für Gameserver-Backups). Valheim und CS2 gibt es nur für amd64, also nicht auf dem Raspberry Pi und der Oracle-ARM-VM.
-7. **Gameserver für Freunde erreichbar machen (ab M6):** Die Zentrale zeigt pro Gameserver, welche Ports weitergeleitet werden müssen. Das machst du selbst: am Heimserver im Deco-Router (Portweiterleitung auf die feste LAN-IP des Heimservers), bei Oracle in der Security List der VM *und* in iptables auf der VM. Für eine schöne Adresse (z. B. `mc.<deine-domain>`) einen DNS-/DDNS-Eintrag anlegen und im Gameserver unter Einstellungen als externe Adresse eintragen. Die Zentrale selbst bleibt dabei nur über Tailscale erreichbar.
+7. **Gameserver für Freunde erreichbar machen (ab M6):** Die Zentrale zeigt pro Gameserver, welche Ports weitergeleitet werden müssen. Das machst du selbst: am Heimserver im Router (Portweiterleitung auf die feste LAN-IP des Heimservers), bei Oracle in der Security List der VM *und* in iptables auf der VM. Für eine schöne Adresse (z. B. `mc.<deine-domain>`) einen DNS-/DDNS-Eintrag anlegen und im Gameserver unter Einstellungen als externe Adresse eintragen. Die Zentrale selbst bleibt dabei nur über Tailscale erreichbar.
 8. **Share-Gateway (optional, ab M7):** Nur wenn Freunde ohne Tailscale Links nutzen sollen. Anleitung in `deploy/README.md` → „Share-Gateway auf oracle-a1“: DDNS-Namen anlegen, in der Oracle Security List und in iptables 80/443 öffnen, Caddy installieren, in der Zentrale unter Einstellungen → Share-Gateway einen Token erzeugen und auf oracle-a1 in `/etc/homelab-share/share.env` eintragen, dann einschalten. Ohne Gateway funktionieren Links nur im Tailnet (sicherer Standard). Die Zentrale selbst bleibt dabei nie öffentlich.
 9. **Home Assistant verbinden (ab M8):** In HA unter Profil → Sicherheit einen Long-Lived Access Token anlegen. In der Zentrale unter Einstellungen → Home Assistant die URL (z. B. `http://<heimserver-LAN-IP>:8123`) und den Token eintragen (fragt nach dem TOTP-Code), dann unter „Wohnung: Räume und Geräte“ Räume anlegen und Geräte auswählen. Türöffner (BTicino/Shelly) als Art „Taster“ eintragen. Strompreis €/kWh und die Sensoren für Leistung (W) und Energie (kWh) wählen.
 10. **Web-Konsole einschalten (ab M9, nur wo gewünscht):** Die Konsole ist pro Server zweimal aus: Auf dem Server in der Agent-`.env` `HZ_AGENT_ALLOW_TERMINAL=1` setzen und den Agent neu starten (`deploy/install-agent.sh` erneut ausführen, das neue Image enthält die PTY-Bibliothek), dann in der Zentrale unter Einstellungen → Server „Konsole erlaubt“ einschalten. Öffnen fragt nach dem TOTP-Code; jede Sitzung steht im Protokoll (ohne Inhalte). Empfehlung: nur am Heimserver, nicht auf der öffentlichen Oracle-VM.
 11. **Wandmodus aufs Tablet (ab M9):** Unter Einstellungen → Wandmodus ein Gerät anlegen (fragt nach dem TOTP-Code), den QR-Code mit dem Tablet scannen und die Seite als Startseite bzw. im Kiosk-Browser festlegen. Das Gerät darf nur den Wandzustand lesen; verliert man das Tablet, das Gerät in den Einstellungen löschen.
 12. **Datenbank sichern:** Unter Einstellungen → Export lädt die ganze SQLite-Datenbank herunter (Step-up). Die Secrets darin sind verschlüsselt; ohne `HZ_SECRET_KEY` ist das Backup für Secrets wertlos, also beides getrennt aufbewahren.
+13. **Images öffentlich lesbar machen (einmalig):** Nach dem ersten Lauf von `images.yml` auf `main` unter github.com → dein Profil → Packages bei `homelab-agent`, `homelab-core` und `homelab-share` die Sichtbarkeit auf „Public“ stellen (sonst brauchen die Server ein `docker login ghcr.io`).
 
 **Noch von Hand abzunehmen** (braucht echte Zugänge): Push am Handy (M4); ein echter Deploy eines Test-Repos mit `compose.yml` auf den Heimserver-Agent (M5, automatisiert nur mit Fake-GitHub, Fake-Agent und echtem git gegen ein lokales Repo getestet). Der echte Türöffner (BTicino/Shelly) mit deiner HA (M8, im CI nur mit der HA-Demo getestet). Benutzerlink von außen über das Gateway auf oracle-a1 (M7, im CI nur lokal getestet).
 
+## Entschieden (26.11.2026)
+
+- Ein PR pro Meilenstein auf dem festen Arbeitsbranch bleibt so.
+- Repo ist öffentlich; CodeQL und Dependency-Review laufen jetzt (`.github/workflows/codeql.yml`).
+- „Server hinzufügen“ braucht Step-up.
+- Images kommen aus der GitHub Container Registry (`ghcr.io/puffybooy/homelab-{agent,core,share}`), lokaler Bau bleibt möglich (`HZ_BUILD_LOCAL=1`, `docker-compose.*.build.yml`).
+- Ein widerrufener Server kann sich unter demselben Namen neu anmelden und behält seinen Verlauf.
+- Checks (2 Fehlschläge), Deploy ohne CI, Neustart-Recht allein, Konsolen-Grenzen: bleiben wie gebaut.
+- Pushes in der Ruhezeit kommen morgens gesammelt („Über Nacht: N Meldungen“).
+- Gameserver-Ports lassen sich ändern, mit Hinweis zur Portweiterleitung.
+- Backups gelöschter Gameserver werden nach 30 Tagen gelöscht.
+- Benutzerlinks erstellen und widerrufen braucht Step-up.
+- Türöffner behält Bestätigung plus Step-up.
+- Wandgerät-Link gilt nur einmal; „Neuen Link“ koppelt ein Tablet neu.
+- „Updates verfügbar“ und „Neustart nötig“ sind `info` (kein Push).
+- Die App ist für jeden deploybar: nichts Persönliches im Code, Zeitzone über `HZ_TIMEZONE`, GitHub, Home Assistant und Gameserver sind Module zum An- und Ausschalten.
+
 ## Offene Fragen
 
-- **Branch-Namen:** AGENTS.md wünscht pro Meilenstein einen Branch `m<N>-<name>`. Diese Sitzung darf technisch nur auf einen festen Branch pushen. Annahme: Jeder Meilenstein ist trotzdem ein eigener PR mit Titel `M<N>: …`, der Branch wird nach jedem Merge neu von `main` gestartet. Soll ich künftig `m<N>-…`-Branches verwenden?
-- **CodeQL / Dependency-Review:** Das Repo ist privat. GitHubs CodeQL-Code-Scanning und die Dependency-Review-Action brauchen dafür „GitHub Code Security“ (kostenpflichtig). Annahme: Stattdessen laufen Semgrep (SAST), Gitleaks (Secrets in der ganzen Git-Historie), Trivy (Abhängigkeiten, Dockerfiles, Image) und `pnpm audit` in `.github/workflows/security.yml`. Wenn du Code Security aktivierst oder das Repo öffentlich machst, ergänze ich CodeQL in 5 Minuten.
-
-- **Server hinzufügen ohne Step-up?** Das Erzeugen eines Enrollment-Tokens (15 Min, einmalig) verlangt derzeit keine erneute TOTP-Eingabe, Widerrufen und Löschen schon. Soll auch das Hinzufügen Step-up brauchen?
-- **Agent-Image:** Es gibt noch keine Registry. Annahme: Das Agent-Image wird auf jedem Server lokal gebaut (`deploy/install-agent.sh`). Alternative: GitHub Container Registry (`ghcr.io/puffybooy/homelab-agent`), dann müsste das Repo-Paket für die Server lesbar sein. Soll ich das einrichten?
-- **Neu einschreiben unter gleichem Namen:** Ein widerrufener Server muss gelöscht werden, bevor er sich unter demselben Namen neu anmelden kann (dabei geht der Verlauf verloren). Soll ein Re-Enrollment den alten Eintrag samt Verlauf übernehmen?
-- **Checks, erste Fehlschläge:** Der erste Fehlschlag zeigt `WARN` ohne Meldung, erst der zweite in Folge ist `CRIT` mit Push. Weiterleitungen (max. 5, nur http/https) werden verfolgt, ein Check kann also keinen 3xx-Code erwarten. Passt das?
-- **Deploy ohne CI:** Repos ganz ohne GitHub Actions dürfen per Knopf deployt werden (rotes oder laufendes CI nicht). Auto-Deploy nur bei grünem CI. Rollback ignoriert den CI-Status. Passt das?
-- **Ruhezeit:** warn- und info-Pushes in der Ruhezeit (23–7 Uhr) werden verworfen, nicht morgens nachgeliefert (die Meldungen selbst bleiben in der Liste). Lieber morgens gesammelt nachliefern?
-- **Gameserver-Ports ändern:** Ports sind nach dem Aufsetzen nicht mehr änderbar (sonst stimmt die Portweiterleitung nicht mehr). Reicht das, oder soll Ändern mit Hinweis gehen?
-- **Backups beim Löschen:** Vor dem Löschen eines Gameservers wird immer gesichert; die Backup-Dateien bleiben unter `/opt/homelab/backups/` am Server liegen, auch wenn der Eintrag weg ist. Sollen sie nach X Tagen automatisch weg?
-- **Step-up für Benutzerlinks?** Links erstellen und widerrufen braucht derzeit keine erneute TOTP-Eingabe (SECURITY.md nennt es nicht); Gateway-Einstellungen und Gateway-Token schon. Soll auch das Erstellen eines Links Step-up brauchen?
-- **Neustart-Recht allein:** Ein Link nur mit „Neustart“ darf einen gestoppten Server nicht starten (sonst wäre es heimlich „Starten“). Passt das?
-- **Türöffner mit Step-up:** Tür öffnen fragt nach der Bestätigung zusätzlich nach dem TOTP-Code (gilt 15 Min), damit ein gestohlenes Session-Cookie die Haustür nicht öffnen kann. Zu umständlich?
-- **Wandgerät-Token wiederverwendbar:** Der Link fürs Tablet gilt, bis das Gerät gelöscht wird (Kiosk-Browser laden oft die Start-URL neu und verlieren Cookies). Sicherer wäre ein Einmal-Token, dann muss das Tablet bei Cookie-Verlust neu gekoppelt werden. Lieber einmalig?
-- **Konsole pro Server:** höchstens 2 gleichzeitig, 15 Min ohne Eingabe und 60 Min insgesamt, dann wird getrennt. Passt das?
-- **Arm64-Agent mit Konsole:** Die PTY-Bibliothek kommt als fertiges Binary; auf dem Raspberry Pi und der Oracle-ARM-VM ist das in CI gebaut, aber nicht am echten Gerät ausprobiert.
-- **Level für Updates/Neustart nötig:** derzeit `warn` (wie SPEC 5.1). Mit Push ab M4 wären das gesammelte Pushes alle 30 Min. Lieber `info` (kein Push)?
+- **Prioritäten (M10):** „prepped“ kommt im Repo nicht vor; Annahme: eine eigene App, die als Container läuft. Du markierst sie selbst als `wichtig`, Gameserver als `niedrig`. Standard-Schwelle CPU oder RAM über 90 % für 2 Min, Drosseln auf 1 Kern, Stoppen erst nach weiteren 5 Min und nur mit „darf gestoppt werden“, nie mit Spielern online (außer ausdrücklich erlaubt). Passt das?
+- **Wandmodus-Zeitzone:** Die Wandseite zeigt die Zeit in der Zone des Tablets (sie hat keine Admin-Session). Soll der Core die Zeitzone mitschicken?
 
 ## Annahmen
 
@@ -71,7 +73,7 @@ Sortiert nach Bereich. Nichts davon ist in den Meilensteinen, alles wäre ein ei
 ### Container und Deploy
 - Watchtower-artige Update-Hinweise: neue Image-Version verfügbar, mit Changelog-Link.
 - Preview-Deploys pro Branch unter eigenem Pfad im Tailnet.
-- Deploy-Freigabe per Push-Nachricht („Deploy von soundos auf soundos-pi freigeben?“).
+- Deploy-Freigabe per Push-Nachricht („Deploy von my-app auf raspi freigeben?“).
 - Secrets-Verwaltung für `.env`-Dateien der Apps (verschlüsselt im Core, beim Deploy geschrieben).
 - GitHub-App statt Token, damit Rechte feiner sind.
 - Release-Notes automatisch aus Commits beim Deploy.
@@ -83,7 +85,7 @@ Sortiert nach Bereich. Nichts davon ist in den Meilensteinen, alles wäre ein ei
 - Spielerstatistik (Spielzeit pro Freund, Spitzenzeiten).
 - Mehr Vorlagen: Satisfactory, Factorio, Enshrouded, Project Zomboid, ARK, Rust, V Rising.
 - Auto-Start beim ersten Verbindungsversuch (Proxy, der den Server weckt).
-- Whitelist-Anfragen: Freund trägt seinen Namen ein, Alex bestätigt per Push.
+- Whitelist-Anfragen: Freund trägt seinen Namen ein, der Admin bestätigt per Push.
 - Feld „Netz: zuhause/Oracle/VPS“ am Server, damit der Hinweis zur Portweiterleitung nicht aus dem Namen geraten wird.
 - Gameserver in der Befehlspalette; Ports nachträglich ändern; Wiederherstellen eines Backups per Knopf.
 - Docker-Labels im Inventar, damit Gameserver-Container über `homelab.game` statt über Ordner/Name erkannt werden.
@@ -97,25 +99,25 @@ Sortiert nach Bereich. Nichts davon ist in den Meilensteinen, alles wäre ein ei
 - Eskalation: crit 15 Min unbestätigt → zweite Push oder Anruf über Home Assistant.
 
 ### Wohnung
-- Morgen-Briefing auf dem Wandtablet: Wetter Wien und Attersee, Wiener Linien Abfahrten, Termine, Müllabfuhr.
+- Morgen-Briefing auf dem Wandtablet: Wetter, Öffi-Abfahrten, Termine, Müllabfuhr.
 - Stromverbrauch pro Server (Shelly-Steckdosen) und Kosten pro Gameserver im Monat.
 - Szenen („Gaming-Abend“: Licht dimmen, Minecraft starten).
-- Anwesenheit: Gameserver stoppen, wenn niemand online ist und Alex nicht zu Hause.
+- Anwesenheit: Gameserver stoppen, wenn niemand online ist und der Admin nicht zu Hause.
 
 ### Bedienung
 - KI-Befehle in der Befehlspalette („Starte den Minecraft-Server“, „Warum ist oracle-a1 langsam?“).
 - Sprachsteuerung über Home Assistant Assist.
 - iOS/Android-Widgets über die PWA-Shortcuts.
 - Tastatur-Makros und eigene Aktionen in der Palette.
-- Dunkles Wandmodus-Layout für den Echo Show.
+- Dunkles Wandmodus-Layout für Smart Displays.
 
 - Konsole: mehrere Tabs, Datei-Upload per Drag & Drop, gespeicherte Befehle.
-- Wandmodus: Kalender, Wetter und Öffi-Abfahrten (Wiener Linien) als Kacheln.
+- Wandmodus: Kalender, Wetter und Öffi-Abfahrten als Kacheln.
 - Export automatisch jede Nacht auf einen zweiten Server (verschlüsselt).
 
 ### Sonstiges
-- Roblox-/Evelon-Statistiken.
-- SoundOS-Steuerung (FastAPI auf dem Pi): Status, Neustart, Logs.
+- Statistiken eigener Spiele.
+- Steuerung eigener Apps (z. B. FastAPI auf dem Pi): Status, Neustart, Logs.
 - Paket-Tracking (Post, DHL) als Kachel.
 - Pi-hole/AdGuard-Statistiken.
 - Tailscale-Geräteliste mit „zuletzt online“ und Ablauf der Schlüssel.

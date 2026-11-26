@@ -44,13 +44,13 @@ describe('worstStatus', () => {
 });
 
 describe('groupContainers', () => {
-  const pi = { serverId: 'srv-pi000001', serverName: 'soundos-pi' };
+  const pi = { serverId: 'srv-pi000001', serverName: 'pi' };
   const home = { serverId: 'srv-home0001', serverName: 'heimserver' };
   const oci = { serverId: 'srv-oci00001', serverName: 'oracle-a1' };
 
   it('groups by server, then compose project; problems first', () => {
     const groups = groupContainers([
-      container({ ...pi, name: 'soundos' }),
+      container({ ...pi, name: 'my-app' }),
       container({ ...home, name: 'homeassistant' }),
       container({ ...home, name: 'jellyfin', composeProject: 'media' }),
       container({ ...home, name: 'sonarr', composeProject: 'media' }),
@@ -65,7 +65,7 @@ describe('groupContainers', () => {
       }),
       container({ ...oci, name: 'minecraft', status: 'warn', state: 'restarting' }),
     ]);
-    expect(groups.map((g) => g.serverName)).toEqual(['heimserver', 'oracle-a1', 'soundos-pi']);
+    expect(groups.map((g) => g.serverName)).toEqual(['heimserver', 'oracle-a1', 'pi']);
     const h = groups[0];
     expect(h?.status).toBe('crit');
     expect(h?.problems).toBe(1);

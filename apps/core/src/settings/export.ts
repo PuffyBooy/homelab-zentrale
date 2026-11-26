@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import type Database from 'better-sqlite3';
 import type { FastifyBaseLogger, FastifyPluginAsync } from 'fastify';
 import { requireStepUp } from '../auth/guard.js';
-import { viennaTime } from '../calendar.js';
+import { localTime } from '../calendar.js';
 import type { Clock } from '../clock.js';
 import { randomToken } from '../crypto.js';
 import { writeAudit } from '../db/audit.js';
@@ -25,9 +25,9 @@ const TEMP_RE = /^\.export-[A-Za-z0-9_-]{16,}\.sqlite$/;
 
 const pad = (n: number): string => String(n).padStart(2, '0');
 
-/** "homelab-zentrale-20261126-2304.sqlite" (Vienna time). */
+/** "homelab-zentrale-20261126-2304.sqlite" (local time, HZ_TIMEZONE). */
 export function exportFileName(ms: number): string {
-  const t = viennaTime(ms);
+  const t = localTime(ms);
   return `homelab-zentrale-${t.year}${pad(t.month)}${pad(t.day)}-${pad(t.hour)}${pad(t.minute)}.sqlite`;
 }
 

@@ -46,13 +46,17 @@ export function shortcutLabel(item: NavItem, index: number): string {
 
 /**
  * Target path for a global shortcut key: 1–8 by position, 9 and ` for the console.
- * Returns undefined for any other key.
+ * `items` are the visible nav items (switched-off modules left out), so the digits
+ * match the key caps in the NavRail. Returns undefined for any other key.
  */
-export function shortcutTarget(key: string): string | undefined {
-  const byLabel = navItems.find((it, i) => shortcutLabel(it, i) === key);
+export function shortcutTarget(
+  key: string,
+  items: readonly NavItem[] = navItems,
+): string | undefined {
+  const byLabel = items.find((it, i) => shortcutLabel(it, i) === key);
   if (byLabel) return hrefOf(byLabel);
   if (/^[1-9]$/.test(key)) {
-    const item = navItems[Number(key) - 1];
+    const item = items[Number(key) - 1];
     return item ? hrefOf(item) : undefined;
   }
   return undefined;
@@ -82,12 +86,12 @@ interface KeyLike {
 export type ShortcutAction = { kind: 'palette' } | { kind: 'navigate'; to: string } | null;
 
 /** Maps a keydown to a shell action. Ctrl/⌘+K works everywhere, digits only outside inputs. */
-export function shortcutAction(e: KeyLike): ShortcutAction {
+export function shortcutAction(e: KeyLike, items: readonly NavItem[] = navItems): ShortcutAction {
   if ((e.ctrlKey || e.metaKey) && !e.altKey && e.key.toLowerCase() === 'k') {
     return { kind: 'palette' };
   }
   if (e.ctrlKey || e.metaKey || e.altKey) return null;
   if (isTypingTarget(e.target)) return null;
-  const to = shortcutTarget(e.key);
+  const to = shortcutTarget(e.key, items);
   return to ? { kind: 'navigate', to } : null;
 }

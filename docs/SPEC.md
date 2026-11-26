@@ -2,19 +2,33 @@
 
 ## 1. Ziel und Nutzer
 
-Ein Admin (Alex) will alle seine Server, Container, Gameserver, Repos, Websites und die Wohnung auf **einer** Oberfläche sehen und steuern, am Desktop, am Handy (PWA) und auf einem Tablet an der Wand.
+Ein Admin will alle eigenen Server, Container, Gameserver, Repos, Websites und die Wohnung auf **einer** Oberfläche sehen und steuern, am Desktop, am Handy (PWA) und auf einem Tablet an der Wand.
 
 **Grundsatz:** Wenn alles läuft, ist der Bildschirm still. Probleme stehen immer oben, und ein Blick muss reichen.
 
-Außer Alex gibt es nur eine Art von Nutzer: **Freunde mit einem Benutzerlink** für einen einzelnen Gameserver (Abschnitt 6.4). Sie sehen nichts anderes.
+Außer dem Admin gibt es nur eine Art von Nutzer: **Freunde mit einem Benutzerlink** für einen einzelnen Gameserver (Abschnitt 6.4). Sie sehen nichts anderes.
 
-## 2. Ausgangslage
+## 1a. Für jeden deploybar, Module
+
+Die Zentrale ist nicht an eine bestimmte Person, Stadt oder ein bestimmtes Netz gebunden. Alles Persönliche steht in der Konfiguration (`.env`, Einstellungen), nicht im Code: Basis-URL, Zeitzone (`HZ_TIMEZONE`, Standard `Europe/Vienna`), Server-Namen, Domains.
+
+Optionale Teile sind **Module**, die der Admin unter Einstellungen → Module an- und ausschaltet:
+
+| Modul | Standard bei Neuinstallation | Aus heißt |
+| --- | --- | --- |
+| GitHub | aus | keine GitHub-Seite, kein Polling, keine Deploys; die Zentrale braucht GitHub nicht |
+| Home Assistant | aus | keine Seite „Wohnung“, keine Verbindung zu HA |
+| Gameserver | an | keine Gameserver-Seite, keine Benutzerlinks |
+
+Ein ausgeschaltetes Modul verschwindet aus Navigation, Übersicht und Befehlspalette, seine API antwortet `404 module_disabled`, und es läuft nichts im Hintergrund. Container-Images gibt es fertig in der GitHub Container Registry; wer GitHub nicht nutzen will, baut sie lokal (`HZ_BUILD_LOCAL=1`).
+
+## 2. Ausgangslage (Beispiel-Setup)
 
 | Server | Ort | Rolle | Erreichbarkeit |
 | --- | --- | --- | --- |
-| `heimserver` | Wien, Ubuntu Server 24.04, Docker | Core, Home Assistant, eigene Web-Apps, kleinere Gameserver | Tailscale; zu Hause hinter TP-Link Deco Mesh, eigene öffentliche IPv4 mit DDNS |
+| `heimserver` | zu Hause, Ubuntu Server 24.04, Docker | Core, Home Assistant, eigene Web-Apps, kleinere Gameserver | Tailscale; zu Hause hinter dem Router, öffentliche IPv4 mit DDNS |
 | `oracle-a1` | Oracle Cloud, VM.Standard.A1.Flex (ARM), Ubuntu | Gameserver (Minecraft Paper), öffentliche Dienste | Tailscale; reservierte öffentliche IP |
-| `soundos-pi` | Raspberry Pi 5 im Studio | SoundOS (FastAPI) | Tailscale |
+| `pi` | Raspberry Pi 5 | kleine Dienste | Tailscale |
 | weitere | beliebig | | Tailscale |
 
 Alle Server laufen auf Linux mit Docker. ARM (Oracle, Pi) und x86 müssen beide unterstützt werden: Multi-Arch-Images für den Agent.
@@ -33,7 +47,7 @@ Linke Navigation (`NavRail`), Tastenkürzel in Klammern:
 8. Meldungen (`8`)
 9. Konsole (`` ` ``)
 
-Dazu kommen die Einstellungen (Zahnrad unten in der Navigation) und eine **Befehlspalette** (`Strg/⌘+K`): Suche über Server, Container, Repos, Gameserver und Aktionen wie „minecraft neu starten“ oder „soundos deployen“.
+Dazu kommen die Einstellungen (Zahnrad unten in der Navigation) und eine **Befehlspalette** (`Strg/⌘+K`): Suche über Server, Container, Repos, Gameserver und Aktionen wie „minecraft neu starten“ oder „my-app deployen“.
 
 Am Handy wird die Navigation zur unteren Leiste mit Übersicht, Server, Gameserver und Meldungen sowie „Mehr“ für den Rest.
 
@@ -100,7 +114,7 @@ Vorlagen liegen als Dateien in `templates/games/<id>/`: `compose.yml` mit `${VAR
 1. Vorlage wählen
 2. Formular: Name, Zielserver (mit freiem RAM, „zu wenig RAM frei“ als Warnung), Version, max. Spieler, Port (Vorschlag: der nächste freie), vorlagenspezifische Felder (z. B. Minecraft: Typ, Seed, Whitelist an/aus, Online-Mode)
 3. „Aufsetzen“: Der Core rendert die Compose-Datei, der Agent legt sie unter `/opt/homelab/games/<name>/` ab und startet sie. Der Fortschritt erscheint live (Image ziehen, Welt erzeugen, „bereit“).
-4. Danach erscheint die `GameServer`-Kachel. Der Hinweis zur Portweiterleitung (Deco bzw. Oracle Security List) wird mit den genauen Ports angezeigt, wenn der Server von außen erreichbar sein soll.
+4. Danach erscheint die `GameServer`-Kachel. Der Hinweis zur Portweiterleitung (Router bzw. Oracle Security List) wird mit den genauen Ports angezeigt, wenn der Server von außen erreichbar sein soll.
 
 RCON-Passwörter werden automatisch erzeugt und verschlüsselt gespeichert.
 
@@ -118,6 +132,24 @@ Freunde bekommen pro Gameserver einen Link, mit dem sie **nur diesen Server** st
 - Jede Aktion wird mit Person und Zeit protokolliert und ist in der Gameserver-Detailseite sichtbar.
 - Widerrufen jederzeit. Abgelaufene Links zeigen „Link abgelaufen“.
 - **Erreichbarkeit:** Über das optionale Share-Gateway (`apps/share`, siehe `docs/NETWORK.md`). Solange das Gateway aus ist, funktionieren Links nur im Tailnet. Das ist der Standard.
+
+## 6a. Prioritäten und automatisches Drosseln
+
+Jeder Container und jeder Gameserver hat eine **Priorität**:
+
+| Priorität | Bedeutung |
+| --- | --- |
+| `wichtig` | Muss immer laufen (z. B. die eigene Web-App). Wird nie gedrosselt oder gestoppt. Fällt er aus, startet die Zentrale ihn neu (höchstens 3 Versuche in 10 Min, dann CRIT-Meldung). |
+| `normal` | Standard. Wird nicht automatisch angefasst. |
+| `niedrig` | Darf gedrosselt werden, wenn ein Server knapp wird (typisch: Gameserver). Optional „darf gestoppt werden“. |
+
+Regel pro Server (Schwellen in den Server-Einstellungen, Standard: CPU über 90 % oder RAM über 90 % für 2 Min):
+
+1. **Drosseln:** Die Zentrale begrenzt die CPU der `niedrig`-Container (zuerst den mit der höchsten CPU) auf einen Anteil (Standard 1 Kern) mit `docker update --cpus`. RAM-Limits werden nie automatisch gesenkt (das würde den Prozess abschießen).
+2. **Stoppen:** Bleibt der Server weitere 5 Min über der Schwelle und ist der Container als „darf gestoppt werden“ markiert, stoppt die Zentrale ihn (Gameserver sauber über `compose stop`, vorher Speichern per RCON, wenn vorhanden). Gameserver mit Spielern online werden nur gestoppt, wenn das ausdrücklich erlaubt ist.
+3. **Aufheben:** Ist der Server 10 Min unter der Schwelle minus 10 Prozentpunkte, hebt die Zentrale die Drosselung wieder auf. Automatisch gestoppte Container startet sie nicht von selbst neu (Meldung mit Knopf „Wieder starten“).
+
+Jeder Eingriff ist eine `warn`-Meldung mit Grund („minecraft gedrosselt: heimserver CPU 96 % seit 2 Min“) und steht im Protokoll. Die Zentrale und der Agent (`hz.role`) sind immer `wichtig` und nie Ziel. Ein Schalter pro Server schaltet die Automatik ganz ab.
 
 ## 7. GitHub
 
@@ -184,4 +216,4 @@ Konto (Passwort, TOTP, aktive Sessions), Server (Schwellen, Konsole erlaubt, ent
 
 ## 15. Ideen für später (nicht in den Meilensteinen)
 
-Backups mit restic zwischen den Servern, Roblox-/Evelon-Statistiken, SoundOS-Steuerung, Morgen-Briefing (Wetter Wien und Attersee, Wiener Linien, Termine), Paket-Tracking, Pi-hole-Statistiken, Wake-on-LAN, KI-Befehle („Starte den Minecraft-Server“).
+Backups mit restic zwischen den Servern, Spiel-Statistiken, Steuerung eigener Apps, Morgen-Briefing (Wetter, Öffi-Abfahrten, Termine), Paket-Tracking, Pi-hole-Statistiken, Wake-on-LAN, KI-Befehle („Starte den Minecraft-Server“).

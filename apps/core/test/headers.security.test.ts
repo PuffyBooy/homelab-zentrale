@@ -132,7 +132,7 @@ describe('error responses', () => {
     t = await makeApp();
     const requests = [
       { payload: { username: marker, password: marker, code: marker } },
-      { payload: { username: 'alex', password: PASSWORD, code: '000000', extra: marker } },
+      { payload: { username: 'admin', password: PASSWORD, code: '000000', extra: marker } },
       { payload: `{"username":"${marker}",`, headers: { 'content-type': 'application/json' } },
       { payload: marker, headers: { 'content-type': 'text/plain' } },
       { payload: { username: ['x'], password: { $ne: marker } } },

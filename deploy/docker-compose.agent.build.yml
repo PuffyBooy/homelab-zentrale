@@ -1,0 +1,9 @@
+# Override: build the agent image from this checkout instead of pulling it from GHCR.
+#   docker compose -f deploy/docker-compose.agent.yml -f deploy/docker-compose.agent.build.yml up -d --build
+services:
+  agent:
+    build:
+      context: ..
+      dockerfile: apps/agent/Dockerfile
+    image: homelab-zentrale/agent:local
+    pull_policy: build

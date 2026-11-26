@@ -13,7 +13,7 @@ import { server } from '../test-fixtures.js';
 describe('sortServers', () => {
   it('puts crit, then warn, then the rest by name', () => {
     const list = [
-      server({ name: 'soundos-pi' }),
+      server({ name: 'pi' }),
       server({ name: 'oracle-a1', status: 'warn' }),
       server({ name: 'heimserver' }),
       server({ name: 'web-vps', status: 'crit' }),
@@ -24,10 +24,10 @@ describe('sortServers', () => {
       'oracle-a1',
       'alt',
       'heimserver',
-      'soundos-pi',
+      'pi',
     ]);
     // Input untouched.
-    expect(list[0]?.name).toBe('soundos-pi');
+    expect(list[0]?.name).toBe('pi');
   });
 });
 
@@ -96,7 +96,7 @@ describe('toServerInfo', () => {
     expect(info).toMatchObject({
       id: 'abcdefgh',
       name: 'heimserver',
-      where: 'Wien',
+      where: 'Zuhause',
       ip: '100.64.0.1',
       status: 'ok',
       cpu: 23,

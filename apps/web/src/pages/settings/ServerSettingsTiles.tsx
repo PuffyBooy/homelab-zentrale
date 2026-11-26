@@ -245,7 +245,7 @@ function EditServerForm({
         value={location}
         maxLength={60}
         onChange={(e) => setLocation(e.target.value)}
-        placeholder="Wien"
+        placeholder="Zuhause"
         data-autofocus=""
       />
       <fieldset className="app-fieldset">

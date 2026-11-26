@@ -1,38 +1,24 @@
+import { zonedFormat } from './timezone.js';
+
 /**
  * German (Austrian) text formatting for status reasons and alerts
  * (design/README.md, "Stimme und Text"): comma decimals, a space before the
- * unit, 24-hour clock in Europe/Vienna.
+ * unit, 24-hour clock in the configured time zone (HZ_TIMEZONE, timezone.ts).
  */
-export const TIME_ZONE = 'Europe/Vienna';
-
-const timeFmt = new Intl.DateTimeFormat('de-AT', {
-  timeZone: TIME_ZONE,
-  hour: '2-digit',
-  minute: '2-digit',
-  hourCycle: 'h23',
-});
-const dateFmt = new Intl.DateTimeFormat('de-AT', {
-  timeZone: TIME_ZONE,
-  day: '2-digit',
-  month: '2-digit',
-});
-const dayKeyFmt = new Intl.DateTimeFormat('en-CA', {
-  timeZone: TIME_ZONE,
-  year: 'numeric',
-  month: '2-digit',
-  day: '2-digit',
-});
+const timeFmt = zonedFormat('de-AT', { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
+const dateFmt = zonedFormat('de-AT', { day: '2-digit', month: '2-digit' });
+const dayKeyFmt = zonedFormat('en-CA', { year: 'numeric', month: '2-digit', day: '2-digit' });
 const decimalFmt = new Intl.NumberFormat('de-AT', { maximumFractionDigits: 1 });
 
-/** `23:04` in Vienna time. */
+/** `23:04` in local time. */
 export function clockTime(ms: number): string {
-  return timeFmt.format(ms);
+  return timeFmt().format(ms);
 }
 
-/** `23:04`, or `24.11. 23:04` if `ms` is not on the same Vienna day as `now`. */
+/** `23:04`, or `24.11. 23:04` if `ms` is not on the same local day as `now`. */
 export function clockTimeRelative(ms: number, now: number): string {
-  if (dayKeyFmt.format(ms) === dayKeyFmt.format(now)) return clockTime(ms);
-  return `${dateFmt.format(ms)} ${clockTime(ms)}`;
+  if (dayKeyFmt().format(ms) === dayKeyFmt().format(now)) return clockTime(ms);
+  return `${dateFmt().format(ms)} ${clockTime(ms)}`;
 }
 
 /**

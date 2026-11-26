@@ -57,9 +57,7 @@ describe('ha schemas', () => {
     expect(haPressRequestSchema.safeParse({}).success).toBe(false);
     expect(haPressRequestSchema.safeParse({ confirm: false }).success).toBe(false);
     expect(haPressRequestSchema.safeParse({ confirm: true }).success).toBe(true);
-    expect(haSettingsRequestSchema.safeParse({ url: 'http://192.168.68.20:8123' }).success).toBe(
-      true,
-    );
+    expect(haSettingsRequestSchema.safeParse({ url: 'http://192.0.2.20:8123' }).success).toBe(true);
     for (const url of [
       'http://u:p@ha.local:8123',
       'ftp://ha.local',
@@ -117,7 +115,7 @@ describe('ha schemas', () => {
     for (const u of [
       'http://127.0.0.1:8123',
       'http://[::1]:8123',
-      'http://192.168.68.20:8123',
+      'http://192.0.2.20:8123',
       'https://ha.example.ts.net',
       'http://[fec0::1]',
     ]) {

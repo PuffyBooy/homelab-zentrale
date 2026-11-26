@@ -7,7 +7,7 @@ const servers: ServerInfo[] = [
   {
     id: 'home',
     name: 'heimserver',
-    where: 'Wien',
+    where: 'Zuhause',
     ip: '192.168.1.20',
     status: 'ok',
     cpu: 23,
@@ -31,7 +31,7 @@ describe('ServerList', () => {
   });
 
   it('shows where and ip, values and meters', () => {
-    expect(out).toContain('<b>heimserver</b><small>Wien · 192.168.1.20</small>');
+    expect(out).toContain('<b>heimserver</b><small>Zuhause · 192.168.1.20</small>');
     expect(out).toContain('<i>23%</i>');
     expect(out).toContain('aria-label="Disk"');
     expect(countClass(out, 'hz-blocks-crit')).toBe(1);

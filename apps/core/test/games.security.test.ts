@@ -37,11 +37,12 @@ const ROUTES = [
   ['GET', '/api/games/:id'],
   ['PUT', '/api/games/:id'],
   ['DELETE', '/api/games/:id'],
+  ['PATCH', '/api/games/:id/ports'],
   ['POST', '/api/games/:id/rcon'],
   ['GET', '/api/games/:id/backups'],
   ['POST', '/api/games/:id/:action'],
 ] as const;
-const MUTATING = new Set(['POST', 'PUT', 'DELETE']);
+const MUTATING = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 
 function urlFor(url: string, id: string): string {
   return url.replace(':id', id).replace(':action', 'stop');
@@ -53,6 +54,7 @@ function payloadFor(method: string, url: string, s: GameSetup): Record<string, u
   if (method === 'DELETE') return { confirmName: 'survival' };
   if (url.endsWith('/rcon')) return { command: 'list' };
   if (method === 'PUT') return { autoStopMinutes: 5 };
+  if (method === 'PATCH') return { ports: { game: 30000 } };
   return {};
 }
 

@@ -3,7 +3,7 @@ import { z } from 'zod';
 /**
  * Home Assistant (SPEC 10). The core keeps one WebSocket connection to HA
  * (URL + long-lived access token, token AES-GCM encrypted in `settings`).
- * Only entities Alex selected appear and can be controlled; the core calls a
+ * Only entities the admin selected appear and can be controlled; the core calls a
  * fixed set of services per kind and domain, never an arbitrary service.
  *
  * Kinds:
@@ -67,7 +67,7 @@ export const haConnectionStatusSchema = z.enum([
 
 // GET /api/ha/settings
 export const haSettingsSchema = z.strictObject({
-  /** e.g. "http://192.168.68.20:8123" or "https://ha.<tailnet>.ts.net". */
+  /** e.g. "http://192.0.2.20:8123" or "https://ha.<tailnet>.ts.net". */
   url: z.string().nullable(),
   tokenSet: z.boolean(),
   status: haConnectionStatusSchema,

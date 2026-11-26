@@ -3,11 +3,13 @@ import {
   gameEventSchema,
   gameListResponseSchema,
   gameNameSchema,
+  gamePortsUpdateResponseSchema,
   gameRconResponseSchema,
   gameResponseSchema,
   gameSuggestResponseSchema,
   gameTemplateListResponseSchema,
   type ContainerSummary,
+  type GamePortsUpdateResponse,
   type GameSummary,
   type ServerSummary,
   type TemplateField,
@@ -94,6 +96,28 @@ export async function updateGame(id: string, body: GameUpdateBody): Promise<Game
     schema: gameResponseSchema,
   });
   return res.game;
+}
+
+/**
+ * Changes the host ports (step-up via api()). 409 conflict: a port is taken on the
+ * server. The answer carries the hint for the port forwarding of friends.
+ */
+export function changeGamePorts(
+  id: string,
+  ports: Record<string, number>,
+): Promise<GamePortsUpdateResponse> {
+  return api(`/api/games/${enc(id)}/ports`, {
+    method: 'PATCH',
+    body: { ports },
+    schema: gamePortsUpdateResponseSchema,
+  });
+}
+
+/** Port inputs of the "Ports ändern" form, from the current host ports. */
+export function portsDraft(g: Pick<GameSummary, 'ports'>): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const p of g.ports) out[p.name] = String(p.port);
+  return out;
 }
 
 export async function gameAction(id: string, action: GameAction): Promise<GameSummary> {
@@ -372,7 +396,7 @@ export type ForwardPlace = 'home' | 'oracle' | 'unknown';
 
 /**
  * Where the ports have to be opened. Oracle Cloud VMs need a Security List rule,
- * servers at home a port forwarding on the Deco router. Guessed from name and location;
+ * servers at home a port forwarding on the router. Guessed from name and location;
  * when nothing fits, both hints are shown (docs/QUESTIONS.md, M6 Web).
  */
 export function forwardPlace(
@@ -381,7 +405,7 @@ export function forwardPlace(
   if (!s) return 'unknown';
   const text = `${s.name} ${s.location}`.toLowerCase();
   if (/oracle|\boci\b|oci-/.test(text)) return 'oracle';
-  if (/heim|zuhause|daheim|home|wien|studio/.test(text)) return 'home';
+  if (/heim|zuhause|daheim|home/.test(text)) return 'home';
   return 'unknown';
 }
 
@@ -559,7 +583,7 @@ export function externalAddressError(raw: string): string | null {
   const v = raw.trim();
   if (!v) return null;
   if (v.length > 253 || !ADDRESS_RE.test(v)) {
-    return 'Hostname oder IP, optional mit :Port, z. B. mc.hoebe.at.';
+    return 'Hostname oder IP, optional mit :Port, z. B. mc.example.org.';
   }
   return null;
 }

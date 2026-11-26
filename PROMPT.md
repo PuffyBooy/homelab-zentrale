@@ -54,9 +54,9 @@ Im geklonten Repo `claude` starten und schreiben: „Lies CLAUDE.md und starte m
 | --- | --- |
 | M0 | Auf dem Heimserver: Docker installiert, Repo geklont, `.env` aus `.env.example`, `HZ_SECRET_KEY` mit `openssl rand -base64 32` |
 | M1 | Tailscale auf Heimserver, Handy und Laptop; im Tailscale-Admin MagicDNS und HTTPS-Zertifikate einschalten; dann `tailscale serve --bg --https=443 http://127.0.0.1:8080` |
-| M2 | Tailscale und den Agent (Einzeiler aus der Zentrale) auf `oracle-a1`, `soundos-pi` und jedem weiteren Server |
+| M2 | Tailscale und den Agent (Einzeiler aus der Zentrale) auf jedem weiteren Server |
 | M4 | Die Zentrale am Handy als App installieren (Teilen → „Zum Home-Bildschirm“), dann Push erlauben |
 | M5 | GitHub → Settings → Developer settings → Fine-grained token (nur Lesen: Contents, Actions, Metadata) und in der Zentrale eintragen |
-| M6 | Für Gameserver von außen: Ports in der Oracle Security List öffnen bzw. Portweiterleitung im Deco auf den Heimserver |
+| M6 | Für Gameserver von außen: Ports in der Oracle Security List öffnen bzw. Portweiterleitung im Router auf den Heimserver |
 | M7 | Nur wenn Freunde ohne Tailscale steuern sollen: Share-Gateway auf `oracle-a1` mit deinem DDNS-Namen |
 | M8 | Home Assistant → Profil → Long-Lived Access Token, in der Zentrale eintragen |

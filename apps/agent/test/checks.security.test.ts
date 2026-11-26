@@ -354,7 +354,7 @@ describe('check.http security', () => {
     seenAuth.length = 0;
     const r = await checkHttp({
       ...http0,
-      url: base.replace('http://', 'http://alex:hunter2pw@') + '/cross',
+      url: base.replace('http://', 'http://user:hunter2pw@') + '/cross',
       timeoutMs: 2000,
     });
     expect(r).toMatchObject({ ok: true, code: 200 });
@@ -366,7 +366,7 @@ describe('check.http security', () => {
     seenAuth.length = 0;
     await checkHttp({
       ...http0,
-      url: base.replace('http://', 'http://alex:hunter2pw@') + '/same',
+      url: base.replace('http://', 'http://user:hunter2pw@') + '/same',
       timeoutMs: 2000,
     });
     expect(seenAuth).toHaveLength(2);
@@ -376,7 +376,7 @@ describe('check.http security', () => {
   it('never returns or logs the body, credentials or query', async () => {
     const lines: string[] = [];
     const log = createLogger('debug', (l) => lines.push(l));
-    const url = base.replace('http://', 'http://alex:hunter2pw@') + '/x?token=qsecret123#frag';
+    const url = base.replace('http://', 'http://user:hunter2pw@') + '/x?token=qsecret123#frag';
     const hit = await checkHttp(
       { ...http0, url, contains: 'top-secret', timeoutMs: 2000 },
       { log },
@@ -386,7 +386,7 @@ describe('check.http security', () => {
     expect(miss).toMatchObject({ ok: false, error: 'text not found' });
     const all = JSON.stringify([hit, miss]) + lines.join('\n');
     expect(lines.length).toBeGreaterThan(0);
-    for (const bad of ['top-secret-body', 'hunter2pw', 'alex:', 'qsecret123', 'frag']) {
+    for (const bad of ['top-secret-body', 'hunter2pw', 'user:', 'qsecret123', 'frag']) {
       expect(all).not.toContain(bad);
     }
   });

@@ -4,6 +4,7 @@ import { Button } from '@hz/ui';
 import { Brand } from '../components/Brand.js';
 import { FormError } from '../components/FormError.js';
 import { errorText } from '../lib/errors.js';
+import { setDisplayTimeZone } from '../lib/format.js';
 import { decideGuard, safeReturnPath, type GuardArea } from '../lib/guard.js';
 import { useAuthState } from '../lib/useAuthState.js';
 
@@ -28,6 +29,8 @@ export function AuthGate({
   const location = useLocation();
   const [stuck, setStuck] = useState(false);
   const decision = decideGuard(state.data, area);
+  // Before the children render, so every time on the page uses the zone of the core.
+  if (state.data?.authenticated) setDisplayTimeZone(state.data.timeZone);
 
   if (sticky && decision.kind === 'render' && !stuck) setStuck(true);
   if (stuck) return <>{children}</>;

@@ -53,12 +53,12 @@ describe('command palette', () => {
     ]);
     const r = repoCommands(qc, [
       repo({
-        fullName: 'PuffyBooy/soundos',
+        fullName: 'PuffyBooy/my-app',
         targets: [target({ headSha: 'a'.repeat(40), serverName: 'pi', behind: 3 })],
       }),
     ]);
-    const deploy = r.find((x) => x.label === 'soundos deployen');
-    expect(deploy?.confirm?.title).toBe('soundos auf pi deployen?');
+    const deploy = r.find((x) => x.label === 'my-app deployen');
+    expect(deploy?.confirm?.title).toBe('my-app auf pi deployen?');
     expect(deploy?.confirm?.text).toContain('aaaaaaa');
   });
 

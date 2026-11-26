@@ -100,7 +100,8 @@ export const serverRoutes: FastifyPluginAsync<ServerRoutesOptions> = async (app,
     return historyResponseSchema.parse(o.metrics.history(row.id, range));
   });
 
-  app.post('/servers/enroll', async (request) => {
+  // Creating an enrollment token needs a fresh TOTP (decision 2026-11-26).
+  app.post('/servers/enroll', { preHandler: stepUp }, async (request) => {
     const body = enrollRequestSchema.parse(request.body);
     let created: { token: string; expiresAt: number };
     try {

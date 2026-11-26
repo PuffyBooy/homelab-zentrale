@@ -1,0 +1,127 @@
+name: Images
+
+# Builds and pushes the multi-arch images (linux/amd64 + linux/arm64, for ARM VMs and
+# Raspberry Pis) to the GitHub Container Registry of the repository owner:
+#   ghcr.io/<owner>/homelab-agent   apps/agent/Dockerfile
+#   ghcr.io/<owner>/homelab-core    deploy/Dockerfile.core
+#   ghcr.io/<owner>/homelab-share   deploy/Dockerfile.share
+# main is only published from the CI workflow (workflow_call, `needs` on every CI job),
+# so a red commit never becomes :latest. Tags: main -> latest + sha-<short>;
+# tag v* -> <tag> (e.g. v1.2.0) + sha-<short>.
+# Login, tags and OCI labels are plain docker/buildx commands, so no third-party
+# action beyond checkout, QEMU and buildx is needed. Never runs for pull requests.
+
+on:
+  workflow_call:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: images-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  image:
+    name: ${{ matrix.name }} (amd64 + arm64)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    # Never for pull requests; main comes only via CI (workflow_call).
+    if: ${{ github.event_name == 'push' || github.event_name == 'workflow_dispatch' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: homelab-agent
+            dockerfile: apps/agent/Dockerfile
+            description: Homelab-Zentrale agent (metrics, allowlisted actions, outbound WebSocket)
+          - name: homelab-core
+            dockerfile: deploy/Dockerfile.core
+            description: Homelab-Zentrale core (API, web app)
+          - name: homelab-share
+            dockerfile: deploy/Dockerfile.share
+            description: Homelab-Zentrale share gateway
+    env:
+      REGISTRY: ghcr.io
+      OWNER: ${{ github.repository_owner }}
+      NAME: ${{ matrix.name }}
+      SHA: ${{ github.sha }}
+      DOCKERFILE: ${{ matrix.dockerfile }}
+      DESCRIPTION: ${{ matrix.description }}
+      REF_TYPE: ${{ github.ref_type }}
+      REF_NAME: ${{ github.ref_name }}
+      SOURCE_URL: ${{ github.server_url }}/${{ github.repository }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3.7.0
+        with:
+          platforms: arm64
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+      - name: Tags and labels
+        id: meta
+        run: |
+          set -euo pipefail
+          image="ghcr.io/${OWNER,,}/$NAME"
+          short="${SHA::7}"
+          tags=("$image:sha-$short")
+          if [[ "$REF_TYPE" == tag ]]; then
+            [[ "$REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]] \
+              || { echo "tag $REF_NAME is not a version (v1.2.3)"; exit 1; }
+            tags+=("$image:$REF_NAME")
+            version="$REF_NAME"
+          elif [[ "$REF_NAME" == main ]]; then
+            tags+=("$image:latest")
+            version="sha-$short"
+          else
+            echo "images are only pushed from main or v* tags"; exit 1
+          fi
+          {
+            echo "image=$image"
+            echo "tags=${tags[*]}"
+            echo "version=$version"
+            echo "created=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          } >>"$GITHUB_OUTPUT"
+      - name: Log in to GHCR
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: printf '%s' "$GHCR_TOKEN" | docker login "$REGISTRY" -u "$GITHUB_ACTOR" --password-stdin
+      - name: Build and push linux/amd64 + linux/arm64
+        env:
+          TAGS: ${{ steps.meta.outputs.tags }}
+          IMAGE: ${{ steps.meta.outputs.image }}
+          VERSION: ${{ steps.meta.outputs.version }}
+          CREATED: ${{ steps.meta.outputs.created }}
+        run: |
+          set -euo pipefail
+          args=()
+          for t in $TAGS; do args+=(--tag "$t"); done
+          # Same OCI metadata as image config labels and as index annotations (GHCR
+          # links the package to the repo via org.opencontainers.image.source).
+          oci=(
+            "org.opencontainers.image.source=$SOURCE_URL"
+            "org.opencontainers.image.url=$SOURCE_URL"
+            "org.opencontainers.image.revision=$SHA"
+            "org.opencontainers.image.version=$VERSION"
+            "org.opencontainers.image.created=$CREATED"
+            "org.opencontainers.image.title=${IMAGE##*/}"
+            "org.opencontainers.image.description=$DESCRIPTION"
+          )
+          for kv in "${oci[@]}"; do
+            args+=(--label "$kv" --annotation "index:$kv")
+          done
+          docker buildx build \
+            --platform linux/amd64,linux/arm64 \
+            --file "$DOCKERFILE" \
+            --provenance=mode=min \
+            --push \
+            "${args[@]}" \
+            .
+      - name: Log out
+        if: always()
+        run: docker logout "$REGISTRY" || true

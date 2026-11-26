@@ -2,7 +2,7 @@ import { isIP } from 'node:net';
 
 /**
  * Domain expiry over RDAP (rdap.org bootstraps to the registry). Runs daily at
- * 04:00 Vienna time; failures are tolerated (the value just stays unknown).
+ * 04:00 local time (HZ_TIMEZONE); failures are tolerated (the value just stays unknown).
  */
 
 export type FetchLike = (url: string, init: RequestInit) => Promise<Response>;
@@ -13,7 +13,7 @@ const MAX_BYTES = 1024 * 1024;
 const MAX_REDIRECTS = 3;
 
 /**
- * Public suffixes with two labels that are common for Alex' domains. Without a
+ * Public suffixes with two labels that are common for the admin's domains. Without a
  * full public suffix list, `a.b.co.at` becomes `b.co.at`, everything else the
  * last two labels.
  */

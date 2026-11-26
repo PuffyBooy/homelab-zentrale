@@ -1,5 +1,6 @@
 # Homelab-Zentrale share gateway (optional, public) on oracle-a1.
-# Start: docker compose -f deploy/docker-compose.share.yml up -d --build
+# Start (GHCR image): docker compose -f deploy/docker-compose.share.yml up -d
+# Local build:        docker compose -f deploy/docker-compose.share.yml -f deploy/docker-compose.share.build.yml up -d --build
 # Host network, binds 127.0.0.1:8090 only. Caddy on the same host terminates HTTPS
 # (deploy/Caddyfile.share) and is the only client; its X-Forwarded-For over loopback
 # is the only one the gateway trusts. The gateway talks to the core over Tailscale
@@ -9,10 +10,9 @@ name: homelab-share
 
 services:
   share:
-    build:
-      context: ..
-      dockerfile: deploy/Dockerfile.share
-    image: homelab-zentrale/share:local
+    # Multi-arch image from GHCR (.github/workflows/images.yml). Pin with
+    # HZ_SHARE_IMAGE=ghcr.io/puffybooy/homelab-share:sha-<short>.
+    image: ${HZ_SHARE_IMAGE:-ghcr.io/puffybooy/homelab-share:latest}
     restart: unless-stopped
     # HZ_SHARE_CORE_URL and HZ_SHARE_GATEWAY_TOKEN (0600, never in the repo).
     env_file:

@@ -35,12 +35,12 @@ describe('check presentation', () => {
   });
 
   it('shows the target per kind', () => {
-    expect(checkTarget(check({ def: { url: 'https://sc-ball.at/' } }).def)).toBe('sc-ball.at');
-    expect(checkTarget(check({ def: { url: 'https://hoebe.at/api?x=1' } }).def)).toBe(
-      'hoebe.at/api',
+    expect(checkTarget(check({ def: { url: 'https://example.at/' } }).def)).toBe('example.at');
+    expect(checkTarget(check({ def: { url: 'https://example.org/api?x=1' } }).def)).toBe(
+      'example.org/api',
     );
-    const tcp = check({ def: { kind: 'tcp', host: 'mc.hoebe.at', port: 25565 } as never });
-    expect(checkTarget(tcp.def)).toBe('mc.hoebe.at:25565');
+    const tcp = check({ def: { kind: 'tcp', host: 'mc.example.org', port: 25565 } as never });
+    expect(checkTarget(tcp.def)).toBe('mc.example.org:25565');
     expect(checkCode(tcp)).toBe('TCP');
     expect(checkCode(check({ lastCode: 503 }))).toBe(503);
     expect(checkCode(check({ lastCode: null }))).toBeUndefined();
@@ -62,7 +62,7 @@ describe('check presentation', () => {
   it('puts the reason first in the sub line', () => {
     const home = server({ id: 'srv-home0001', name: 'heimserver' });
     const c = check({
-      def: { name: 'Lernplattform', url: 'https://lernen.hoebe.at/', runFrom: home.id },
+      def: { name: 'Lernplattform', url: 'https://lernen.example.org/', runFrom: home.id },
       status: 'crit',
       reason: 'HTTP 503',
       uptime24h: 97.5,
@@ -89,12 +89,12 @@ describe('check presentation', () => {
 describe('Statussatz', () => {
   it('names a single offline site', () => {
     const list = [
-      check({ def: { url: 'https://lernen.hoebe.at/' }, status: 'crit' }),
+      check({ def: { url: 'https://lernen.example.org/' }, status: 'crit' }),
       check(),
       check(),
     ];
     expect(sentenceText(checksSentence(list))).toBe(
-      'lernen.hoebe.at ist nicht erreichbar · 2 von 3 Checks erreichbar',
+      'lernen.example.org ist nicht erreichbar · 2 von 3 Checks erreichbar',
     );
   });
 
@@ -176,13 +176,13 @@ describe('check form', () => {
   it('builds an HTTP check with defaults and an optional text', () => {
     const res = formToDef({
       ...emptyCheckForm('http'),
-      url: 'https://sc-ball.at',
+      url: 'https://example.at',
       contains: 'SC Ball',
     });
     expect(res.ok && res.def).toMatchObject({
       kind: 'http',
-      name: 'sc-ball.at',
-      url: 'https://sc-ball.at',
+      name: 'example.at',
+      url: 'https://example.at',
       expectStatusMin: 200,
       expectStatusMax: 399,
       contains: 'SC Ball',
@@ -208,7 +208,7 @@ describe('check form', () => {
       expectStatusMax: '200',
     });
     expect(!range.ok && range.errors.expectStatusMax).toBeTruthy();
-    const creds = formToDef({ ...emptyCheckForm('http'), url: 'https://alex:geheim@a.at/' });
+    const creds = formToDef({ ...emptyCheckForm('http'), url: 'https://admin:geheim@a.at/' });
     expect(!creds.ok && creds.errors.url).toBe('URL ohne Benutzer und Passwort eintragen.');
   });
 

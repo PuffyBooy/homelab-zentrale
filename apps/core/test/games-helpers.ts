@@ -27,7 +27,7 @@ export interface StatusAnswer {
 
 export const ONLINE: StatusAnswer = {
   online: true,
-  players: { online: 2, max: 20, names: ['alex', 'mia'] },
+  players: { online: 2, max: 20, names: ['steve', 'mia'] },
   version: 'Paper 1.21.4',
   tps: 19.8,
 };
@@ -163,6 +163,9 @@ export async function withGames(
       case 'game.rcon':
         ok({ output: `ran ${String(params.command)}${behaviour.rconSuffix}` });
         return;
+      case 'game.backups.purge':
+        ok({ removed: 2 });
+        return;
       case 'game.backup': {
         const b = behaviour.backup;
         if (b.kind === 'hold') return;
@@ -284,7 +287,7 @@ export async function readyGame(
 
 export function gameRequest(
   s: GameSetup,
-  method: 'GET' | 'POST' | 'PUT' | 'DELETE',
+  method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE',
   url: string,
   payload?: Record<string, unknown>,
 ) {

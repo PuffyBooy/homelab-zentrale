@@ -178,7 +178,7 @@ describe('setup link', () => {
         method: 'POST',
         url: '/api/setup/start',
         headers: SAME_ORIGIN,
-        payload: { setupToken: token, username: 'alex', password: PASSWORD },
+        payload: { setupToken: token, username: 'admin', password: PASSWORD },
       });
       expect(res.statusCode).toBe(200);
     } finally {

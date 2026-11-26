@@ -58,11 +58,11 @@ describe('RepoListRow', () => {
 
   it('uses the short name in the overview and "aktuell" when nothing waits', () => {
     const r = repo({
-      fullName: 'PuffyBooy/soundos',
-      targets: [target({ serverName: 'soundos-pi' })],
+      fullName: 'PuffyBooy/my-app',
+      targets: [target({ serverName: 'pi' })],
     });
     const out = html(<RepoListRow repo={r} now={NOW} compact onDeploy={noop} onOpen={noop} />);
-    expect(out).toContain('<span class="hz-row-name">soundos<');
+    expect(out).toContain('<span class="hz-row-name">my-app<');
     expect(out).toContain('>aktuell<');
     expect(out).not.toContain('Details');
     expect(out).not.toContain('>Deploy<');

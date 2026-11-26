@@ -1,6 +1,6 @@
 import { mkdirSync } from 'node:fs';
 import { expect, test, type BrowserContext, type Page } from '@playwright/test';
-import { ORIGIN, signIn } from './helpers/auth.js';
+import { enrollServer, ORIGIN, signIn } from './helpers/auth.js';
 import { SimAgent, hexId, imageId, type SimContainer } from './helpers/sim-agent.js';
 
 /**
@@ -170,6 +170,8 @@ function logLines() {
 const agentName = 'heimserver-m3';
 
 test.beforeAll(async ({ browser }) => {
+  // signIn and the step-up for the enrollment may each wait for a fresh TOTP window.
+  test.setTimeout(120_000);
   context = await browser.newContext({
     baseURL: ORIGIN,
     colorScheme: 'dark',
@@ -180,12 +182,9 @@ test.beforeAll(async ({ browser }) => {
   page.on('framenavigated', (f) => {
     if (f === page.mainFrame()) navigations++;
   });
-  await signIn(page);
+  const totp = await signIn(page);
 
-  const res = await apiCall<{ token: string }>('POST', '/api/servers/enroll', {
-    name: agentName,
-    location: 'Wien',
-  });
+  const res = await enrollServer(page, totp, agentName, 'Zuhause');
   expect(res.status).toBe(200);
   agent = new SimAgent({
     url: AGENT_URL,

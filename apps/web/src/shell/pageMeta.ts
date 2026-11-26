@@ -4,6 +4,7 @@ import type {
   ContainerSummary,
   GameSummary,
   HaState,
+  Modules,
   RepoSummary,
   ServerSummary,
 } from '@hz/shared';
@@ -14,6 +15,7 @@ import { gameSentence, gamesSentence, isGameRunning, playersOnline } from '../li
 import { STATUS_TEXT, groupByRoom, haSentence } from '../lib/ha.js';
 import { githubSentence, repoOnServer, repoSentence } from '../lib/github.js';
 import type { LiveState } from '../lib/live.js';
+import { isModuleOn, MODULE_LABEL, MODULE_PAGE, moduleOfPath } from '../lib/modules.js';
 import {
   ALL_SERVERS,
   serverSentence,
@@ -46,6 +48,8 @@ export interface PageData {
   /** Server filter from the ServerSwitch, or the id of the detail page. */
   filter?: string | undefined;
   live?: LiveState | undefined;
+  /** Optional modules; pages of switched-off ones get a fixed title. */
+  modules?: Modules | undefined;
   /** Time of the last live message, for "aktualisiert 23:04". */
   updatedAt?: Date | null | undefined;
 }
@@ -122,6 +126,15 @@ export function pageMeta(pathname: string, data: PageData = {}): PageMeta {
     data.filter && data.filter !== ALL_SERVERS
       ? servers.find((s) => s.id === data.filter)
       : undefined;
+
+  const mod = moduleOfPath(pathname);
+  if (mod && !isModuleOn(data.modules, mod)) {
+    return {
+      title: plain(`${MODULE_LABEL[mod]} ist ausgeschaltet.`),
+      sub: `${MODULE_PAGE[mod]} · Modul einschalten unter Einstellungen → Module`,
+      serverSwitch: false,
+    };
+  }
 
   if (pathname === '/' || pathname === '/servers') {
     const area = pathname === '/' ? 'Übersicht' : 'Server';

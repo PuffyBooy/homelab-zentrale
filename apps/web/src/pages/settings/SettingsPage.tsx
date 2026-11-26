@@ -1,4 +1,4 @@
-import type { SessionInfo } from '@hz/shared';
+import type { ModuleId, SessionInfo } from '@hz/shared';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useState, type FormEvent, type ReactElement, type ReactNode } from 'react';
 import { useLocation } from 'react-router';
@@ -30,24 +30,35 @@ import { GithubTile } from './GithubTiles.js';
 import { HaEntitiesTile, HaSettingsTile } from './HaTiles.js';
 import { NotifyTile, PushTile } from './PushTiles.js';
 import { ShareGatewayTile } from './ShareGatewayTile.js';
+import { ModulesTile } from './ModulesTile.js';
+import { useModules } from '../../lib/useModules.js';
 
 /** Sections of SPEC 13, in that order. Ids are the anchors (`/settings#server`). */
-export const SETTINGS_SECTIONS = [
+export const SETTINGS_SECTIONS: readonly { id: string; label: string; module?: ModuleId }[] = [
   { id: 'konto', label: 'Konto' },
+  { id: 'module', label: 'Module' },
   { id: 'server', label: 'Server' },
   { id: 'agents', label: 'Agents' },
-  { id: 'github', label: 'GitHub' },
+  { id: 'github', label: 'GitHub', module: 'github' },
   { id: 'checks', label: 'Checks' },
   { id: 'push', label: 'Push' },
-  { id: 'ha', label: 'Home Assistant' },
+  { id: 'ha', label: 'Home Assistant', module: 'homeassistant' },
   { id: 'wandmodus', label: 'Wandmodus' },
-  { id: 'share-gateway', label: 'Share-Gateway' },
+  { id: 'share-gateway', label: 'Share-Gateway', module: 'games' },
   { id: 'backup', label: 'Backup' },
-] as const;
+];
 
-function Anchor({ id, children }: { id: string; children: ReactNode }): ReactElement {
+function Anchor({
+  id,
+  wide = false,
+  children,
+}: {
+  id: string;
+  wide?: boolean;
+  children: ReactNode;
+}): ReactElement {
   return (
-    <div id={id} className="app-anchor">
+    <div id={id} className={wide ? 'app-anchor app-settings-wide' : 'app-anchor'}>
       {children}
     </div>
   );
@@ -55,17 +66,20 @@ function Anchor({ id, children }: { id: string; children: ReactNode }): ReactEle
 
 export function SettingsPage(): ReactElement {
   const { hash } = useLocation();
+  const modules = useModules();
   // Tiles with their own anchor (github, ha, share-gateway) scroll themselves once loaded.
   useEffect(() => {
     const id = decodeURIComponent(hash.slice(1));
-    if (!id || ['github', 'ha', 'share-gateway'].includes(id)) return;
+    if (!id) return;
+    const section = SETTINGS_SECTIONS.find((s) => s.id === id);
+    if (section?.module && modules[section.module]) return;
     document.getElementById(id)?.scrollIntoView({ block: 'start' });
-  }, [hash]);
+  }, [hash, modules]);
 
   return (
     <>
       <nav className="app-settings-nav" aria-label="Bereiche der Einstellungen">
-        {SETTINGS_SECTIONS.map((s) => (
+        {SETTINGS_SECTIONS.filter((s) => !s.module || modules[s.module]).map((s) => (
           <a key={s.id} href={`#${s.id}`} className="app-settings-link">
             {s.label}
           </a>
@@ -77,13 +91,16 @@ export function SettingsPage(): ReactElement {
         </Anchor>
         <SessionsTile />
         <RecoveryTile />
+        <Anchor id="module">
+          <ModulesTile />
+        </Anchor>
         <Anchor id="server">
           <ServersSettingsTile />
         </Anchor>
         <Anchor id="agents">
           <AgentsSettingsTile />
         </Anchor>
-        <GithubTile />
+        {modules.github ? <GithubTile /> : null}
         <Anchor id="checks">
           <ChecksSettingsTile />
         </Anchor>
@@ -91,12 +108,17 @@ export function SettingsPage(): ReactElement {
           <PushTile />
         </Anchor>
         <NotifyTile />
-        <HaSettingsTile />
-        <HaEntitiesTile />
-        <Anchor id="wandmodus">
+        {modules.homeassistant ? (
+          <>
+            <HaSettingsTile />
+            <HaEntitiesTile />
+          </>
+        ) : null}
+        {/* Wide: each device row has a pairing badge and two actions. */}
+        <Anchor id="wandmodus" wide>
           <WallDevicesTile />
         </Anchor>
-        <ShareGatewayTile />
+        {modules.games ? <ShareGatewayTile /> : null}
         <Anchor id="backup">
           <BackupTile />
         </Anchor>

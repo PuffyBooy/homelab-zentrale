@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { DEFAULT_TIME_ZONE, isValidTimeZone } from './timezone.js';
 
 const boolFlag = z
   .enum(['0', '1', 'true', 'false'])
@@ -34,7 +35,7 @@ export const configSchema = z.object({
   HZ_AGENT_IMAGE: z
     .string()
     .regex(/^[a-z0-9][a-z0-9._/:@-]{0,254}$/, 'HZ_AGENT_IMAGE: ungültiger Image-Name')
-    .default('homelab-zentrale/agent:local'),
+    .default('ghcr.io/puffybooy/homelab-agent:latest'),
   // Game templates (templates/games/<id>/). Default: the repo's templates dir; the
   // Docker image sets it to the copy shipped in the image.
   HZ_GAME_TEMPLATES_DIR: optionalEnv(z.string().min(1).max(4096)),
@@ -61,6 +62,11 @@ export const configSchema = z.object({
       .max(200)
       .regex(/^(mailto:[^\s@]+@[^\s@]+|https:\/\/\S+)$/, 'HZ_VAPID_SUBJECT: mailto: oder https://'),
   ),
+  // IANA time zone of all wall-clock logic (quiet hours, reports, wall night, export
+  // file name, energy month). Number formats stay de-AT.
+  HZ_TIMEZONE: optionalEnv(
+    z.string().refine(isValidTimeZone, 'HZ_TIMEZONE: unbekannte Zeitzone (z. B. Europe/Vienna)'),
+  ),
   NODE_ENV: z.enum(['development', 'production', 'test']).default('production'),
 });
 
@@ -83,6 +89,8 @@ export interface Config {
   /** Fixed VAPID keys from the environment (both or none). */
   vapid: { publicKey: string; privateKey: string } | undefined;
   vapidSubject: string | undefined;
+  /** IANA zone, validated with Intl (default Europe/Vienna). */
+  timeZone: string;
 }
 
 export function isLoopback(host: string): boolean {
@@ -132,5 +140,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
         ? { publicKey: c.HZ_VAPID_PUBLIC, privateKey: c.HZ_VAPID_PRIVATE }
         : undefined,
     vapidSubject: c.HZ_VAPID_SUBJECT,
+    timeZone: c.HZ_TIMEZONE ?? DEFAULT_TIME_ZONE,
   };
 }

@@ -1,12 +1,28 @@
 # Deploy
 
+## Images (GHCR)
+
+Die Images baut `.github/workflows/images.yml` nach jedem grünen CI-Lauf auf `main` und bei jedem Tag `v*`, für `linux/amd64` und `linux/arm64` (viele Cloud-VMs und der Raspberry Pi sind ARM), und legt sie in der GitHub Container Registry ab:
+
+| Image | Dockerfile |
+| --- | --- |
+| `ghcr.io/puffybooy/homelab-agent` | `apps/agent/Dockerfile` |
+| `ghcr.io/puffybooy/homelab-core` | `deploy/Dockerfile.core` |
+| `ghcr.io/puffybooy/homelab-share` | `deploy/Dockerfile.share` |
+
+Tags: `latest` und `sha-<kurz>` (Push auf `main`), `v<version>` und `sha-<kurz>` (Git-Tag). Jedes Image trägt OCI-Labels (`org.opencontainers.image.source` zeigt auf das Repo, dazu `revision`, `version`, `created`). Die Compose-Dateien verwenden standardmäßig `:latest`; für einen festen Stand die Variable setzen, z. B. `HZ_CORE_IMAGE=ghcr.io/puffybooy/homelab-core:sha-1a2b3c4` (Agent: `HZ_AGENT_IMAGE`, Share: `HZ_SHARE_IMAGE`). Solange das Repo bzw. die Packages privat sind, braucht `docker pull` vorher `docker login ghcr.io` mit einem Token mit `read:packages`.
+
+**Lokal bauen statt laden:** Zu jeder Compose-Datei gibt es eine Override-Datei `docker-compose.<dienst>.build.yml`, die das Image aus dem Checkout baut (`homelab-zentrale/<dienst>:local`, `pull_policy: build`). Der Agent-Installer baut mit `--build-local` oder `HZ_BUILD_LOCAL=1`.
+
 ## Core (Heimserver)
 
 Ein Image: Der Core liefert die gebaute Web-App mit aus.
 
 ```bash
 cp .env.example .env            # HZ_SECRET_KEY setzen: openssl rand -base64 32
-docker compose -f deploy/docker-compose.core.yml up -d --build
+docker compose -f deploy/docker-compose.core.yml up -d     # Image aus GHCR
+# oder lokal bauen:
+docker compose -f deploy/docker-compose.core.yml -f deploy/docker-compose.core.build.yml up -d --build
 curl http://127.0.0.1:8080/api/health   # {"ok":true}
 ```
 
@@ -34,8 +50,12 @@ Der Agent läuft als Container auf jedem Server und baut die Verbindung **selbst
 ```bash
 sudo HZ_AGENT_TOKEN=<token> ./deploy/install-agent.sh \
   --url wss://heimserver.<tailnet>.ts.net/agent --name oracle-a1
-# optional: --image <registry/agent:tag> statt lokal zu bauen, --allow-terminal für die Web-Konsole
+# optional: --allow-terminal für die Web-Konsole
+#           --image ghcr.io/puffybooy/homelab-agent:sha-<kurz>   fester Stand statt :latest
+#           --build-local (oder HZ_BUILD_LOCAL=1)                 Image aus dem Checkout bauen
 ```
+
+Standardmäßig lädt das Skript `ghcr.io/puffybooy/homelab-agent:latest` (passend zur Architektur des Servers) und startet es. `--image` und `--build-local` schließen sich aus. Ein erneuter Aufruf ohne `--image` setzt das Image wieder auf `:latest` und zieht es neu (Update).
 
 Das Skript prüft Docker und Compose v2, legt `/opt/homelab` an, schreibt `/etc/homelab-agent/agent.env` (0600, enthält das Token) und startet `deploy/docker-compose.agent.yml` als `/etc/homelab-agent/docker-compose.yml`. Das Token wird nie als Argument angenommen (Shell-History, `ps`), sondern über `HZ_AGENT_TOKEN`, `--token-stdin` oder eine Eingabeaufforderung.
 
@@ -199,9 +219,9 @@ Freund ── HTTPS ──▶ Caddy (oracle-a1, :443) ──▶ Gateway 127.0.0.
    HZ_SHARE_GATEWAY_TOKEN=<Token aus Schritt 5>
    ```
    `HZ_SHARE_CORE_URL` ist die `ts.net`-Adresse des Core (dieselbe wie im Browser). Tailscale läuft auf `oracle-a1` bereits (für den Agent), dadurch ist der Core von dort erreichbar. Erlaubt sind nur `https://<name>.ts.net` und für Tests `http://127.0.0.1`.
-7. **Starten**, in einem Checkout dieses Repos auf `oracle-a1`:
+7. **Starten**, in einem Checkout dieses Repos auf `oracle-a1` (Image aus GHCR; lokal bauen mit zusätzlich `-f deploy/docker-compose.share.build.yml … --build`):
    ```bash
-   docker compose -f deploy/docker-compose.share.yml up -d --build
+   docker compose -f deploy/docker-compose.share.yml up -d
    curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8090/s/$(printf 'a%.0s' $(seq 43))   # 200
    ```
 8. **In der Zentrale einschalten**: Einstellungen → Share-Gateway, „Aktiv“ und die öffentliche Adresse `https://spiel.example.duckdns.org` eintragen. Erst dann nimmt der Core Anfragen des Gateways an, und neue Benutzerlinks bekommen zusätzlich den öffentlichen Link. Ausschalten sperrt das Gateway sofort.

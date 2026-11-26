@@ -94,7 +94,8 @@ function CreateForm({
     <form className="hz-dialog-body" onSubmit={submit} noValidate>
       <p className="hz-dialog-text">
         Der Link zeigt nur {game.name} und nur die Knöpfe, die du hier einschaltest. Jede Aktion
-        wird mit dem Namen protokolliert.
+        wird mit dem Namen protokolliert. Erstellen und Widerrufen brauchen einen frischen Code aus
+        der App.
       </p>
       <Field
         label="Person"

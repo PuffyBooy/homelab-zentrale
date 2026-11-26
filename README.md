@@ -16,7 +16,7 @@ Ein privates Kontrollzentrum für alle meine Server, Container, Gameserver, GitH
 | **Meldungen** | Alle Probleme als Logzeilen, Push aufs Handy (Web-Push), Wochenbericht |
 | **Wohnung** | Home Assistant: Schalter, Klima, Strom, Gegensprechanlage |
 | **Konsole** | Web-SSH zu jedem Server, für den es eingeschaltet ist |
-| **Wandmodus** | Vollbild-Ansicht fürs Tablet/Echo Show, nachts gedimmt |
+| **Wandmodus** | Vollbild-Ansicht fürs Tablet oder Smart Display, nachts gedimmt |
 
 ## Aufbau
 

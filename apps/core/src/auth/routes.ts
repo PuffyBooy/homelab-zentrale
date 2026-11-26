@@ -52,6 +52,11 @@ function stateFor(svc: AuthService, auth: AuthContext | null): AuthState {
     state.username = auth.user.username;
     const until = auth.session.stepUpUntil;
     if (until !== null && until > svc.now()) state.stepUpUntil = iso(until);
+    const extra = svc.bootstrap?.();
+    if (extra) {
+      state.modules = extra.modules;
+      state.timeZone = extra.timeZone;
+    }
   }
   return authStateSchema.parse(state);
 }

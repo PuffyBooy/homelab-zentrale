@@ -295,7 +295,7 @@ describe('game.rcon', () => {
         if (cmd === 'echo-secret') return `the password is ${PASSWORD}`;
         if (cmd === 'big') return 'y'.repeat(10_000);
         if (cmd === 'huge') return 'z'.repeat(100_000);
-        if (cmd === 'list') return '§6There are §c1§6 of a max of §c20§6 players online: Alex';
+        if (cmd === 'list') return '§6There are §c1§6 of a max of §c20§6 players online: Mia';
         return `ok: ${cmd}`;
       },
     });
@@ -308,7 +308,7 @@ describe('game.rcon', () => {
   it('runs one command, strips color codes, never returns the password', async () => {
     const { ctx, rec } = makeCtx(root);
     const res = await gameRcon({ gameDir: dir, command: 'list' }, ctx);
-    expect(res.output).toBe('There are 1 of a max of 20 players online: Alex');
+    expect(res.output).toBe('There are 1 of a max of 20 players online: Mia');
     expect(rconDataSchema.safeParse(res).success).toBe(true);
     const echoed = await gameRcon({ gameDir: dir, command: 'echo-secret' }, ctx);
     expect(echoed.output).toBe('the password is [redacted]');
@@ -441,7 +441,7 @@ describe('game.status', () => {
         online: 2,
         max: 20,
         sample: [
-          { name: '§cAlex', id: '00000000-0000-0000-0000-000000000001' },
+          { name: '§cMia', id: '00000000-0000-0000-0000-000000000001' },
           { name: 'B'.repeat(60), id: '00000000-0000-0000-0000-000000000002' },
         ],
       },
@@ -463,7 +463,7 @@ describe('game.status', () => {
       );
       expect(res).toEqual({
         online: true,
-        players: { online: 2, max: 20, names: ['Alex', 'B'.repeat(40)] },
+        players: { online: 2, max: 20, names: ['Mia', 'B'.repeat(40)] },
         version: 'Paper 1.21.10',
         tps: 19.5,
       });
@@ -519,7 +519,7 @@ describe('game.status', () => {
       status.players = {
         online: 1,
         max: 20,
-        sample: [{ name: 'Alex', id: '00000000-0000-0000-0000-000000000001' }],
+        sample: [{ name: 'Mia', id: '00000000-0000-0000-0000-000000000001' }],
       };
       tpsText = '19.0';
       now += 1000;
@@ -593,7 +593,7 @@ describe('game.status', () => {
       );
       expect(res).toEqual({
         online: true,
-        players: { online: 2, max: 16, names: ['Alex', 'Bob'] },
+        players: { online: 2, max: 16, names: ['Mia', 'Bob'] },
         version: 'v0.6.1',
         tps: null,
       });

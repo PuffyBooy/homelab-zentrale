@@ -9,7 +9,7 @@ import {
   type WallState,
 } from '@hz/shared';
 import type { z } from 'zod';
-import { viennaTime } from '../calendar.js';
+import { localTime } from '../calendar.js';
 import type { Clock } from '../clock.js';
 import { randomToken, sha256Hex, timingSafeEqual } from '../crypto.js';
 import type { Db } from '../db/index.js';
@@ -22,7 +22,7 @@ type WallDevice = z.infer<typeof wallDeviceSchema>;
 export const WALL_TOUCH_MS = 60_000;
 /** Cookie lifetime; refreshed with lastSeenAt, so a used tablet never runs out. */
 export const WALL_COOKIE_MAX_AGE_MS = 365 * 24 * 60 * 60_000;
-/** Night (dim to 40 %): from 22:00 to 06:59 Europe/Vienna. */
+/** Night (dim to 40 %): from 22:00 to 06:59 local time (HZ_TIMEZONE). */
 export const NIGHT_FROM_HOUR = 22;
 export const NIGHT_UNTIL_HOUR = 7;
 const MAX_ALERTS = 5;
@@ -32,7 +32,7 @@ export function wallTokenHash(token: string): string {
 }
 
 export function isNight(ms: number): boolean {
-  const h = viennaTime(ms).hour;
+  const h = localTime(ms).hour;
   return h >= NIGHT_FROM_HOUR || h < NIGHT_UNTIL_HOUR;
 }
 
@@ -56,6 +56,8 @@ export function maskAddresses(text: string): string {
 }
 
 interface Sources {
+  /** Optional modules that are on; switched-off modules have no tiles. Default: all on. */
+  modules?: () => { games: boolean; homeassistant: boolean };
   servers: () => ServerSummary[];
   games: () => GameSummary[];
   ha: () => HaState;
@@ -102,6 +104,7 @@ export class WallService {
       name: r.name,
       createdAt: new Date(r.createdAt).toISOString(),
       lastSeenAt: r.lastSeenAt === null ? null : new Date(r.lastSeenAt).toISOString(),
+      paired: r.sessionHash !== null,
     };
   }
 
@@ -114,18 +117,42 @@ export class WallService {
       .map((r) => this.toDevice(r));
   }
 
-  /** Creates a device. The token is returned only here and never stored. */
+  /** Creates a device. The one-time token is returned only here and never stored. */
   create(name: string): { device: WallDevice; token: string } {
     const token = randomToken(32);
     const row: WallDeviceRow = {
       id: randomToken(16),
       name,
       tokenHash: wallTokenHash(token),
+      sessionHash: null,
+      usedTokenHash: null,
       createdAt: this.deps.now(),
       lastSeenAt: null,
+      pairedAt: null,
     };
     this.deps.db.insert(wallDevices).values(row).run();
     return { device: this.toDevice(row), token };
+  }
+
+  /**
+   * A fresh one-time link for an existing device. The old link and the old cookie
+   * stop working at once. Returns null for an unknown device.
+   */
+  relink(id: string): { device: WallDevice; token: string } | null {
+    const token = randomToken(32);
+    const changed = this.deps.db
+      .update(wallDevices)
+      .set({
+        tokenHash: wallTokenHash(token),
+        sessionHash: null,
+        usedTokenHash: null,
+        pairedAt: null,
+      })
+      .where(eq(wallDevices.id, id))
+      .run().changes;
+    if (changed === 0) return null;
+    const device = this.get(id);
+    return device ? { device, token } : null;
   }
 
   get(id: string): WallDevice | null {
@@ -133,27 +160,66 @@ export class WallService {
     return r ? this.toDevice(r) : null;
   }
 
-  /** Deleting revokes at once: every request looks the token up again. */
+  /** Deleting revokes at once: every request looks the cookie up again. */
   delete(id: string): boolean {
     return this.deps.db.delete(wallDevices).where(eq(wallDevices.id, id)).run().changes > 0;
   }
 
-  /** The device of a token (or cookie value), or null. */
-  resolve(token: string | undefined): { id: string; lastSeenAt: number | null } | null {
-    if (!wallTokenSchema.safeParse(token).success || token === undefined) return null;
-    const hash = wallTokenHash(token);
+  /** The device of a cookie value (session secret), or null. Used by the auth guard. */
+  resolve(secret: string | undefined): { id: string; lastSeenAt: number | null } | null {
+    if (secret === undefined || !wallTokenSchema.safeParse(secret).success) return null;
+    const hash = wallTokenHash(secret);
     const row = this.deps.db
       .select({
         id: wallDevices.id,
-        tokenHash: wallDevices.tokenHash,
+        sessionHash: wallDevices.sessionHash,
         lastSeenAt: wallDevices.lastSeenAt,
       })
       .from(wallDevices)
-      .where(eq(wallDevices.tokenHash, hash))
+      .where(eq(wallDevices.sessionHash, hash))
       .get();
-    // The lookup is by hash of a 256-bit token; the compare is constant time anyway.
-    if (!row || !timingSafeEqual(row.tokenHash, hash)) return null;
+    // The lookup is by hash of a 256-bit secret; the compare is constant time anyway.
+    if (!row?.sessionHash || !timingSafeEqual(row.sessionHash, hash)) return null;
     return { id: row.id, lastSeenAt: row.lastSeenAt };
+  }
+
+  /**
+   * Swaps a one-time link token for a new device session secret (decision 2026-11-26).
+   * - Unused token: the token hash is cleared, a new secret is stored (hash only) and
+   *   returned for the cookie; an older cookie of that device stops working.
+   * - Used token, but the request carries a valid cookie of the device that this
+   *   token paired: `repeat` (kiosk reload of the start URL), the cookie stays.
+   * - Otherwise null (401).
+   */
+  exchange(
+    token: string,
+    cookie: string | undefined,
+  ): { kind: 'paired'; id: string; secret: string } | { kind: 'repeat'; id: string } | null {
+    const hash = wallTokenHash(token);
+    const secret = randomToken(32);
+    const now = this.deps.now();
+    const paired = this.deps.db
+      .update(wallDevices)
+      .set({
+        tokenHash: null,
+        sessionHash: wallTokenHash(secret),
+        usedTokenHash: hash,
+        pairedAt: now,
+        lastSeenAt: now,
+      })
+      .where(eq(wallDevices.tokenHash, hash))
+      .returning({ id: wallDevices.id })
+      .get();
+    if (paired) return { kind: 'paired', id: paired.id, secret };
+    const current = this.resolve(cookie);
+    if (!current) return null;
+    const row = this.deps.db
+      .select({ usedTokenHash: wallDevices.usedTokenHash })
+      .from(wallDevices)
+      .where(eq(wallDevices.id, current.id))
+      .get();
+    if (!row?.usedTokenHash || !timingSafeEqual(row.usedTokenHash, hash)) return null;
+    return { kind: 'repeat', id: current.id };
   }
 
   /** Updates lastSeenAt at most once per WALL_TOUCH_MS. Returns true if written. */
@@ -171,8 +237,9 @@ export class WallService {
   /** Read-only state of the wall. No ids, no addresses. */
   state(): WallState {
     const now = this.deps.now();
+    const mods = this.deps.sources.modules?.() ?? { games: true, homeassistant: true };
     const servers = this.deps.sources.servers();
-    const games = this.deps.sources.games();
+    const games = mods.games ? this.deps.sources.games() : [];
     const ha = this.deps.sources.ha();
     const open = this.deps.db
       .select({
@@ -188,9 +255,8 @@ export class WallService {
 
     const tiles: WallTile[] = [
       serversTile(servers),
-      playersTile(games),
-      temperatureTile(ha),
-      powerTile(ha),
+      ...(mods.games ? [playersTile(games)] : []),
+      ...(mods.homeassistant ? [temperatureTile(ha), powerTile(ha)] : []),
       problemsTile(open),
     ];
     // crit first, then by time (newest first).
@@ -258,7 +324,7 @@ function isTemperature(i: HaState['items'][number]): boolean {
 }
 
 function temperatureTile(ha: HaState): WallTile {
-  // Overview entities first (Alex chose them as the important ones), then any.
+  // Overview entities first (the admin chose them as the important ones), then any.
   const candidates = ha.items.filter(isTemperature);
   const pick =
     candidates.find((i) => i.overview && i.available && i.value !== null) ??

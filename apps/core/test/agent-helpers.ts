@@ -195,18 +195,39 @@ export function inventoryMsg(over: Partial<Inventory> = {}): Inventory {
   };
 }
 
-/** POST /api/servers/enroll as admin; returns the one-time token. */
+/**
+ * Runs `fn` with a step-up on every session and restores the previous step-up state
+ * afterwards, so tests that only need a token (not the step-up flow itself) do not
+ * leak a step-up into later requests.
+ */
+export async function withStepUp<T>(t: TestApp, fn: () => Promise<T>): Promise<T> {
+  const prev = t.db.sqlite.prepare('SELECT id, step_up_until AS s FROM sessions').all() as {
+    id: string;
+    s: number | null;
+  }[];
+  t.db.sqlite.prepare('UPDATE sessions SET step_up_until = ?').run(t.clock.t + 15 * 60_000);
+  try {
+    return await fn();
+  } finally {
+    const restore = t.db.sqlite.prepare('UPDATE sessions SET step_up_until = ? WHERE id = ?');
+    for (const r of prev) restore.run(r.s, r.id);
+  }
+}
+
+/** POST /api/servers/enroll as admin (step-up granted for this call); returns the one-time token. */
 export async function createEnrollToken(
   t: TestApp,
   cookie: string,
   name = 'heimserver',
 ): Promise<string> {
-  const res = await t.app.inject({
-    method: 'POST',
-    url: '/api/servers/enroll',
-    headers: authHeaders(cookie),
-    payload: { name, location: 'Wien' },
-  });
+  const res = await withStepUp(t, () =>
+    t.app.inject({
+      method: 'POST',
+      url: '/api/servers/enroll',
+      headers: authHeaders(cookie),
+      payload: { name, location: 'home' },
+    }),
+  );
   if (res.statusCode !== 200) throw new Error(`enroll ${res.statusCode}`);
   return res.json<{ token: string }>().token;
 }

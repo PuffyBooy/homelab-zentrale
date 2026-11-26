@@ -14,7 +14,7 @@ describe('CheckRow', () => {
 
   it('renders WebCheckRow with status shape and text, code, ms, SSL and sparkline', () => {
     const c = check({
-      def: { url: 'https://lernen.hoebe.at/', runFrom: home.id },
+      def: { url: 'https://lernen.example.org/', runFrom: home.id },
       status: 'crit',
       reason: 'HTTP 503',
       lastCode: 503,
@@ -25,13 +25,13 @@ describe('CheckRow', () => {
     expect(out).toContain('class="hz-row hz-web"');
     expect(out).toContain('hz-status hz-status-crit');
     expect(out).toContain('>DOWN<');
-    expect(out).toContain('<span class="hz-row-name">lernen.hoebe.at</span>');
+    expect(out).toContain('<span class="hz-row-name">lernen.example.org</span>');
     expect(out).toContain('HTTP 503 · ');
     expect(out).toContain('von heimserver');
     expect(out).toContain('hz-web-code hz-t-crit">503<');
     expect(out).toContain('hz-web-ssl hz-t-crit">SSL 4d<');
     expect(out).toContain('class="hz-spark hz-spark-muted"');
-    expect(out).toContain('aria-label="lernen.hoebe.at jetzt prüfen"');
+    expect(out).toContain('aria-label="lernen.example.org jetzt prüfen"');
     expect(out).toContain('>Details<');
   });
 

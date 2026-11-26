@@ -52,7 +52,7 @@ export class Scheduler {
 
   /**
    * Registers a job that runs at times given by `nextAfter` (e.g. every day at
-   * 04:00 Vienna time, see calendar.ts). `nextAfter(t)` must return a time > t.
+   * 04:00 local time, see calendar.ts). `nextAfter(t)` must return a time > t.
    */
   at(name: string, nextAfter: (from: number) => number, fn: JobFn): () => void {
     return this.add(name, nextAfter, fn, false);

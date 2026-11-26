@@ -54,6 +54,13 @@ export const homelabPathSchema = z
     message: 'no .git in path',
   });
 
+/**
+ * Name of a game folder /opt/homelab/games/<name>/ and its backup folder
+ * /opt/homelab/backups/<name>/ (same rule as gameNameSchema in api/games.ts and
+ * GAME_NAME in the agent, without trimming).
+ */
+export const gameFolderNameSchema = z.string().regex(/^[a-z0-9](?:[a-z0-9-]{0,30}[a-z0-9])$/);
+
 /** Single file name (no directories). */
 export const fileNameSchema = z
   .string()
@@ -437,6 +444,19 @@ export const rpcParamsByAction = {
   }),
   /** compose down and remove a game folder (only /opt/homelab/games/<name>/). */
   'game.remove': z.strictObject({ gameDir: homelabPathSchema }),
+  /**
+   * Deletes backup archives `<gameId>-YYYYMMDD-HHMMSS.tar.zst` in
+   * /opt/homelab/backups/<gameId>/ whose mtime is older than `olderThanDays` days,
+   * then removes the folder if it is empty. `gameId` is the game's folder name (the
+   * <name> of /opt/homelab/games/<name>/ and of the backup folder), not the core's
+   * database id. A missing folder is success with removed 0. Never follows symlinks.
+   * The core sends it for game servers that were deleted 30 days ago.
+   * Result: gameBackupsPurgeDataSchema.
+   */
+  'game.backups.purge': z.strictObject({
+    gameId: gameFolderNameSchema,
+    olderThanDays: z.number().int().min(1).max(3650),
+  }),
   /** Stream. */
   'deploy.run': z.strictObject({
     dir: homelabPathSchema,
@@ -572,6 +592,11 @@ export const backupDoneDataSchema = z.strictObject({
   path: homelabPathSchema,
   sizeBytes: nonNeg,
 });
+/** Result of game.backups.purge: number of archives deleted. */
+export const gameBackupsPurgeDataSchema = z.strictObject({
+  removed: z.number().int().nonnegative(),
+});
+export type GameBackupsPurgeData = z.infer<typeof gameBackupsPurgeDataSchema>;
 export const ptyOpenDataSchema = z.strictObject({ streamId: streamIdSchema });
 export const gameStatusDataSchema = z.strictObject({
   online: z.boolean(),

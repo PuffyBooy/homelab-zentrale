@@ -1,22 +1,30 @@
-import { useState, type ReactElement } from 'react';
+import { useMemo, useState, type ReactElement } from 'react';
 import { Link } from 'react-router';
-import { Icon } from '@hz/ui';
+import { Icon, type NavItem } from '@hz/ui';
 import { Dialog } from '../components/Dialog.js';
 import { bottomBarIds, navItems, settingsItem } from '../nav.js';
 import { ThemeButton } from './ThemeButton.js';
 
-const barItems = navItems.filter((it) => (bottomBarIds as readonly string[]).includes(it.id));
-const moreItems = navItems.filter((it) => !(bottomBarIds as readonly string[]).includes(it.id));
+const inBar = (it: NavItem): boolean => (bottomBarIds as readonly string[]).includes(it.id);
 
 export interface BottomBarProps {
+  /** Visible nav items (switched-off modules left out). */
+  items?: readonly NavItem[] | undefined;
   active: string;
   onNavigate: (to: string) => void;
   onSearch: () => void;
 }
 
 /** Phone navigation (< 700 px). Proposed for packages/ui as `BottomBar` (docs/QUESTIONS.md). */
-export function BottomBar({ active, onNavigate, onSearch }: BottomBarProps): ReactElement {
+export function BottomBar({
+  items = navItems,
+  active,
+  onNavigate,
+  onSearch,
+}: BottomBarProps): ReactElement {
   const [more, setMore] = useState(false);
+  const barItems = useMemo(() => items.filter(inBar), [items]);
+  const moreItems = useMemo(() => items.filter((it) => !inBar(it)), [items]);
   const moreActive = !barItems.some((it) => it.id === active);
 
   return (

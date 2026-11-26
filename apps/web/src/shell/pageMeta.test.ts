@@ -44,7 +44,7 @@ describe('pageMeta for containers', () => {
 describe('pageMeta for websites and alerts', () => {
   const home = server({ id: 'srv-home0001', name: 'heimserver' });
   const down = check({
-    def: { url: 'https://lernen.hoebe.at/', serverId: home.id },
+    def: { url: 'https://lernen.example.org/', serverId: home.id },
     status: 'crit',
     reason: 'HTTP 503',
   });
@@ -55,7 +55,7 @@ describe('pageMeta for websites and alerts', () => {
     expect(pageMeta('/websites', { servers: [home] }).sub).toBe('lädt …');
     const meta = pageMeta('/websites', { servers: [home], checks: [down, check()], live: 'open' });
     expect(meta.title).toEqual({
-      em: 'lernen.hoebe.at ist nicht erreichbar',
+      em: 'lernen.example.org ist nicht erreichbar',
       rest: ' · 1 von 2 Checks erreichbar',
     });
     expect(meta.sub).toBe('Websites · 2 Checks · live');
@@ -65,7 +65,7 @@ describe('pageMeta for websites and alerts', () => {
       checks: [down, check()],
       filter: home.id,
     });
-    expect(one.title.em).toBe('lernen.hoebe.at ist nicht erreichbar');
+    expect(one.title.em).toBe('lernen.example.org ist nicht erreichbar');
     expect(one.title.rest).toBe(' · 0 von 1 Check erreichbar');
   });
 
@@ -74,7 +74,10 @@ describe('pageMeta for websites and alerts', () => {
     expect(checkDetailId(path)).toBe(down.id);
     expect(needsChecks(path)).toBe(true);
     const meta = pageMeta(path, { servers: [home], checks: [down] });
-    expect(meta.title).toEqual({ em: 'lernen.hoebe.at ist nicht erreichbar', rest: ' · HTTP 503' });
+    expect(meta.title).toEqual({
+      em: 'lernen.example.org ist nicht erreichbar',
+      rest: ' · HTTP 503',
+    });
     expect(meta.sub).toBe('Website · HTTP(S) · von der Zentrale');
   });
 
@@ -95,7 +98,7 @@ describe('pageMeta for github', () => {
 
   it('puts red CI first on /github and filters by target server', () => {
     const red = repo({ fullName: 'PuffyBooy/lernplattform', ci: 'crit' });
-    const ok = repo({ fullName: 'PuffyBooy/soundos', targets: [target({ serverId: home.id })] });
+    const ok = repo({ fullName: 'PuffyBooy/my-app', targets: [target({ serverId: home.id })] });
     expect(needsRepos('/github')).toBe(true);
     expect(needsRepos('/servers')).toBe(false);
     expect(pageMeta('/github', { servers: [home] }).sub).toBe('lädt …');
@@ -107,13 +110,13 @@ describe('pageMeta for github', () => {
   });
 
   it('describes the repo on its detail page', () => {
-    const r = repo({ fullName: 'PuffyBooy/soundos', targets: [target({ behind: 3 })] });
+    const r = repo({ fullName: 'PuffyBooy/my-app', targets: [target({ behind: 3 })] });
     const path = `/github/${r.id}`;
     expect(repoDetailId(path)).toBe(r.id);
     expect(needsRepos(path)).toBe(true);
     const meta = pageMeta(path, { servers: [home], repos: [r] });
-    expect(meta.title.rest).toBe('soundos: 3 neu, noch nicht deployt.');
-    expect(meta.sub).toBe('GitHub · PuffyBooy/soundos · 1 Ziel');
+    expect(meta.title.rest).toBe('my-app: 3 neu, noch nicht deployt.');
+    expect(meta.sub).toBe('GitHub · PuffyBooy/my-app · 1 Ziel');
     expect(meta.serverSwitch).toBe(false);
   });
 });

@@ -1,6 +1,14 @@
 import { mkdirSync } from 'node:fs';
 import { expect, test, type BrowserContext, type Page } from '@playwright/test';
-import { answerStepUp, login, ORIGIN, signIn, type Totp } from './helpers/auth.js';
+import {
+  answerStepUp,
+  enrollServer,
+  login,
+  ORIGIN,
+  signIn,
+  withStepUpSession,
+  type Totp,
+} from './helpers/auth.js';
 import { SimAgent } from './helpers/sim-agent.js';
 
 /**
@@ -63,11 +71,8 @@ async function themes(name: string): Promise<void> {
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
 }
 
-async function enroll(name: string, terminal: boolean): Promise<SimAgent> {
-  const res = await apiCall<{ token: string }>(page, 'POST', '/api/servers/enroll', {
-    name,
-    location: 'Wien',
-  });
+async function enroll(p: Page, t: Totp, name: string, terminal: boolean): Promise<SimAgent> {
+  const res = await enrollServer(p, t, name, 'Zuhause');
   expect(res.status).toBe(200);
   const a = new SimAgent({ url: AGENT_URL, name, token: res.data.token, terminal });
   await a.connect();
@@ -80,8 +85,9 @@ const target = (name: string, p: Page = page) =>
 const screen = (p: Page = page) => p.locator('.app-xterm .xterm-rows');
 
 test.beforeAll(async ({ browser }) => {
-  // Hooks default to 30 s; signIn may wait ~26 s for a fresh TOTP window.
-  test.setTimeout(120_000);
+  // Hooks default to 30 s; signIn may wait ~26 s for a fresh TOTP window, the step-up
+  // session for the enrollment two more windows.
+  test.setTimeout(180_000);
   context = await browser.newContext({
     baseURL: ORIGIN,
     colorScheme: 'dark',
@@ -90,8 +96,11 @@ test.beforeAll(async ({ browser }) => {
   });
   page = await context.newPage();
   totp = await signIn(page);
-  agent = await enroll(NAME, true);
-  other = await enroll(OTHER, false);
+  // Enrollment needs step-up; done in a second session so this one is still asked below.
+  await withStepUpSession(browser, async (p, t) => {
+    agent = await enroll(p, t, NAME, true);
+    other = await enroll(p, t, OTHER, false);
+  });
 });
 
 test.afterAll(async () => {
@@ -169,7 +178,7 @@ test('keystrokes reach the agent, the echo comes back, the size follows the wind
   // Step-up from the settings test is still valid (15 min): no dialog.
   await expect(status()).toContainText(`verbunden mit ${NAME}`);
   await expect(page.getByRole('dialog', { name: 'Mit Code bestätigen' })).toHaveCount(0);
-  await expect(screen()).toContainText(`alex@${NAME}:~$`);
+  await expect(screen()).toContainText(`admin@${NAME}:~$`);
   await page.keyboard.type('uptime');
   await page.keyboard.press('Enter');
   await expect(screen()).toContainText('echo: uptime');

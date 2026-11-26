@@ -1,0 +1,9 @@
+# Override: build the share image from this checkout instead of pulling it from GHCR.
+#   docker compose -f deploy/docker-compose.share.yml -f deploy/docker-compose.share.build.yml up -d --build
+services:
+  share:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.share
+    image: homelab-zentrale/share:local
+    pull_policy: build

@@ -123,7 +123,7 @@ describe('2-failure rule and warn rules', () => {
 
 describe('RDAP', () => {
   it('registrable domain: skips IPs, tailnet and local names', () => {
-    expect(registrableDomain('www.sc-ball.at')).toBe('sc-ball.at');
+    expect(registrableDomain('www.beispiel.at')).toBe('beispiel.at');
     expect(registrableDomain('shop.example.co.at')).toBe('example.co.at');
     expect(registrableDomain('a.b.example.com.')).toBe('example.com');
     for (const h of [
@@ -153,13 +153,13 @@ describe('RDAP', () => {
     expect(expiryFromRdap(null)).toBeNull();
 
     const urls: string[] = [];
-    const ok = await lookupDomainExpiry('sc-ball.at', (url) => {
+    const ok = await lookupDomainExpiry('beispiel.at', (url) => {
       urls.push(url);
       if (url.startsWith('https://rdap.org/')) {
         return Promise.resolve(
           new Response(null, {
             status: 302,
-            headers: { location: 'https://rdap.nic.at/domain/sc-ball.at' },
+            headers: { location: 'https://rdap.nic.at/domain/beispiel.at' },
           }),
         );
       }
@@ -167,8 +167,8 @@ describe('RDAP', () => {
     });
     expect(ok).toBe(Date.parse('2027-01-15T00:00:00Z'));
     expect(urls).toEqual([
-      'https://rdap.org/domain/sc-ball.at',
-      'https://rdap.nic.at/domain/sc-ball.at',
+      'https://rdap.org/domain/beispiel.at',
+      'https://rdap.nic.at/domain/beispiel.at',
     ]);
 
     // Redirect to plain http is not followed.

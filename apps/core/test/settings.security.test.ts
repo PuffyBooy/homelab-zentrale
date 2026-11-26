@@ -4,7 +4,7 @@ import Database from 'better-sqlite3';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { GameSummary, HaState } from '@hz/shared';
 import { staticCacheControl } from '../src/app.js';
-import { fromVienna } from '../src/calendar.js';
+import { fromLocal } from '../src/calendar.js';
 import { openDatabase } from '../src/db/index.js';
 import { exportFileName, removeStaleExports } from '../src/settings/export.js';
 import { WallService } from '../src/wall/service.js';
@@ -68,7 +68,7 @@ describe('POST /api/settings/export', () => {
   it('streams a valid SQLite snapshot, removes the temp file, audits', async () => {
     const e = await setup();
     await stepUp(e.t, e.secret, e.cookie);
-    e.t.clock.t = fromVienna(2026, 11, 26, 23, 4);
+    e.t.clock.t = fromLocal(2026, 11, 26, 23, 4);
     // The session is still valid; step-up again at the new time.
     await stepUp(e.t, e.secret, e.cookie);
     const res = await e.t.app.inject({
@@ -93,7 +93,7 @@ describe('POST /api/settings/export', () => {
       username: string;
       totp_secret_enc: string;
     };
-    expect(user.username).toBe('alex');
+    expect(user.username).toBe('admin');
     // Secrets stay encrypted in the export.
     expect(user.totp_secret_enc).not.toContain(e.secret);
     const v = copy.prepare('SELECT MAX(version) v FROM schema_migrations').get() as { v: number };
@@ -125,7 +125,7 @@ describe('POST /api/settings/export', () => {
   });
 
   it('file name in Vienna time; stale temp files are removed', async () => {
-    expect(exportFileName(fromVienna(2026, 3, 29, 3, 7))).toBe(
+    expect(exportFileName(fromLocal(2026, 3, 29, 3, 7))).toBe(
       'homelab-zentrale-20260329-0307.sqlite',
     );
     expect(exportFileName(Date.UTC(2026, 11, 31, 23, 30))).toBe(

@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1.7
 # Optional public share gateway (apps/share) for oracle-a1. Multi-arch (linux/amd64,
 # linux/arm64). Build context is the repo root:
-#   docker compose -f deploy/docker-compose.share.yml build
+#   docker compose -f deploy/docker-compose.share.yml -f deploy/docker-compose.share.build.yml build
 #   docker buildx build --platform linux/amd64,linux/arm64 -f deploy/Dockerfile.share .
 # Runtime: only the compiled gateway, its production deps (@hz/shared, zod) and the
 # built mini UI in dist/ui. No npm, no corepack, runs as `node`, read-only friendly.

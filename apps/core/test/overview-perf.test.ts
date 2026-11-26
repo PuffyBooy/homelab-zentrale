@@ -45,7 +45,7 @@ function seed(t: TestApp, now: number): void {
   const db = t.db.sqlite;
   const servers = Array.from({ length: 6 }, (_, i) => `srv${String(i).padStart(19, '0')}`);
   const insServer = db.prepare(
-    `INSERT INTO servers (id, name, location, created_at, thresholds_json) VALUES (?, ?, 'Wien', ?, '{}')`,
+    `INSERT INTO servers (id, name, location, created_at, thresholds_json) VALUES (?, ?, 'Zuhause', ?, '{}')`,
   );
   const insRaw = db.prepare(
     `INSERT INTO metrics_raw (server_id, ts, cpu, ram, swap, disk_max, disk_json, temp, net_in, net_out)

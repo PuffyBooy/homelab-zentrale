@@ -1,5 +1,7 @@
 # Homelab-Zentrale agent, one per server. Installed by deploy/install-agent.sh.
 #   docker compose -f deploy/docker-compose.agent.yml up -d
+# Local build instead of the GHCR image:
+#   docker compose -f deploy/docker-compose.agent.yml -f deploy/docker-compose.agent.build.yml up -d --build
 # Config (HZ_CORE_URL, HZ_AGENT_TOKEN, HZ_AGENT_NAME, HZ_AGENT_ALLOW_TERMINAL) comes from
 # /etc/homelab-agent/agent.env (mode 0600, outside /opt/homelab so no action can rewrite it).
 #
@@ -40,10 +42,10 @@ name: homelab-agent
 
 services:
   agent:
-    build:
-      context: ..
-      dockerfile: apps/agent/Dockerfile
-    image: ${HZ_AGENT_IMAGE:-homelab-zentrale/agent:local}
+    # Multi-arch image from GHCR (.github/workflows/images.yml). Pin with
+    # HZ_AGENT_IMAGE=ghcr.io/puffybooy/homelab-agent:sha-<short>; build locally with
+    # deploy/docker-compose.agent.build.yml or install-agent.sh --build-local.
+    image: ${HZ_AGENT_IMAGE:-ghcr.io/puffybooy/homelab-agent:latest}
     container_name: homelab-agent
     restart: unless-stopped
     labels:
