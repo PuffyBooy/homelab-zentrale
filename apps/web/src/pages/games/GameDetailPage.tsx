@@ -16,12 +16,14 @@ import {
   type GameEventBuffer,
 } from '../../lib/games.js';
 import { useLiveTopic } from '../../lib/live.js';
+import { priorityText } from '../../lib/throttle.js';
 import { useNow } from '../../lib/useNow.js';
 import { BackupsTile } from './BackupsTile.js';
 import { ConsoleTile } from './ConsoleTile.js';
 import { DeleteGameDialog } from './DeleteGameDialog.js';
 import { ForwardHint } from './ForwardHint.js';
 import { GameTile } from './GameTile.js';
+import { GamePriorityTile } from '../throttle/PriorityTile.js';
 import { PortsTile } from './PortsTile.js';
 import { SettingsTile } from './SettingsTile.js';
 import { ShareAuditTile, ShareLinksTile } from './ShareLinksTile.js';
@@ -124,6 +126,8 @@ function Detail({ game }: { game: GameSummary }): ReactElement {
           <dd className="app-break">{game.address}</dd>
           <dt>Ports</dt>
           <dd>{ports.map((p) => portLabel(p.port, p.protocol, p.count)).join(' · ')}</dd>
+          <dt>Priorität</dt>
+          <dd>{priorityText(game)}</dd>
           <dt>Auto-Stopp</dt>
           <dd>{autoStopText(game.autoStopMinutes)}</dd>
           <dt>Konsole</dt>
@@ -145,6 +149,7 @@ function Detail({ game }: { game: GameSummary }): ReactElement {
       <ShareAuditTile game={game} now={now} />
       <BackupsTile game={game} now={now} />
       <SettingsTile game={game} tpl={tpl} />
+      <GamePriorityTile game={game} />
       <PortsTile game={game} tpl={tpl} />
       <Tile title="Von außen erreichbar" icon="globe" span={2}>
         <ForwardHint ports={ports} server={server} />

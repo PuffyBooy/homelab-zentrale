@@ -25,6 +25,8 @@ import {
   type LogBuffer,
   type LogMatch,
 } from '../../lib/logs.js';
+import { ContainerThrottleTile } from '../throttle/ContainerThrottleTile.js';
+import { ContainerPriorityTile } from '../throttle/PriorityTile.js';
 
 /** Distance from the bottom (px) that still counts as "at the end". */
 const BOTTOM_SLACK = 24;
@@ -61,7 +63,10 @@ function paintMatches(body: HTMLElement | null, matches: LogMatch[], current: nu
   CSS.highlights.set(HL_CURRENT, cur);
 }
 
-/** /containers/:id/logs (SPEC 6.1): last 500 lines plus follow, pause and search. */
+/**
+ * /containers/:id/logs (SPEC 6.1): last 500 lines plus follow, pause and search.
+ * Below: priority and throttle of the container (SPEC 6a, M10).
+ */
 export function ContainerLogsPage(): ReactElement | null {
   const { id = '' } = useParams();
   const qc = useQueryClient();
@@ -217,110 +222,114 @@ export function ContainerLogsPage(): ReactElement | null {
           : 'angehalten beim Scrollen';
 
   return (
-    <Tile
-      title={c.name}
-      icon="terminal"
-      count={containerSub(c)}
-      status={c.status}
-      span={4}
-      actions={
-        <Link className="hz-btn hz-btn-ghost hz-btn-sm" to={`/containers?server=${c.serverId}`}>
-          Alle Container
-        </Link>
-      }
-      footer={
-        <>
-          <span className="app-foot-text">
-            {formatNumber(shown.length, 0)} Zeilen · höchstens {formatNumber(MAX_LOG_LINES, 0)} im
-            Fenster
-          </span>
-          <span className="app-foot-text">{c.statusText}</span>
-        </>
-      }
-    >
-      <div className="app-logbar" role="toolbar" aria-label="Log-Steuerung">
-        <Button
-          size="sm"
-          variant={follow && !paused ? 'secondary' : 'ghost'}
-          aria-pressed={follow && !paused}
-          disabled={paused}
-          onClick={() => setFollow((f) => !f)}
-        >
-          Folgen
-        </Button>
-        <Button
-          size="sm"
-          variant={paused ? 'secondary' : 'ghost'}
-          aria-pressed={paused}
-          onClick={togglePause}
-        >
-          {paused ? 'Weiter' : 'Pause'}
-        </Button>
-        <div className="app-logsearch">
-          <label className="hz-sr" htmlFor={searchId}>
-            Suche im Log
-          </label>
-          <input
-            id={searchId}
-            className="hz-input hz-input-mono"
-            type="search"
-            placeholder="Suchen"
-            autoComplete="off"
-            spellCheck={false}
-            value={query}
-            onChange={(e) => {
-              setQuery(e.target.value);
-              setCurrent(-1);
-            }}
-            onKeyDown={onSearchKey}
-          />
-          <span className="app-logsearch-n" aria-live="polite">
-            {query
-              ? matches.length
-                ? cur >= 0
-                  ? `${formatNumber(cur + 1, 0)} von ${formatNumber(matches.length, 0)}`
-                  : plural(matches.length, 'Treffer', 'Treffer')
-                : 'kein Treffer'
-              : ''}
-          </span>
+    <div className="hz-grid app-grid">
+      <Tile
+        title={c.name}
+        icon="terminal"
+        count={containerSub(c)}
+        status={c.status}
+        span={4}
+        actions={
+          <Link className="hz-btn hz-btn-ghost hz-btn-sm" to={`/containers?server=${c.serverId}`}>
+            Alle Container
+          </Link>
+        }
+        footer={
+          <>
+            <span className="app-foot-text">
+              {formatNumber(shown.length, 0)} Zeilen · höchstens {formatNumber(MAX_LOG_LINES, 0)} im
+              Fenster
+            </span>
+            <span className="app-foot-text">{c.statusText}</span>
+          </>
+        }
+      >
+        <div className="app-logbar" role="toolbar" aria-label="Log-Steuerung">
           <Button
             size="sm"
-            variant="ghost"
-            aria-label="Vorheriger Treffer"
-            disabled={!matches.length}
-            onClick={() => jump(-1)}
+            variant={follow && !paused ? 'secondary' : 'ghost'}
+            aria-pressed={follow && !paused}
+            disabled={paused}
+            onClick={() => setFollow((f) => !f)}
           >
-            ↑
+            Folgen
           </Button>
           <Button
             size="sm"
-            variant="ghost"
-            aria-label="Nächster Treffer"
-            disabled={!matches.length}
-            onClick={() => jump(1)}
+            variant={paused ? 'secondary' : 'ghost'}
+            aria-pressed={paused}
+            onClick={togglePause}
           >
-            ↓
+            {paused ? 'Weiter' : 'Pause'}
           </Button>
+          <div className="app-logsearch">
+            <label className="hz-sr" htmlFor={searchId}>
+              Suche im Log
+            </label>
+            <input
+              id={searchId}
+              className="hz-input hz-input-mono"
+              type="search"
+              placeholder="Suchen"
+              autoComplete="off"
+              spellCheck={false}
+              value={query}
+              onChange={(e) => {
+                setQuery(e.target.value);
+                setCurrent(-1);
+              }}
+              onKeyDown={onSearchKey}
+            />
+            <span className="app-logsearch-n" aria-live="polite">
+              {query
+                ? matches.length
+                  ? cur >= 0
+                    ? `${formatNumber(cur + 1, 0)} von ${formatNumber(matches.length, 0)}`
+                    : plural(matches.length, 'Treffer', 'Treffer')
+                  : 'kein Treffer'
+                : ''}
+            </span>
+            <Button
+              size="sm"
+              variant="ghost"
+              aria-label="Vorheriger Treffer"
+              disabled={!matches.length}
+              onClick={() => jump(-1)}
+            >
+              ↑
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              aria-label="Nächster Treffer"
+              disabled={!matches.length}
+              onClick={() => jump(1)}
+            >
+              ↓
+            </Button>
+          </div>
+          <span className="app-logstate" aria-live="polite">
+            <StatusDot
+              status={loading ? 'busy' : paused || ended ? 'off' : 'ok'}
+              label={status}
+              pulse={false}
+            />
+          </span>
         </div>
-        <span className="app-logstate" aria-live="polite">
-          <StatusDot
-            status={loading ? 'busy' : paused || ended ? 'off' : 'ok'}
-            label={status}
-            pulse={false}
-          />
-        </span>
-      </div>
-      <div className="app-term" ref={wrap}>
-        <div className="app-term-scope" data-theme="dark">
-          <Terminal
-            title={`docker logs ${c.name}`}
-            host={c.serverName}
-            lines={lines}
-            height="min(64vh, 640px)"
-            cursor={false}
-          />
+        <div className="app-term" ref={wrap}>
+          <div className="app-term-scope" data-theme="dark">
+            <Terminal
+              title={`docker logs ${c.name}`}
+              host={c.serverName}
+              lines={lines}
+              height="min(64vh, 640px)"
+              cursor={false}
+            />
+          </div>
         </div>
-      </div>
-    </Tile>
+      </Tile>
+      <ContainerPriorityTile c={c} />
+      <ContainerThrottleTile c={c} />
+    </div>
   );
 }

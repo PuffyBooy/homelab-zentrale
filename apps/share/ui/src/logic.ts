@@ -21,7 +21,9 @@ export type ShareErrorCode =
   | 'rate_limited'
   | 'invalid_input'
   | 'busy'
-  | 'unavailable';
+  | 'unavailable'
+  /** M10: the game does not fit into free RAM minus the reserve (no numbers for links). */
+  | 'insufficient_ram';
 
 /** A failed request: share API error codes plus two client-side ones. */
 export interface Failure {
@@ -126,6 +128,8 @@ export function errorLine(f: Failure): string {
       return 'Dafür hat dieser Link keine Berechtigung.';
     case 'busy':
       return 'Gerade läuft schon eine Aktion. Kurz warten.';
+    case 'insufficient_ram':
+      return 'Zu wenig Arbeitsspeicher auf dem Server. Später erneut versuchen.';
     case 'rate_limited':
       return `Zu viele Anfragen. Wieder möglich in ${retryMinutes(f.retryAfter)} Min.`;
     case 'invalid_input':
@@ -302,6 +306,7 @@ const CODES = new Set<string>([
   'invalid_input',
   'busy',
   'unavailable',
+  'insufficient_ram',
 ]);
 
 function fallbackCode(status: number): Failure['error'] {

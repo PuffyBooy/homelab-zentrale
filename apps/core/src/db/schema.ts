@@ -239,6 +239,8 @@ export const containers = sqliteTable(
     /** Alert class of the last evaluation (containers/status.ts), for transitions. */
     alertClass: text('alert_class'),
     updatedAt: integer('updated_at').notNull(),
+    /** Last known memory usage (kept while stopped), for the derived RAM reserve (M10). */
+    lastMemBytes: real('last_mem_bytes'),
   },
   (t) => [
     unique().on(t.serverId, t.name),
@@ -464,6 +466,12 @@ export const gameServers = sqliteTable(
     emptySince: integer('empty_since'),
     createdAt: integer('created_at').notNull(),
     updatedAt: integer('updated_at').notNull(),
+    /** M10: wichtig | normal | niedrig (api/throttle.ts). */
+    priority: text('priority').notNull().default('normal'),
+    allowStop: integer('allow_stop', { mode: 'boolean' }).notNull().default(false),
+    allowStopWithPlayers: integer('allow_stop_with_players', { mode: 'boolean' })
+      .notNull()
+      .default(false),
   },
   (t) => [unique().on(t.serverId, t.name)],
 );
@@ -640,3 +648,81 @@ export type ConsoleSessionRow = typeof consoleSessions.$inferSelect;
 export type WallDeviceRow = typeof wallDevices.$inferSelect;
 export type PushDigestItemRow = typeof pushDigestItems.$inferSelect;
 export type DeletedGameBackupRow = typeof deletedGameBackups.$inferSelect;
+
+// ---- M10: priorities and automatic throttling (migration 11) ----------------------
+
+/** Priority of a plain container, keyed by the core container id (server id + name). */
+export const containerPriorities = sqliteTable(
+  'container_priorities',
+  {
+    containerId: text('container_id').primaryKey(),
+    serverId: text('server_id')
+      .notNull()
+      .references(() => servers.id, { onDelete: 'cascade' }),
+    containerName: text('container_name').notNull(),
+    priority: text('priority').notNull(),
+    allowStop: integer('allow_stop', { mode: 'boolean' }).notNull().default(false),
+    updatedAt: integer('updated_at').notNull(),
+  },
+  (t) => [index('container_priorities_server').on(t.serverId)],
+);
+
+/** Throttle settings (merged ThrottleSettings) and schedule windows of a server. */
+export const serverThrottle = sqliteTable('server_throttle', {
+  serverId: text('server_id')
+    .primaryKey()
+    .references(() => servers.id, { onDelete: 'cascade' }),
+  settingsJson: text('settings_json').notNull().default('{}'),
+  schedulesJson: text('schedules_json').notNull().default('[]'),
+  updatedAt: integer('updated_at').notNull(),
+});
+
+/** Current throttle and auto-stop mark of a container (core container id). */
+export const containerThrottles = sqliteTable(
+  'container_throttles',
+  {
+    containerId: text('container_id').primaryKey(),
+    serverId: text('server_id')
+      .notNull()
+      .references(() => servers.id, { onDelete: 'cascade' }),
+    containerName: text('container_name').notNull(),
+    /** Game server of the container (no foreign key, rows of deleted games are dropped). */
+    gameId: text('game_id'),
+    /** Docker container the limit was set on; a recreate drops the limit. */
+    dockerId: text('docker_id'),
+    /** Current --cpus limit, null = not throttled. */
+    cpus: real('cpus'),
+    /** --cpus limit before the throttle (restored on unthrottle), null = none. */
+    originalCpus: real('original_cpus'),
+    /** auto | admin | schedule */
+    by: text('by'),
+    reason: text('reason'),
+    since: integer('since'),
+    /** Stopped by the rule set; cleared when the container runs again. */
+    autoStoppedAt: integer('auto_stopped_at'),
+    updatedAt: integer('updated_at').notNull(),
+  },
+  (t) => [
+    index('container_throttles_server').on(t.serverId),
+    index('container_throttles_game').on(t.gameId),
+  ],
+);
+
+/** Restart attempts of stopped `wichtig` containers. */
+export const wichtigRestarts = sqliteTable(
+  'wichtig_restarts',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    containerId: text('container_id').notNull(),
+    serverId: text('server_id')
+      .notNull()
+      .references(() => servers.id, { onDelete: 'cascade' }),
+    ts: integer('ts').notNull(),
+    ok: integer('ok', { mode: 'boolean' }).notNull(),
+  },
+  (t) => [index('wichtig_restarts_container_ts').on(t.containerId, t.ts)],
+);
+
+export type ContainerPriorityRow = typeof containerPriorities.$inferSelect;
+export type ServerThrottleRow = typeof serverThrottle.$inferSelect;
+export type ContainerThrottleRow = typeof containerThrottles.$inferSelect;

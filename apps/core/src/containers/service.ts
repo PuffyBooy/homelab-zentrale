@@ -55,6 +55,23 @@ function startedMs(iso: string | undefined): number | null {
 
 export type ContainerListener = (id: string, deleted: boolean) => void;
 
+/** M10 fields of a summary (priority, protection, throttle state), see throttle/service.ts. */
+export type ContainerControl = Pick<
+  ContainerSummary,
+  'priority' | 'allowStop' | 'protected' | 'gameId' | 'throttled' | 'autoStopped'
+>;
+export type ContainerControlProvider = (row: ContainerRow) => ContainerControl;
+
+/** Until the throttle service is attached (and for unit tests without it). */
+const DEFAULT_CONTROL: ContainerControl = {
+  priority: 'normal',
+  allowStop: false,
+  protected: false,
+  gameId: null,
+  throttled: null,
+  autoStopped: false,
+};
+
 const STATUS_ORDER: Record<ContainerStatus, number> = { crit: 0, warn: 1, busy: 2, off: 3, ok: 4 };
 
 type Values = Omit<ContainerRow, 'id' | 'serverId' | 'name'>;
@@ -103,6 +120,7 @@ const signature = (v: Partial<Values>): string =>
  */
 export class ContainerService {
   private readonly listeners = new Set<ContainerListener>();
+  private control: ContainerControlProvider | null = null;
 
   constructor(
     private readonly deps: {
@@ -120,6 +138,16 @@ export class ContainerService {
 
   private emit(id: string, deleted: boolean): void {
     for (const fn of this.listeners) fn(id, deleted);
+  }
+
+  /** Priority and throttle state come from the throttle service (M10). */
+  setControl(fn: ContainerControlProvider): void {
+    this.control = fn;
+  }
+
+  /** Something outside the row changed (priority, throttle): send a live update. */
+  touch(id: string): void {
+    if (this.row(id)) this.emit(id, false);
   }
 
   // ---- reads -----------------------------------------------------------------
@@ -154,7 +182,7 @@ export class ContainerService {
     );
   }
 
-  private activeIntent(row: Pick<ContainerRow, 'intent' | 'intentUntil'>): ContainerIntent | null {
+  activeIntent(row: Pick<ContainerRow, 'intent' | 'intentUntil'>): ContainerIntent | null {
     if (row.intent !== 'stop' && row.intent !== 'restart') return null;
     if (row.intentUntil !== null && row.intentUntil < this.deps.now()) return null;
     return row.intent;
@@ -188,6 +216,7 @@ export class ContainerService {
       memBytes: row.memBytes,
       restartCount: row.restartCount,
       updatedAt: new Date(row.updatedAt).toISOString(),
+      ...(this.control?.(row) ?? DEFAULT_CONTROL),
     };
   }
 
@@ -294,6 +323,7 @@ export class ContainerService {
           oomAt: old?.oomAt ?? null,
           alertClass: old?.alertClass ?? null,
           updatedAt: now,
+          lastMemBytes: c.memBytes ?? old?.lastMemBytes ?? null,
         };
         const result = this.write(tx, serverId, serverName, name, old, base);
         if (result.changed) changed.push(result.id);

@@ -1,6 +1,6 @@
 import type { FastifyError, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
-import type { ErrorCode, ErrorResponse } from '@hz/shared';
+import type { ErrorCode, ErrorResponse, InsufficientRamDetails } from '@hz/shared';
 
 /** Thrown by route handlers for expected failures. Carries only a stable code. */
 export class HttpError extends Error {
@@ -10,6 +10,8 @@ export class HttpError extends Error {
     public readonly retryAfter?: number,
     /** Fixed German hint for the user; never input values or internals. */
     public readonly userMessage?: string,
+    /** Only with `insufficient_ram` (admin API; share links never get details). */
+    public readonly details?: InsufficientRamDetails,
   ) {
     super(code);
     this.name = 'HttpError';
@@ -22,6 +24,7 @@ export function sendError(
   code: ErrorCode,
   retryAfter?: number,
   message?: string,
+  details?: InsufficientRamDetails,
 ): FastifyReply {
   const body: ErrorResponse = { ok: false, error: code };
   if (retryAfter !== undefined) {
@@ -29,6 +32,7 @@ export function sendError(
     void reply.header('retry-after', String(retryAfter));
   }
   if (message !== undefined) body.message = message;
+  if (details !== undefined) body.details = details;
   return reply.code(status).send(body);
 }
 
@@ -60,7 +64,7 @@ export function errorHandler(
   reply: FastifyReply,
 ): FastifyReply {
   if (err instanceof HttpError) {
-    return sendError(reply, err.status, err.code, err.retryAfter, err.userMessage);
+    return sendError(reply, err.status, err.code, err.retryAfter, err.userMessage, err.details);
   }
   if (err instanceof z.ZodError) {
     request.log.debug({ issues: err.issues.length }, 'invalid input');

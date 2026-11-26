@@ -174,6 +174,8 @@ export const shareErrorCodeSchema = z.enum([
   'busy',
   /** Server cannot be reached right now (503). */
   'unavailable',
+  /** Game start refused, not enough RAM free on the server (409). No details for friends. */
+  'insufficient_ram',
 ]);
 export const shareErrorResponseSchema = z.strictObject({
   ok: z.literal(false),

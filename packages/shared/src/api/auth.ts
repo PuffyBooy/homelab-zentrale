@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { modulesSchema } from './modules.js';
+import { insufficientRamDetailsSchema } from './throttle.js';
 
 /** Shared limits so web and core validate the same way. */
 export const USERNAME_RE = /^[a-z0-9][a-z0-9._-]{1,31}$/;
@@ -154,6 +155,11 @@ export const errorCodeSchema = z.enum([
   'ha_error',
   /** The optional module (github, homeassistant, games) is switched off (404). */
   'module_disabled',
+  /**
+   * Game start refused: its RAM limit does not fit into free RAM minus the
+   * reserve for wichtig containers (409). `details`: InsufficientRamDetails.
+   */
+  'insufficient_ram',
 ]);
 export type ErrorCode = z.infer<typeof errorCodeSchema>;
 export const errorResponseSchema = z.strictObject({
@@ -166,5 +172,7 @@ export const errorResponseSchema = z.strictObject({
    * 8 Zeichen"). Written by the core, never contains input values or internals.
    */
   message: z.string().max(200).optional(),
+  /** Only with error `insufficient_ram`. */
+  details: insufficientRamDetailsSchema.optional(),
 });
 export type ErrorResponse = z.infer<typeof errorResponseSchema>;

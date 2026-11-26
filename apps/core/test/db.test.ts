@@ -45,6 +45,10 @@ const tables = [
   schema.wallDevices,
   schema.pushDigestItems,
   schema.deletedGameBackups,
+  schema.containerPriorities,
+  schema.serverThrottle,
+  schema.containerThrottles,
+  schema.wichtigRestarts,
 ];
 
 describe('database', () => {

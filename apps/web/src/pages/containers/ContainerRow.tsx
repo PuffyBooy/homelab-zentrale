@@ -4,6 +4,7 @@ import { useNavigate } from 'react-router';
 import { Alert, Button, ServiceRow } from '@hz/ui';
 import { errorText } from '../../lib/errors.js';
 import { ACTION_PENDING, containerMeta, containerSub, isRunning } from '../../lib/containers.js';
+import { ThrottleBadge } from '../throttle/ThrottleBadge.js';
 import { UpdateDialog } from './UpdateDialog.js';
 import { useContainerAction } from './useContainerAction.js';
 
@@ -96,7 +97,18 @@ export function ContainerRow({
         name={c.name}
         host={containerSub(c, withServer)}
         status={busy ? 'busy' : c.status}
-        meta={busy ? ACTION_PENDING[pending] : containerMeta(c, now, !readOnly)}
+        meta={
+          busy ? (
+            ACTION_PENDING[pending]
+          ) : c.throttled || c.autoStopped ? (
+            <>
+              <ThrottleBadge throttled={c.throttled} autoStopped={c.autoStopped} />{' '}
+              {containerMeta(c, now, !readOnly)}
+            </>
+          ) : (
+            containerMeta(c, now, !readOnly)
+          )
+        }
         actions={actions}
       />
       {action.error ? (

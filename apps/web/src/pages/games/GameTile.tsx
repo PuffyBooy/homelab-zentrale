@@ -3,6 +3,7 @@ import { useEffect, useState, type ReactElement } from 'react';
 import { GameServer } from '@hz/ui';
 import { FormError } from '../../components/FormError.js';
 import { disabledTileActions, gameTileProps } from '../../lib/games.js';
+import { ThrottleBadge } from '../throttle/ThrottleBadge.js';
 import { ShareCreateDialog } from './ShareCreateDialog.js';
 import { gameErrorText, useGameAction } from './useGameAction.js';
 
@@ -43,6 +44,11 @@ export function GameTile({ game, onConsole }: GameTileProps): ReactElement {
         onCopy={() => setCopied(true)}
         disabledActions={disabled}
       />
+      {game.throttled || game.autoStopped ? (
+        <div className="app-game-hint">
+          <ThrottleBadge throttled={game.throttled} autoStopped={game.autoStopped} />
+        </div>
+      ) : null}
       <span className="hz-sr" aria-live="polite">
         {copied ? `Adresse ${game.address} kopiert` : ''}
       </span>

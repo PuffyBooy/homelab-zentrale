@@ -4,6 +4,7 @@ import {
   containerStateSchema,
   portMappingSchema,
 } from '../agent-protocol.js';
+import { containerControlFields } from './throttle.js';
 
 /** UI status of a container (design/README.md). */
 export const containerStatusSchema = z.enum(['ok', 'warn', 'crit', 'off', 'busy']);
@@ -40,6 +41,8 @@ export const containerSummarySchema = z.strictObject({
   memBytes: z.number().nullable(),
   restartCount: z.number().int().nullable(),
   updatedAt: z.iso.datetime(),
+  /** M10: priority, protection (hz.role) and throttle state (api/throttle.ts). */
+  ...containerControlFields,
 });
 export type ContainerSummary = z.infer<typeof containerSummarySchema>;
 

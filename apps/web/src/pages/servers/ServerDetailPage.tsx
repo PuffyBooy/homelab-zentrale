@@ -1,7 +1,7 @@
 import type { HistoryResponse, ServerDetail } from '@hz/shared';
 import { useQuery } from '@tanstack/react-query';
-import { useState, type ReactElement } from 'react';
-import { Link, useParams } from 'react-router';
+import { useEffect, useRef, useState, type ReactElement } from 'react';
+import { Link, useLocation, useParams } from 'react-router';
 import { Alert, Button, Metric, Sparkline, StatusDot, Tile, UsageBar } from '@hz/ui';
 import { isApiError } from '../../lib/api.js';
 import { errorText } from '../../lib/errors.js';
@@ -20,6 +20,7 @@ import { useLiveState, useLiveTopic } from '../../lib/live.js';
 import { fetchHistory, fetchServer, historyKey, serverKey } from '../../lib/servers.js';
 import { useNow } from '../../lib/useNow.js';
 import { ContainerGroups } from '../containers/ContainersPage.js';
+import { AutomatikTile } from '../throttle/AutomatikTile.js';
 import { CleanupDialog } from './CleanupDialog.js';
 import { RebootDialog } from './RebootDialog.js';
 
@@ -75,6 +76,12 @@ function Detail({ d, history }: { d: ServerDetail; history?: HistoryResponse | u
   const t = d.thresholds;
   const now = useNow(30_000);
   const [dialog, setDialog] = useState<'cleanup' | 'reboot' | null>(null);
+  const { hash } = useLocation();
+  const automatik = useRef<HTMLDivElement>(null);
+  // Settings → Server links to #automatik.
+  useEffect(() => {
+    if (hash === '#automatik') automatik.current?.scrollIntoView({ block: 'start' });
+  }, [hash]);
   const offline = !s.connected;
   const diskIssue = s.reasons.some((r) => r.code === 'disk_warn' || r.code === 'disk_crit');
 
@@ -261,6 +268,10 @@ function Detail({ d, history }: { d: ServerDetail; history?: HistoryResponse | u
         </Tile>
 
         <ServerContainers server={s} />
+
+        <div className="hz-span-4 app-anchor" id="automatik" ref={automatik}>
+          <AutomatikTile serverId={s.id} serverName={s.name} />
+        </div>
 
         <Tile title="Aktionen" icon="power" span={4}>
           <div className="app-actions">

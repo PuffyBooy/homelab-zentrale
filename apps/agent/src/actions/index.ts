@@ -13,6 +13,7 @@ import { resolveHomelabPath } from '../paths.js';
 import { checkHttp, checkPing, checkTcp } from './checks.js';
 import { composeDown, composePull, composeUp, composeWrite } from './compose.js';
 import { containerRestart, containerStart, containerStop } from './container.js';
+import { containerLimit } from './container-limit.js';
 import { containerUpdate } from './container-update.js';
 import { containerLogs } from './logs.js';
 import { deployRun } from './deploy.js';
@@ -41,6 +42,7 @@ export const handlers: ActionHandlers = {
   'container.restart': containerRestart,
   'container.update': containerUpdate,
   'container.logs': containerLogs,
+  'container.limit': containerLimit,
   'compose.up': composeUp,
   'compose.down': composeDown,
   'compose.pull': composePull,

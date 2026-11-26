@@ -21,6 +21,8 @@ import {
   type gameUpdateRequestSchema,
   type GamePortsUpdateResponse,
   type gameTemplateListResponseSchema,
+  type InsufficientRamDetails,
+  type Throttled,
 } from '@hz/shared';
 import {
   RpcError,
@@ -47,13 +49,14 @@ import {
   type GameServerRow,
   type ServerRow,
 } from '../db/schema.js';
-import { clockTime, duration } from '../format.js';
+import { clockTime, duration, gigabytes } from '../format.js';
 import { HttpError } from '../http/errors.js';
 import type { Scheduler } from '../scheduler.js';
 import {
   collectUsed,
   isFree,
   markUsed,
+  ramBytes,
   ramCheck,
   suggestPorts,
   suggestRconPort,
@@ -212,6 +215,22 @@ export interface GameServiceDeps {
 const TOPIC_RE = /^game:([A-Za-z0-9_-]{1,64})$/;
 export const gameTopic = (id: string): string => `game:${id}`;
 
+/**
+ * M10 hooks from the throttle service: throttle state of a game's container and
+ * the RAM reserve check before a game starts.
+ */
+export interface GameControl {
+  throttleOf(gameId: string): { throttled: Throttled | null; autoStopped: boolean };
+  /** null = fits (or RAM unknown); else the numbers for 409 insufficient_ram. */
+  ramCheck(
+    serverId: string,
+    neededBytes: number,
+    ownContainerIds: readonly string[],
+  ): InsufficientRamDetails | null;
+  /** Effective reserve in bytes, null while RAM is unknown. */
+  reserveOf(serverId: string, ownContainerIds: readonly string[]): number | null;
+}
+
 type BackupOutcome = { ok: true; backup: GameBackup } | { ok: false; reason: string; code: string };
 
 /**
@@ -231,6 +250,7 @@ export class GameService {
   private readonly background = new Set<Promise<unknown>>();
   private publisher: GamePublisher | null = null;
   private refreshQueued = false;
+  private control: GameControl | null = null;
 
   constructor(private readonly deps: GameServiceDeps) {
     this.templates = deps.templates;
@@ -249,6 +269,10 @@ export class GameService {
 
   setPublisher(p: GamePublisher): void {
     this.publisher = p;
+  }
+
+  setControl(c: GameControl): void {
+    this.control = c;
   }
 
   onChange(fn: GameListener): () => void {
@@ -355,6 +379,11 @@ export class GameService {
   }
 
   // ---- reads -------------------------------------------------------------------
+
+  /** An action (start, stop, backup, ...) is running for this game. */
+  isBusy(id: string): boolean {
+    return this.busy.has(id);
+  }
 
   row(id: string): GameServerRow | undefined {
     return this.deps.db.select().from(gameServers).where(eq(gameServers.id, id)).get();
@@ -485,6 +514,10 @@ export class GameService {
       values,
       lastBackupAt: lastBackup === null ? null : iso(lastBackup),
       createdAt: iso(row.createdAt),
+      priority: row.priority as GameSummary['priority'],
+      allowStop: row.allowStop,
+      allowStopWithPlayers: row.allowStopWithPlayers,
+      ...(this.control?.throttleOf(row.id) ?? { throttled: null, autoStopped: false }),
     };
   }
 
@@ -637,9 +670,18 @@ export class GameService {
     const l = this.templates.get(templateId);
     if (!l || !this.serverRow(serverId)) throw new HttpError(404, 'not_found');
     const used = this.usedPorts(serverId);
+    const ram = this.freeRam(serverId);
+    const reserve = ram ? (this.control?.reserveOf(serverId, []) ?? 0) : null;
+    // The reserve for wichtig containers counts as used for the warning.
+    const check = ramCheck(
+      ram && reserve !== null ? { ...ram, usedBytes: ram.usedBytes + reserve } : ram,
+      l.template.ram.recommended,
+    );
     return {
       ports: suggestPorts(l.template, used),
-      ...ramCheck(this.freeRam(serverId), l.template.ram.recommended),
+      ...check,
+      freeRamBytes: ram ? Math.max(0, ram.totalBytes - ram.usedBytes) : null,
+      ramReserveBytes: reserve,
     };
   }
 
@@ -1043,6 +1085,13 @@ export class GameService {
       return this.summary(id) as GameSummary;
     }
     const texts = { start: 'Startet', stop: 'Wird gestoppt', restart: 'Neustart' } as const;
+    // A restart of a game that does not run is a start (compose up): same RAM check.
+    if (
+      action === 'start' ||
+      (action === 'restart' && this.containerOf(row)?.state !== 'running')
+    ) {
+      this.checkRam(row);
+    }
     this.lock(row, texts[action]);
     const dir = gameDirOf(row.name);
     const hub = this.deps.hub;
@@ -1084,6 +1133,36 @@ export class GameService {
       details: { name: row.name, serverId: row.serverId },
     });
     return this.summary(id) as GameSummary;
+  }
+
+  /** RAM limit of the game: MEMORY field, else the template recommendation. */
+  ramLimitOf(row: GameServerRow): number | null {
+    const mem = storedOf(row).values.MEMORY;
+    const m = typeof mem === 'string' ? /^(\d{1,3})([GM])$/.exec(mem) : null;
+    if (m) return Number(m[1]) * (m[2] === 'G' ? 1024 ** 3 : 1024 ** 2);
+    const rec = this.templates.get(row.templateId)?.template.ram.recommended;
+    return rec ? ramBytes(rec) : null;
+  }
+
+  /**
+   * M10 RAM reserve: refuses a start (admin, share link, automatic) with 409
+   * insufficient_ram when the RAM limit does not fit into free RAM minus the
+   * reserve for wichtig containers. Unknown RAM (no metrics yet) does not block.
+   */
+  private checkRam(row: GameServerRow): void {
+    const needed = this.ramLimitOf(row);
+    if (needed === null || !this.control) return;
+    const own = this.containerIds(row);
+    const d = this.control.ramCheck(row.serverId, needed, own);
+    if (d === null) return;
+    const left = Math.max(0, d.freeBytes - d.reserveBytes);
+    throw new HttpError(
+      409,
+      'insufficient_ram',
+      undefined,
+      `Zu wenig RAM, ${gigabytes(left)} frei`,
+      d,
+    );
   }
 
   private setRunState(id: string, phase: 'running' | 'stopped'): void {

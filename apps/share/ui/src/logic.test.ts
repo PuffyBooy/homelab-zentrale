@@ -131,6 +131,10 @@ describe('answers -> screens', () => {
       'Zu viele Anfragen. Wieder möglich in 2 Min.',
     );
     expect(errorLine({ status: 409, error: 'busy' })).toMatch(/läuft schon/);
+    expect(screenFor({ status: 409, error: 'insufficient_ram' })).toBeNull();
+    expect(errorLine(failureOf(409, { ok: false, error: 'insufficient_ram' }, null))).toBe(
+      'Zu wenig Arbeitsspeicher auf dem Server. Später erneut versuchen.',
+    );
   });
 
   it('reads error bodies, Retry-After and unknown bodies', () => {

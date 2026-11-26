@@ -34,6 +34,20 @@ const isoTs = z.iso.datetime();
 const nonNeg = z.number().finite().nonnegative();
 const percent = z.number().finite().min(0).max(100);
 
+/** Bounds of a docker --cpus limit (container.limit, throttle settings). */
+export const CPUS_MIN = 0.1;
+export const CPUS_MAX = 64;
+/**
+ * A CPU share for `docker update --cpus`: finite number 0.1..64, rounded to 2
+ * decimals. Rejects NaN, Infinity, negatives, 0 and strings (no coercion).
+ */
+export const cpusSchema = z
+  .number()
+  .finite()
+  .min(CPUS_MIN)
+  .max(CPUS_MAX)
+  .transform((v) => Math.round(v * 100) / 100);
+
 /**
  * A path below /opt/homelab/. This is only the syntactic check; the agent
  * additionally resolves it with realpath and checks the prefix again.
@@ -150,6 +164,10 @@ export const containerInfoSchema = z.strictObject({
   cpu: percent.optional(),
   memBytes: nonNeg.optional(),
   restartCount: z.number().int().nonnegative().optional(),
+  /** Value of the label hz.role when it is core or agent (never a throttle target). */
+  role: z.enum(['core', 'agent']).optional(),
+  /** Current --cpus limit (HostConfig.NanoCpus / 1e9), null without a limit. */
+  cpuLimit: nonNeg.nullable().optional(),
 });
 export type ContainerInfo = z.infer<typeof containerInfoSchema>;
 
@@ -407,6 +425,13 @@ export const rpcParamsByAction = {
   /** Pull the image and recreate a standalone container with the same config. */
   'container.update': containerIdParams,
   /** Stream: the rpc id is the stream id. */
+  /**
+   * `docker update --cpus <cpus>`; cpus null removes the limit (--cpus 0).
+   * Nothing else is changed (never memory). The agent refuses containers with
+   * the label hz.role (core, agent) and its own container with not_allowed, and
+   * caps cpus at the host's CPU count. Result: containerLimitDataSchema.
+   */
+  'container.limit': z.strictObject({ id: containerRefSchema, cpus: cpusSchema.nullable() }),
   'container.logs': z.strictObject({
     id: containerRefSchema,
     tail: z.number().int().min(0).max(5000).default(500),
@@ -585,6 +610,10 @@ export const cleanupPreviewDataSchema = z.strictObject({
   totalBytes: nonNeg,
 });
 export type CleanupPreviewData = z.infer<typeof cleanupPreviewDataSchema>;
+
+/** Result of container.limit: the limit now in effect (null = none). */
+export const containerLimitDataSchema = z.strictObject({ cpus: nonNeg.nullable() });
+export type ContainerLimitData = z.infer<typeof containerLimitDataSchema>;
 
 export const cleanupDataSchema = z.strictObject({ freedBytes: nonNeg });
 export const rconDataSchema = z.strictObject({ output: z.string().max(64 * 1024) });

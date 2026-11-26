@@ -54,6 +54,8 @@ export interface ContainerDetails {
   restartCount?: number;
   exitCode?: number;
   health?: ContainerHealth;
+  /** --cpus limit (HostConfig.NanoCpus / 1e9), null without one. */
+  cpuLimit?: number | null;
 }
 
 /** Subset of the inspect result we read (also what tests fake). */
@@ -67,6 +69,7 @@ export interface InspectLike {
     StartedAt?: string;
     Health?: { Status?: string } | undefined;
   };
+  HostConfig?: { NanoCpus?: number | null } | null;
 }
 
 /** Docker timestamps have nanoseconds; "0001-01-01T00:00:00Z" means never. */
@@ -90,6 +93,13 @@ export function detailsFromInspect(i: InspectLike): ContainerDetails {
   }
   const h = i.State?.Health?.Status;
   if (h && HEALTH.has(h)) d.health = h as ContainerHealth;
+  if (i.HostConfig) {
+    const nano = i.HostConfig.NanoCpus;
+    d.cpuLimit =
+      typeof nano === 'number' && Number.isFinite(nano) && nano > 0
+        ? Math.round(nano / 1e7) / 100
+        : null;
+  }
   return d;
 }
 
@@ -145,6 +155,9 @@ export function mapContainer(
     info.startedAt = details.startedAt;
   }
   if (details.restartCount !== undefined) info.restartCount = details.restartCount;
+  const role = labels['hz.role'];
+  if (role === 'core' || role === 'agent') info.role = role;
+  if (details.cpuLimit !== undefined) info.cpuLimit = details.cpuLimit;
   if (state === 'running') {
     if (usage.cpu !== undefined) info.cpu = Math.min(100, Math.max(0, usage.cpu));
     if (usage.memBytes !== undefined) info.memBytes = Math.max(0, usage.memBytes);

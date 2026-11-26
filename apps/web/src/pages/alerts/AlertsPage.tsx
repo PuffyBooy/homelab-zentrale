@@ -1,6 +1,6 @@
 import type { Alert as AlertData } from '@hz/shared';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useCallback, type ReactElement } from 'react';
+import { useCallback, useState, type ReactElement } from 'react';
 import { Link, useSearchParams } from 'react-router';
 import { Alert, Button, Tile } from '@hz/ui';
 import { FormError } from '../../components/FormError.js';
@@ -21,11 +21,13 @@ import {
   resolveAlert,
   sortAlerts,
 } from '../../lib/alerts.js';
-import { useServerFilter, useServers } from '../../lib/data.js';
+import { useContainers, useServerFilter, useServers } from '../../lib/data.js';
 import { errorText } from '../../lib/errors.js';
 import { formatWhen } from '../../lib/format.js';
 import { mergeById } from '../../lib/live.js';
 import { ALL_SERVERS } from '../../lib/servers.js';
+import { parseAutostopKey } from '../../lib/throttle.js';
+import { RestartAutostopButton } from '../throttle/RestartAutostopButton.js';
 
 const STATE_TEXT: Record<AlertData['state'], string> = {
   open: 'offen',
@@ -55,6 +57,12 @@ export function AlertsPage(): ReactElement {
     staleTime: 15_000,
   });
   const servers = useServers();
+  // Only needed for "Wieder starten" on autostop alerts (M10).
+  const hasAutostop = (list.data ?? []).some(
+    (a) => a.state !== 'resolved' && parseAutostopKey(a.key),
+  );
+  const containers = useContainers(hasAutostop);
+  const [startError, setStartError] = useState<unknown>(null);
   const names = new Map((servers.data ?? []).map((s) => [s.id, s.name]));
   const qc = useQueryClient();
 
@@ -127,6 +135,11 @@ export function AlertsPage(): ReactElement {
               : 'Keine aktiven Meldungen. Alles ruhig.'}
           </p>
         ) : null}
+        {startError ? (
+          <div className="app-pad">
+            <FormError title={errorText(startError)} />
+          </div>
+        ) : null}
         {list.isPending ? <p className="app-empty app-pad">Lade Meldungen …</p> : null}
         <ul className="app-alert-list app-pad">
           {rows.map((a) => {
@@ -143,6 +156,13 @@ export function AlertsPage(): ReactElement {
                   action={
                     a.state === 'resolved' ? undefined : (
                       <span className="app-toast-actions">
+                        {containers.data && parseAutostopKey(a.key) ? (
+                          <RestartAutostopButton
+                            alertKey={a.key}
+                            containers={containers.data}
+                            onError={setStartError}
+                          />
+                        ) : null}
                         {a.state === 'open' ? (
                           <Button
                             size="sm"

@@ -29,6 +29,7 @@ import {
   type TemplateInfo,
 } from '../../lib/games.js';
 import { mergeById } from '../../lib/live.js';
+import { suggestRamText } from '../../lib/throttle.js';
 import { ForwardHint } from './ForwardHint.js';
 import { TemplateFields } from './TemplateFields.js';
 import { gameErrorText } from './useGameAction.js';
@@ -204,7 +205,7 @@ function CreateForm({
     ? suggest.isPending
       ? 'freier RAM wird geprüft …'
       : freeRam != null
-        ? `${formatBytes(freeRam)} RAM frei · empfohlen ${formatBytes(ramBytesOf(tpl.ram.recommended))}`
+        ? suggestRamText(freeRam, suggest.data?.ramReserveBytes, ramBytesOf(tpl.ram.recommended))
         : `empfohlen ${formatBytes(ramBytesOf(tpl.ram.recommended))} RAM`
     : `empfohlen ${formatBytes(ramBytesOf(tpl.ram.recommended))} RAM`;
 

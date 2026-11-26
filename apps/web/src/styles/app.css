@@ -1544,3 +1544,79 @@ body,
 .hz-toggle-disabled .hz-switch {
   border-style: dashed;
 }
+
+/* ---------- M10: priorities and throttling ---------- */
+/* "Wer frisst gerade?": CPU and RAM side by side, one column on phones. */
+.app-consumers {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.app-consumers-col {
+  min-width: 0;
+  padding: var(--space-2) 0;
+}
+.app-consumers-col + .app-consumers-col {
+  border-left: 1px solid var(--line);
+}
+.app-consumers-head {
+  margin: 0;
+  padding: 0 var(--space-3) var(--space-1);
+}
+@media (max-width: 699px) {
+  .app-consumers {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .app-consumers-col + .app-consumers-col {
+    border-left: 0;
+    border-top: 1px solid var(--line);
+  }
+}
+.hz-row-meta .hz-badge {
+  vertical-align: middle;
+}
+.app-game-hint {
+  display: flex;
+  gap: var(--space-2);
+}
+/* Schedule editor (Automatik). */
+.app-window {
+  display: grid;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  min-width: 0;
+}
+.app-window-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.app-window-head > .hz-btn {
+  margin-left: auto;
+}
+.app-window-grid {
+  display: grid;
+  gap: var(--space-3);
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  align-items: start;
+}
+@media (max-width: 999px) {
+  .app-window-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@media (max-width: 499px) {
+  .app-window-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+.app-days {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+}
+.app-days .hz-btn {
+  min-width: 40px;
+  justify-content: center;
+}

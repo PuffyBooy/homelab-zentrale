@@ -1,4 +1,4 @@
-import { errorResponseSchema, type ErrorCode } from '@hz/shared';
+import { errorResponseSchema, type ErrorCode, type InsufficientRamDetails } from '@hz/shared';
 
 /** Anything with a zod-like `parse`. Keeps zod out of the web package's direct dependencies. */
 export interface Schema<T> {
@@ -15,14 +15,23 @@ export class ApiError extends Error {
   readonly retryAfter: number | undefined;
   /** Optional fixed German hint from the core (errorResponseSchema `message`). */
   readonly hint: string | undefined;
+  /** Only with `insufficient_ram` (admin routes): free RAM, reserve and need. */
+  readonly details: InsufficientRamDetails | undefined;
 
-  constructor(status: number, error: ApiErrorCode, retryAfter?: number, hint?: string) {
+  constructor(
+    status: number,
+    error: ApiErrorCode,
+    retryAfter?: number,
+    hint?: string,
+    details?: InsufficientRamDetails,
+  ) {
     super(`api ${status} ${error}`);
     this.name = 'ApiError';
     this.status = status;
     this.error = error;
     this.retryAfter = retryAfter;
     this.hint = hint;
+    this.details = details;
   }
 }
 
@@ -146,7 +155,8 @@ export async function api<T>(path: string, opts: RequestOptions<T>): Promise<T> 
     }
     if (code === 'unauthorized' && !opts.quiet401) handlers.onUnauthorized?.();
     const hint = parsed.success ? parsed.data.message?.trim() || undefined : undefined;
-    throw new ApiError(res.status, code, retryAfter, hint);
+    const details = parsed.success ? parsed.data.details : undefined;
+    throw new ApiError(res.status, code, retryAfter, hint, details);
   }
 
   try {
