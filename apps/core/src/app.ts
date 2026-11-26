@@ -543,6 +543,7 @@ export async function buildApp(config: Config, deps: AppDeps = {}): Promise<Fast
     alerts,
     log: app.log.child({ mod: 'ports' }),
   });
+  games.setPortAudit(ports);
   servers.onInventoryStored((id, inv) => {
     try {
       ports.onInventory(id, inv.listeningPorts);

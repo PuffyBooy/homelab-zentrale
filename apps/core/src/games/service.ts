@@ -217,6 +217,34 @@ const TOPIC_RE = /^game:([A-Za-z0-9_-]{1,64})$/;
 export const gameTopic = (id: string): string => `game:${id}`;
 
 /**
+ * M11 port audit hook: public game ports the hub opens go into the server's
+ * allowed list (note `game:<name>`), so the audit does not flag them.
+ */
+export interface GamePortAudit {
+  syncGame(
+    serverId: string,
+    gameName: string,
+    ports: { port: number; proto: 'tcp' | 'udp' }[],
+  ): void;
+  releaseGame(serverId: string, gameName: string): void;
+}
+
+/** Public host ports of a game, one entry per (proto, port); local ones are skipped. */
+export function publicGamePorts(
+  ports: readonly HostPort[],
+): { port: number; proto: 'tcp' | 'udp' }[] {
+  const out: { port: number; proto: 'tcp' | 'udp' }[] = [];
+  for (const p of ports) {
+    if (p.local) continue;
+    const protos: ('tcp' | 'udp')[] = p.protocol === 'tcp+udp' ? ['tcp', 'udp'] : [p.protocol];
+    for (let i = 0; i < p.count; i++) {
+      for (const proto of protos) out.push({ port: p.port + i, proto });
+    }
+  }
+  return out;
+}
+
+/**
  * Result of the RAM reserve check before a game start: `fits`, `unknown` (no
  * fresh metrics, the caller decides) or `insufficient` with the numbers.
  */
@@ -263,6 +291,7 @@ export class GameService {
   private publisher: GamePublisher | null = null;
   private refreshQueued = false;
   private control: GameControl | null = null;
+  private portAudit: GamePortAudit | null = null;
 
   constructor(private readonly deps: GameServiceDeps) {
     this.templates = deps.templates;
@@ -285,6 +314,33 @@ export class GameService {
 
   setControl(c: GameControl): void {
     this.control = c;
+  }
+
+  setPortAudit(p: GamePortAudit): void {
+    this.portAudit = p;
+  }
+
+  /** Allowed-list bookkeeping must never break a game action. */
+  private syncPorts(serverId: string, name: string, ports: readonly HostPort[]): void {
+    try {
+      this.portAudit?.syncGame(serverId, name, publicGamePorts(ports));
+    } catch (err) {
+      this.deps.log.error(
+        { err: err instanceof Error ? err.name : 'error' },
+        'port list sync failed',
+      );
+    }
+  }
+
+  private releasePorts(serverId: string, name: string): void {
+    try {
+      this.portAudit?.releaseGame(serverId, name);
+    } catch (err) {
+      this.deps.log.error(
+        { err: err instanceof Error ? err.name : 'error' },
+        'port list release failed',
+      );
+    }
   }
 
   onChange(fn: GameListener): () => void {
@@ -821,6 +877,7 @@ export class GameService {
       release();
       throw new HttpError(409, 'conflict');
     }
+    this.syncPorts(server.id, req.name, ports);
     this.emit(id);
     const secrets = [...(rconPassword ? [rconPassword] : []), ...Object.values(values.secrets)];
     this.track(this.runSetup(id, server.id, dir, files, secrets).finally(release));
@@ -1197,6 +1254,25 @@ export class GameService {
   }
 
   /**
+   * The RAM reserve check of a migration (M11) on `serverId`, check only: the
+   * migration runs it before backup and before the transfer. Unknown RAM does
+   * not block (system actor).
+   */
+  checkRamOn(row: GameServerRow, serverId: string): void {
+    this.holdRamOn(row, serverId)();
+  }
+
+  /**
+   * Like checkRamOn, but the RAM stays held until the returned release runs:
+   * the migration holds it on the target from the check until compose up
+   * returned (call release in finally).
+   */
+  holdRamOn(row: GameServerRow, serverId: string): () => void {
+    const own = serverId === row.serverId ? this.containerIds(row) : [];
+    return this.admitStart(serverId, this.ramLimitOf(row), own, 'system');
+  }
+
+  /**
    * M10 RAM reserve, on every path that starts a game container (create, start,
    * restart of a stopped game, wichtig restart, share link, settings/ports with
    * compose up): refuses with 409 insufficient_ram when `needed` does not fit
@@ -1208,16 +1284,6 @@ export class GameService {
    * 409 `ram_unknown` (friends never bypass the reserve); the admin and the
    * system may start (their start is the way out when the agent's metrics lag).
    */
-  /**
-   * The RAM reserve check of a migration (M11) on `serverId`, check only: the
-   * migration runs it before backup, before transfer and before the start on
-   * the target. Unknown RAM does not block (system actor).
-   */
-  checkRamOn(row: GameServerRow, serverId: string): void {
-    const own = serverId === row.serverId ? this.containerIds(row) : [];
-    this.admitStart(serverId, this.ramLimitOf(row), own, 'system')();
-  }
-
   private admitStart(
     serverId: string,
     needed: number | null,
@@ -1635,6 +1701,7 @@ export class GameService {
         .set({ portsJson: JSON.stringify(next), updatedAt: this.deps.now() })
         .where(eq(gameServers.id, id))
         .run();
+      this.syncPorts(row.serverId, row.name, next);
       if (row.phase === 'running') {
         for (const c of this.containerIds(row)) this.deps.setIntent(c, 'restart', INTENT_TTL_MS);
         await this.deps.hub.call(row.serverId, 'compose.up', { dir }, { timeoutMs: UP_TIMEOUT_MS });
@@ -1683,9 +1750,23 @@ export class GameService {
     await this.runStop(this.requireRow(id));
   }
 
-  /** Start while the migration holds the lock (same path as action('start')). */
+  /**
+   * Start while the migration holds the lock (same path as action('start'),
+   * same RAM reserve: 409 insufficient_ram, RAM held until compose up returned).
+   */
   async startLocked(id: string): Promise<void> {
-    await this.runStart(this.requireRow(id));
+    const row = this.requireRow(id);
+    const release = this.admitStart(
+      row.serverId,
+      this.ramLimitOf(row),
+      this.containerIds(row),
+      'system',
+    );
+    try {
+      await this.runStart(row);
+    } finally {
+      release();
+    }
   }
 
   /** Secrets of a game, for scrubbing agent output. */
@@ -1820,6 +1901,7 @@ export class GameService {
    */
   moveTo(id: string, serverId: string, ports: HostPort[], rconPort: number | null): void {
     const prev = this.lastSummary.get(id);
+    const before = this.row(id);
     this.deps.db
       .update(gameServers)
       .set({
@@ -1831,6 +1913,12 @@ export class GameService {
       .where(eq(gameServers.id, id))
       .run();
     this.setRunState(id, 'running');
+    // Port list: the target gets the game's ports, the source entries go (its
+    // folder stays as a fallback, but nothing of the hub listens there any more).
+    if (before) {
+      this.syncPorts(serverId, before.name, ports);
+      if (before.serverId !== serverId) this.releasePorts(before.serverId, before.name);
+    }
     if (prev) this.lastSummary.set(id, { ...prev, serverId });
     this.emit(id);
   }
@@ -1870,6 +1958,7 @@ export class GameService {
       throw err;
     }
     this.deps.db.delete(gameServers).where(eq(gameServers.id, id)).run();
+    this.releasePorts(row.serverId, row.name);
     // The backups stay on the server; they are purged 30 days later (purgeDeletedBackups).
     this.deps.db
       .insert(deletedGameBackups)

@@ -17,12 +17,7 @@ import type { Clock } from '../clock.js';
 import { writeAudit } from '../db/audit.js';
 import type { Db } from '../db/index.js';
 import { HttpError, sendError } from '../http/errors.js';
-import {
-  ExchangeLimiter,
-  OnboardingError,
-  renderInstallScript,
-  type OnboardingService,
-} from './onboarding.js';
+import { ExchangeLimiter, OnboardingError, type OnboardingService } from './onboarding.js';
 
 export interface OnboardingRoutesOptions {
   db: Db;
@@ -123,12 +118,12 @@ export const installScriptRoutes: FastifyPluginAsync<{ onboarding: OnboardingSer
   o,
 ) => {
   app.get(INSTALL_SCRIPT_PATH, async (_request, reply) => {
-    const hub = o.onboarding.hub();
-    if (!hub) return sendError(reply, 404, 'not_found');
+    const script = o.onboarding.installScript();
+    if (script === null) return sendError(reply, 404, 'not_found');
     return reply
       .type(INSTALL_SCRIPT_CONTENT_TYPE)
       .header('cache-control', 'no-store')
       .header('x-content-type-options', 'nosniff')
-      .send(renderInstallScript(hub));
+      .send(script);
   });
 };

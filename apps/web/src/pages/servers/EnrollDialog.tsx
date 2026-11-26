@@ -8,7 +8,7 @@ import {
 } from '@hz/shared';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactElement } from 'react';
-import { Link, useNavigate } from 'react-router';
+import { useNavigate } from 'react-router';
 import { Button, Metric, StatusDot } from '@hz/ui';
 import { CopyBlock } from '../../components/CopyBlock.js';
 import { Dialog } from '../../components/Dialog.js';
@@ -193,7 +193,7 @@ function CodeFlow({
   }
   return (
     <ServerNameForm
-      intro={`Die Zentrale zeigt einen Code und einen Einzeiler. Auf dem neuen Server ausgeführt, startet er den Agent, der sich über Tailscale verbindet. Der Code gilt einmal und ${ONBOARDING_TTL_MINUTES} Min. Code erzeugen braucht einen frischen Code aus der App.`}
+      intro={`Die Zentrale zeigt einen Code und einen Einzeiler. Auf dem neuen Server ausgeführt, startet er den Agent, der sich über Tailscale verbindet. Der Code gilt einmal und ${ONBOARDING_TTL_MINUTES} Min. Code erzeugen braucht einen frischen Code aus der Authenticator-App.`}
       submitLabel="Code erzeugen"
       pending={create.isPending}
       error={create.error}
@@ -218,6 +218,7 @@ function CodeStep({
   onRenew: () => void;
 }): ReactElement {
   const now = useNow(1000);
+  const navigate = useNavigate();
   const qc = useQueryClient();
   const status = useQuery({
     queryKey: onboardingKey(res.id),
@@ -249,6 +250,10 @@ function CodeStep({
       onCancel={onClose}
       onClose={onClose}
       onRenew={onRenew}
+      onOpenServer={(id) => {
+        onClose();
+        void navigate(`/servers/${encodeURIComponent(id)}`);
+      }}
     />
   );
 }
@@ -263,6 +268,7 @@ export interface CodeStepViewProps {
   onCancel: () => void;
   onClose: () => void;
   onRenew: () => void;
+  onOpenServer: (serverId: string) => void;
 }
 
 /** The four states of the code step (pure, rendered in the unit tests). */
@@ -276,6 +282,7 @@ export function CodeStepView({
   onCancel,
   onClose,
   onRenew,
+  onOpenServer,
 }: CodeStepViewProps): ReactElement {
   const view = onboardingView(state);
   const until = formatTime(new Date(expiresAt));
@@ -323,13 +330,9 @@ export function CodeStepView({
           <>
             <Button onClick={onClose}>Schließen</Button>
             {serverId ? (
-              <Link
-                className="hz-btn hz-btn-primary hz-btn-md"
-                to={`/servers/${encodeURIComponent(serverId)}`}
-                onClick={onClose}
-              >
-                <span>Server öffnen</span>
-              </Link>
+              <Button variant="primary" onClick={() => onOpenServer(serverId)}>
+                Server öffnen
+              </Button>
             ) : null}
           </>
         ) : (
@@ -382,7 +385,7 @@ function ManualFlow({
 
   return (
     <ServerNameForm
-      intro="Manuell: Die Zentrale erzeugt ein Einmal-Token, und du startest den Agent selbst mit docker run oder Compose. Das Token erzeugen braucht einen frischen Code aus der App."
+      intro="Manuell: Die Zentrale erzeugt ein Einmal-Token, und du startest den Agent selbst mit docker run oder Compose. Das Token erzeugen braucht einen frischen Code aus der Authenticator-App."
       submitLabel="Token erzeugen"
       pending={enroll.isPending}
       error={enroll.error}

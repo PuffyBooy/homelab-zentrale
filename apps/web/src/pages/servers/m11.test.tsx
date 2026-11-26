@@ -45,6 +45,7 @@ function step(
       onCancel={noop}
       onClose={noop}
       onRenew={noop}
+      onOpenServer={noop}
     />,
   );
 }
@@ -72,11 +73,12 @@ describe('Server hinzufügen: code step', () => {
     expect(out).toContain('>Schließen<');
   });
 
-  it('connected: Verbunden with a link to the server', () => {
+  it('connected: Verbunden with Server öffnen as the main action', () => {
     const out = step('connected', 'srv-000123');
     expect(out).toContain('hz-status-ok');
     expect(out).toContain('Verbunden');
-    expect(out).toContain('href="/servers/srv-000123"');
+    expect(out).toContain('hz-btn-primary');
+    expect(out).not.toContain('href=');
     expect(out).toContain('Server öffnen');
   });
 

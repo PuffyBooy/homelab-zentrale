@@ -38,6 +38,8 @@ export interface ExportBehaviour {
 export interface ImportBehaviour {
   refuse?: { code: string; message: string };
   holdAcks?: boolean;
+  /** Hold the end of the extraction (result + stream.end) until `releaseEnd()`. */
+  holdEnd?: boolean;
 }
 
 export interface FakeAgent {
@@ -48,6 +50,8 @@ export interface FakeAgent {
   /** Chunks the agent received (game.import). */
   chunks: { seq: number; bytes: number }[];
   sendInventory(listening?: number[]): void;
+  /** Finishes a held extraction (ImportBehaviour.holdEnd). */
+  releaseEnd(): void;
 }
 
 let dockerSeq = 0x200000000000;
@@ -77,6 +81,7 @@ export function installFakeAgent(
     });
   let lastListening = listening;
   const imports = new Map<string, { parts: Buffer[] }>();
+  let heldEnd: (() => void) | null = null;
   ws.ws.on('message', (raw) => {
     const m = JSON.parse(String(raw)) as Received;
     if (m.type === 'ping') ws.send({ type: 'pong', ts: m.ts });
@@ -100,13 +105,17 @@ export function installFakeAgent(
         ws.send({ type: 'stream.end', streamId: id, code: 1, error: 'checksum_mismatch' });
         return;
       }
-      ws.send({
-        type: 'stream.data',
-        streamId: id,
-        channel: 'progress',
-        chunk: `result ${JSON.stringify({ bytes: all.length, sha256: sha, entries: 3 })}\n`,
-      });
-      ws.send({ type: 'stream.end', streamId: id, code: 0 });
+      const finish = () => {
+        ws.send({
+          type: 'stream.data',
+          streamId: id,
+          channel: 'progress',
+          chunk: `result ${JSON.stringify({ bytes: all.length, sha256: sha, entries: 3 })}\n`,
+        });
+        ws.send({ type: 'stream.end', streamId: id, code: 0 });
+      };
+      if (imp.holdEnd) heldEnd = finish;
+      else finish();
       return;
     }
     if (m.type === 'stream.cancel') {
@@ -176,6 +185,11 @@ export function installFakeAgent(
     sendInventory: (ports = lastListening) => {
       lastListening = ports;
       ws.send(inventory(ports));
+    },
+    releaseEnd: () => {
+      const f = heldEnd;
+      heldEnd = null;
+      f?.();
     },
   };
   return agent;

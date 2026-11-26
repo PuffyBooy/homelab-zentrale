@@ -15,7 +15,7 @@ import {
 } from '@hz/shared';
 import { RpcError, type AgentHub, type RpcStream, type StreamEndInfo } from '../agents/hub.js';
 import { TransferRelay, type RelayFailure } from '../agents/transfer.js';
-import type { Clock } from '../clock.js';
+import { systemTimer, type Clock, type SetTimer } from '../clock.js';
 import { randomToken } from '../crypto.js';
 import { writeAudit } from '../db/audit.js';
 import type { Db } from '../db/index.js';
@@ -152,12 +152,9 @@ export interface MigrationDeps {
   log: FastifyBaseLogger;
   /** After the game moved (M10: drop throttle state that belonged to the old server). */
   onMoved?: (gameId: string) => void;
+  /** Timeouts and poll pauses (tests inject a fake one). Default: setTimeout, unref'd. */
+  timer?: SetTimer;
 }
-
-const sleep = (ms: number): Promise<void> =>
-  new Promise((r) => {
-    setTimeout(r, ms).unref();
-  });
 
 const iso = (ms: number): string => new Date(ms).toISOString();
 
@@ -230,8 +227,11 @@ export class MigrationService {
   private readonly background = new Set<Promise<unknown>>();
   private cleaning = false;
   private stopping = false;
+  private readonly timer: SetTimer;
 
-  constructor(private readonly deps: MigrationDeps) {}
+  constructor(private readonly deps: MigrationDeps) {
+    this.timer = deps.timer ?? systemTimer;
+  }
 
   /** Marks migrations of a previous process failed and registers the cleanup job. */
   start(): void {
@@ -480,7 +480,15 @@ export class MigrationService {
       throw new HttpError(409, 'conflict');
     }
     a.fail('cancelled');
-    await Promise.race([a.done, sleep(CANCEL_WAIT_MS)]);
+    let cancelWait = (): void => undefined;
+    const waited = new Promise<void>((r) => {
+      cancelWait = this.timer(r, CANCEL_WAIT_MS);
+    });
+    try {
+      await Promise.race([a.done, waited]);
+    } finally {
+      cancelWait();
+    }
     return this.latest(gameId);
   }
 
@@ -504,7 +512,7 @@ export class MigrationService {
   private progress(a: Active, bytes: number): void {
     const total = a.bytesTotal;
     const pct = total > 0 ? Math.floor((bytes / total) * 100) : 100;
-    const now = Date.now();
+    const now = this.deps.now();
     if (now - a.lastPersist >= PERSIST_EVERY_MS || bytes === total) {
       a.lastPersist = now;
       this.save(a, { bytesDone: bytes });
@@ -518,18 +526,32 @@ export class MigrationService {
     }
   }
 
-  /** Races `p` against a failure of the migration and an optional timeout. */
-  private wait<T>(a: Active, p: Promise<T>, timeoutMs: number | null): Promise<T> {
-    const racers: Promise<T>[] = [p, a.aborted];
-    if (timeoutMs !== null) {
-      racers.push(
-        sleep(timeoutMs).then(() => {
-          a.fail('timeout');
-          return a.aborted;
-        }),
-      );
+  /**
+   * Races `p` against a failure of the migration and an optional timeout. The
+   * timeout only covers this wait: it is cancelled as soon as the race settles,
+   * so it never fires into a later phase.
+   */
+  private async wait<T>(a: Active, p: Promise<T>, timeoutMs: number | null): Promise<T> {
+    if (timeoutMs === null) return Promise.race([p, a.aborted]);
+    const cancel = this.timer(() => a.fail('timeout'), timeoutMs);
+    try {
+      return await Promise.race([p, a.aborted]);
+    } finally {
+      cancel();
     }
-    return Promise.race(racers);
+  }
+
+  /** Pauses `ms` (cancelled on failure of the migration; the timer is cleared either way). */
+  private async pause(a: Active, ms: number): Promise<void> {
+    let cancel = (): void => undefined;
+    const p = new Promise<void>((r) => {
+      cancel = this.timer(r, ms);
+    });
+    try {
+      await this.wait(a, p, null);
+    } finally {
+      cancel();
+    }
   }
 
   /** An agent call that fails the migration with `code` (offline: agent_offline). */
@@ -654,10 +676,15 @@ export class MigrationService {
 
       // start
       this.setPhase(a, 'start');
-      this.checkTargetRam(a, row);
-      await this.step(a, 'start_failed', () =>
-        hub.call(a.targetId, 'compose.up', { dir }, { timeoutMs: UP_TIMEOUT_MS }),
-      );
+      // RAM held on the target from the check until compose up returned.
+      const releaseRam = this.holdTargetRam(a, row);
+      try {
+        await this.step(a, 'start_failed', () =>
+          hub.call(a.targetId, 'compose.up', { dir }, { timeoutMs: UP_TIMEOUT_MS }),
+        );
+      } finally {
+        releaseRam();
+      }
       await this.waitOnline(a, row);
 
       // The game lives on the target from here on.
@@ -725,8 +752,13 @@ export class MigrationService {
   }
 
   private checkTargetRam(a: Active, row: GameServerRow): void {
+    this.holdTargetRam(a, row)();
+  }
+
+  /** RAM reserve on the target, held until the returned release runs. */
+  private holdTargetRam(a: Active, row: GameServerRow): () => void {
     try {
-      this.deps.games.checkRamOn(row, a.targetId);
+      return this.deps.games.holdRamOn(row, a.targetId);
     } catch (err) {
       if (err instanceof HttpError && err.code === 'insufficient_ram') {
         throw new Failure('insufficient_ram');
@@ -737,7 +769,7 @@ export class MigrationService {
 
   /** Polls game.status on the target until it answers (no query method: compose up is enough). */
   private async waitOnline(a: Active, row: GameServerRow): Promise<void> {
-    const deadline = Date.now() + START_TIMEOUT_MS;
+    const deadline = this.deps.now() + START_TIMEOUT_MS;
     for (;;) {
       if (a.failure) throw a.failure;
       try {
@@ -749,8 +781,8 @@ export class MigrationService {
           throw new Failure('agent_offline');
         }
       }
-      if (Date.now() > deadline) throw new Failure('start_failed');
-      await this.wait(a, sleep(START_POLL_MS), null);
+      if (this.deps.now() > deadline) throw new Failure('start_failed');
+      await this.pause(a, START_POLL_MS);
     }
   }
 

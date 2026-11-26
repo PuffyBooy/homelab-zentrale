@@ -1,6 +1,7 @@
-import { and, eq } from 'drizzle-orm';
+import { and, eq, like, ne } from 'drizzle-orm';
 import {
   MAX_ALLOWED_PORTS,
+  PORT_NOTE_MAX,
   newPortAlertBody,
   newPortAlertTitle,
   parsePortAlertKey,
@@ -16,6 +17,18 @@ import type { AlertService } from '../alerts/service.js';
 import type { Clock } from '../clock.js';
 import type { Db } from '../db/index.js';
 import { alerts, serverAllowedPorts, serverPortAudit, servers, serverState } from '../db/schema.js';
+
+/** A public port the hub opened for a game (published on all addresses). */
+export interface GamePortEntry {
+  port: number;
+  proto: PortAuditProto;
+}
+
+/** Note of the entries the hub manages for a game (`game:<name>`). */
+export const gamePortNote = (gameName: string): string =>
+  `game:${gameName}`.slice(0, PORT_NOTE_MAX);
+
+const portKey = (p: { proto: string; port: number }): string => `${p.proto}/${p.port}`;
 
 /**
  * Port audit (ROADMAP M11, contract in @hz/shared ports.ts): a list of allowed
@@ -130,14 +143,24 @@ export class PortAuditService {
     }
   }
 
+  /** Keys of the open port alerts of this server (filtered in SQL, runs per inventory). */
   private activeKeys(serverId: string): string[] {
-    return this.deps.db
-      .select({ key: alerts.key, state: alerts.state })
-      .from(alerts)
-      .where(eq(alerts.serverId, serverId))
-      .all()
-      .filter((a) => a.state !== 'resolved' && parsePortAlertKey(a.key)?.serverId === serverId)
-      .map((a) => a.key);
+    return (
+      this.deps.db
+        .select({ key: alerts.key })
+        .from(alerts)
+        .where(
+          and(
+            eq(alerts.serverId, serverId),
+            ne(alerts.state, 'resolved'),
+            like(alerts.key, `port:${serverId}:%`),
+          ),
+        )
+        .all()
+        // `_` in a server id is a LIKE wildcard: the exact check stays.
+        .filter((a) => parsePortAlertKey(a.key)?.serverId === serverId)
+        .map((a) => a.key)
+    );
   }
 
   get(serverId: string): PortAuditResponse {
@@ -194,5 +217,58 @@ export class PortAuditService {
     if (active) this.deps.alerts.resolveById(active.id);
     this.reconcile(serverId, this.lastPorts(serverId));
     return this.get(serverId);
+  }
+
+  /**
+   * The hub assigned public ports to a game on this server (create, PATCH ports,
+   * migration target): the list gets them with note `game:<name>`, entries of
+   * that game that are no longer used are removed. Entries the admin or the
+   * seeding made stay as they are. A full list (MAX_ALLOWED_PORTS) skips new
+   * entries silently; the port alert then shows the port as usual. Does not
+   * count as seeding (the first inventory still copies all open ports).
+   */
+  syncGame(serverId: string, gameName: string, ports: readonly GamePortEntry[]): void {
+    const note = gamePortNote(gameName);
+    const want = new Map(ports.map((p) => [portKey(p), p]));
+    const now = this.deps.now();
+    this.deps.db.transaction((tx) => {
+      const rows = tx
+        .select()
+        .from(serverAllowedPorts)
+        .where(eq(serverAllowedPorts.serverId, serverId))
+        .all();
+      const have = new Set<string>();
+      let count = rows.length;
+      for (const r of rows) {
+        if (r.note === note && !want.has(portKey(r))) {
+          tx.delete(serverAllowedPorts)
+            .where(
+              and(
+                eq(serverAllowedPorts.serverId, serverId),
+                eq(serverAllowedPorts.proto, r.proto),
+                eq(serverAllowedPorts.port, r.port),
+              ),
+            )
+            .run();
+          count -= 1;
+        } else {
+          have.add(portKey(r));
+        }
+      }
+      for (const [key, p] of want) {
+        if (have.has(key)) continue;
+        if (count >= MAX_ALLOWED_PORTS) break;
+        tx.insert(serverAllowedPorts)
+          .values({ serverId, proto: p.proto, port: p.port, note, createdAt: now })
+          .run();
+        count += 1;
+      }
+    });
+    if (this.seeded(serverId)) this.reconcile(serverId, this.lastPorts(serverId));
+  }
+
+  /** Removes the entries the hub made for a game (moved away or deleted). */
+  releaseGame(serverId: string, gameName: string): void {
+    this.syncGame(serverId, gameName, []);
   }
 }

@@ -16,12 +16,17 @@
 # The agent opens no port; it connects out to the hub over Tailscale.
 # The token is never printed.
 set -eu
+# Byte-wise character classes in case/grep/tr, whatever the caller's locale.
+LC_ALL=C
+export LC_ALL
 
 HUB='@@HZ_HUB_ORIGIN@@'
 CODE_RE='@@HZ_CODE_RE@@'
 EXCHANGE_PATH='@@HZ_EXCHANGE_PATH@@'
-CONF_DIR=/etc/homelab-agent
-HOMELAB_DIR=/opt/homelab
+# Fixed paths. Only a core in NODE_ENV=test renders these as overridable
+# (HZ_TEST_CONF_DIR / HZ_TEST_HOMELAB_DIR) for its integration test.
+CONF_DIR=@@HZ_CONF_DIR@@
+HOMELAB_DIR=@@HZ_HOMELAB_DIR@@
 CONTAINER=homelab-agent
 
 die() {
@@ -31,6 +36,12 @@ die() {
 
 [ "$#" -eq 1 ] || die "Aufruf: curl -fsSL $HUB/install.sh | sudo sh -s -- <code>"
 code=$1
+# Whole-argument check first: grep below matches per line, so a multi-line
+# argument with a valid first line must never get that far.
+case "$code" in
+  '' | *[!A-Za-z0-9-]*) die "Der Code hat ein ungültiges Format (XXXX-XXXX)." ;;
+esac
+[ "${#code}" -le 9 ] || die "Der Code hat ein ungültiges Format (XXXX-XXXX)."
 printf '%s\n' "$code" | grep -Eq "$CODE_RE" || die "Der Code hat ein ungültiges Format (XXXX-XXXX)."
 [ "$(id -u)" -eq 0 ] || die "bitte als root ausführen (sudo)"
 
@@ -50,9 +61,17 @@ fi
 install -d -m 0755 "$HOMELAB_DIR"
 install -d -m 0700 "$CONF_DIR"
 umask 077
+# Temp files with the exchange answer and the half-written agent.env are
+# removed on every exit (also abort by set -e or a signal) until they are moved.
+resp=''
+tmp=''
+cleanup() {
+  [ -z "$resp" ] || rm -f "$resp"
+  [ -z "$tmp" ] || rm -f "$tmp"
+}
+trap cleanup EXIT
+trap 'cleanup; exit 1' INT TERM HUP
 resp=$(mktemp "$CONF_DIR/.onboarding.XXXXXX")
-trap 'rm -f "$resp"' EXIT
-trap 'rm -f "$resp"; exit 1' INT TERM
 
 case "$HUB" in
   https://*) proto='=https' ;;
@@ -83,6 +102,7 @@ name=$(env_value HZ_AGENT_NAME '[a-z0-9][a-z0-9-]{0,62}')
 token=$(env_value HZ_AGENT_TOKEN '[A-Za-z0-9_-]{22,128}')
 image=$(env_value HZ_AGENT_IMAGE '[a-z0-9][a-z0-9._/:@-]{0,254}')
 rm -f "$resp"
+resp=''
 
 # --- files --------------------------------------------------------------------
 tmp=$(mktemp "$CONF_DIR/.agent.env.XXXXXX")
@@ -96,6 +116,7 @@ tmp=$(mktemp "$CONF_DIR/.agent.env.XXXXXX")
 unset token
 chmod 0600 "$tmp"
 mv -f "$tmp" "$CONF_DIR/agent.env"
+tmp=''
 
 # Same service as deploy/docker-compose.agent.yml (see the comments there for why
 # each right is needed). Quoted heredoc: nothing in it is expanded by the shell.
@@ -168,8 +189,12 @@ chmod 0644 "$CONF_DIR/.env"
 # --- start --------------------------------------------------------------------
 cd "$CONF_DIR"
 echo "Lade $image ..."
-docker compose pull agent
-docker compose up -d --no-build --force-recreate agent
+# The code is used up now: on failure the agent.env must go before a new try.
+start_failed() {
+  die "Der Agent konnte nicht geladen oder gestartet werden (siehe oben). Bitte $CONF_DIR/agent.env löschen und mit einem neuen Code aus der Zentrale erneut versuchen."
+}
+docker compose pull agent || start_failed
+docker compose up -d --no-build --force-recreate agent || start_failed
 
 echo
 echo "Agent \"$name\" läuft. Die Zentrale zeigt gleich \"verbunden\"."

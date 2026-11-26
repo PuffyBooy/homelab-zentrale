@@ -195,8 +195,8 @@ test('Server hinzufügen: code and one-liner, the agent connects with the code o
   newId = fresh.serverId ?? '';
   await expect(step).toHaveAttribute('data-state', 'connected', { timeout: 10_000 });
   await expect(step).toContainText('Verbunden');
-  const open = step.getByRole('link', { name: 'Server öffnen' });
-  await expect(open).toHaveAttribute('href', `/servers/${newId}`);
+  const open = step.getByRole('button', { name: 'Server öffnen' });
+  await expect(open).toBeVisible();
   await shots(page, 'onboarding-connected', dialog);
   await open.click();
   await expect(page).toHaveURL(new RegExp(`/servers/${newId}$`));
@@ -290,7 +290,7 @@ test('a game server moves to the onboarded server and runs there', async () => {
   await page.goto(`/games/${gameId}`);
   await tileByTitle(page, 'Umziehen').getByRole('button', { name: 'Umziehen …' }).click();
   const dialog = page.getByRole('dialog', { name: `${GAME} umziehen` });
-  await expect(dialog).toContainText('Der Gameserver wird dafür kurz gestoppt.');
+  await expect(dialog).toContainText(`Die Zentrale speichert und stoppt ${GAME} auf`);
   const select = dialog.getByLabel('Zielserver');
   await expect(select.locator('option', { hasText: HOME })).toHaveCount(0);
   await select.selectOption(newId);

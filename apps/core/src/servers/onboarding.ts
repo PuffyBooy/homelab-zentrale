@@ -71,17 +71,29 @@ export const INSTALL_TEMPLATE_PATH = resolve(here, '../../templates/install.sh')
 
 let templateCache: string | null = null;
 
+export const AGENT_CONF_DIR = '/etc/homelab-agent';
+export const AGENT_HOMELAB_DIR = '/opt/homelab';
+
 /**
  * install.sh for this hub. The same for every server: only the hub origin,
  * the code pattern and the exchange path are filled in. No secret, no code.
+ * The install paths are fixed; only `testPaths` (set by the core solely with
+ * NODE_ENV=test) makes them overridable via HZ_TEST_CONF_DIR/HZ_TEST_HOMELAB_DIR.
  */
-export function renderInstallScript(hub: OnboardingHub): string {
+export function renderInstallScript(
+  hub: OnboardingHub,
+  opts: { testPaths?: boolean } = {},
+): string {
   if (!SCRIPT_ORIGIN_RE.test(hub.origin)) throw new Error('invalid hub origin');
   templateCache ??= readFileSync(INSTALL_TEMPLATE_PATH, 'utf8');
   const values: Record<string, string> = {
     HZ_HUB_ORIGIN: hub.origin,
     HZ_CODE_RE: ONBOARDING_CODE_SHELL_RE,
     HZ_EXCHANGE_PATH: ONBOARDING_EXCHANGE_PATH,
+    HZ_CONF_DIR: opts.testPaths ? `\${HZ_TEST_CONF_DIR:-${AGENT_CONF_DIR}}` : AGENT_CONF_DIR,
+    HZ_HOMELAB_DIR: opts.testPaths
+      ? `\${HZ_TEST_HOMELAB_DIR:-${AGENT_HOMELAB_DIR}}`
+      : AGENT_HOMELAB_DIR,
   };
   return templateCache.replace(/@@([A-Z_]+)@@/g, (_m, key: string) => {
     const v = values[key];
@@ -130,6 +142,13 @@ export class OnboardingService {
 
   hub(): OnboardingHub | null {
     return onboardingHub(this.deps.config);
+  }
+
+  /** install.sh for this hub, or null without a hub address. */
+  installScript(): string | null {
+    const hub = this.hub();
+    if (!hub) return null;
+    return renderInstallScript(hub, { testPaths: this.deps.config.env === 'test' });
   }
 
   private codeHash(canonical: string): string {

@@ -113,9 +113,9 @@ function targetLabel(s: ServerSummary): string {
 export function MigrateIntro({ game }: { game: Pick<GameSummary, 'name' | 'serverName'> }) {
   return (
     <p className="hz-dialog-text">
-      Der Gameserver wird dafür kurz gestoppt. Die Zentrale sichert die Welt auf {game.serverName},
-      überträgt sie zum Ziel, startet {game.name} dort und stoppt den alten. Bricht etwas ab, bleibt{' '}
-      {game.name} auf {game.serverName}. Braucht einen Code aus der App.
+      Die Zentrale speichert und stoppt {game.name} auf {game.serverName}, überträgt die Welt und
+      startet sie am Ziel. Bricht etwas ab, bleibt {game.name} auf {game.serverName}. Braucht einen
+      Code aus der Authenticator-App.
     </p>
   );
 }

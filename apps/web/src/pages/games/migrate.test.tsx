@@ -23,9 +23,10 @@ function html(el: ReactElement): string {
 beforeAll(() => setDisplayTimeZone('Europe/Vienna'));
 
 describe('Umziehen dialog', () => {
-  it('says the game is stopped for a short time', () => {
+  it('says the source is saved and stopped before the move', () => {
     const out = html(<MigrateIntro game={game({ serverName: 'heimserver' })} />);
-    expect(out).toContain('Der Gameserver wird dafür kurz gestoppt.');
+    expect(out).toContain('speichert und stoppt survival auf heimserver');
+    expect(out).toContain('startet sie am Ziel');
     expect(out).toContain('bleibt survival auf heimserver');
   });
 
