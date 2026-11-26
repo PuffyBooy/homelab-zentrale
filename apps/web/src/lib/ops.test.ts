@@ -46,8 +46,8 @@ const draft = {
 
 const botState = {
   tokenSet: true,
-  applicationId: '123456789012345678',
-  guildId: '223456789012345678',
+  applicationId: '111111111111111111',
+  guildId: '222222222222222222',
   status: 'online' as const,
   statusText: 'Verbunden als Zentrale#1234',
   bindings: [],
@@ -176,11 +176,11 @@ describe('fail2ban', () => {
 
 describe('discord bot', () => {
   it('builds the invite link only from a valid application id', () => {
-    expect(discordInviteUrl('123456789012345678')).toBe(
-      'https://discord.com/oauth2/authorize?client_id=123456789012345678&scope=bot%20applications.commands',
+    expect(discordInviteUrl('111111111111111111')).toBe(
+      'https://discord.com/oauth2/authorize?client_id=111111111111111111&scope=bot%20applications.commands',
     );
     expect(discordInviteUrl('12345')).toBeNull();
-    expect(discordInviteUrl('123456789012345678&x=1')).toBeNull();
+    expect(discordInviteUrl('111111111111111111&x=1')).toBeNull();
   });
 
   it('asks for step-up and repeats the save once', async () => {
@@ -214,13 +214,13 @@ describe('discord bot', () => {
     const onStepUp = vi.fn(() => Promise.resolve(true));
     reset = configureApi({ onStepUp });
     const fn = mockFetch(json(403, { ok: false, error: 'step_up_required' }), json(200, botState));
-    await expect(saveDiscordBinding('shr-0001', '123456789012345678')).resolves.toEqual(botState);
+    await expect(saveDiscordBinding('shr-0001', '111111111111111111')).resolves.toEqual(botState);
     expect(onStepUp).toHaveBeenCalledTimes(1);
     expect(fn).toHaveBeenCalledTimes(2);
     for (const [url, init] of fn.mock.calls) {
       expect(url).toBe('/api/discord-bot/bindings/shr-0001');
       expect(init?.method).toBe('PUT');
-      expect(JSON.parse(String(init?.body))).toEqual({ discordUserId: '123456789012345678' });
+      expect(JSON.parse(String(init?.body))).toEqual({ discordUserId: '111111111111111111' });
     }
   });
 
@@ -231,7 +231,7 @@ describe('discord bot', () => {
     await expect(saveDiscordBinding('shr-0001', null)).resolves.toEqual(botState);
     expect(JSON.parse(String(fn.mock.calls[0]?.[1]?.body))).toEqual({ discordUserId: null });
     expect(onStepUp).not.toHaveBeenCalled();
-    const err = await saveDiscordBinding('shr-0001', '123456789012345678').catch((e: unknown) => e);
+    const err = await saveDiscordBinding('shr-0001', '111111111111111111').catch((e: unknown) => e);
     expect(onStepUp).toHaveBeenCalledTimes(1);
     expect(shownError(err)).toBeNull();
   });

@@ -375,8 +375,8 @@ describe('Fail2ban', () => {
 function bot(over: Partial<DiscordBotState> = {}): DiscordBotState {
   return {
     tokenSet: true,
-    applicationId: '123456789012345678',
-    guildId: '223456789012345678',
+    applicationId: '111111111111111111',
+    guildId: '222222222222222222',
     status: 'online',
     statusText: 'Verbunden als Zentrale#1234',
     bindings: [
@@ -408,7 +408,7 @@ describe('Discord-Bot', () => {
   it('builds the invite link and lists the commands', () => {
     const out = html(<DiscordBotBody state={bot()} />);
     expect(out).toContain(
-      'https://discord.com/oauth2/authorize?client_id=123456789012345678&amp;scope=bot%20applications.commands',
+      'https://discord.com/oauth2/authorize?client_id=111111111111111111&amp;scope=bot%20applications.commands',
     );
     for (const c of ['/status', '/start spiel', '/stop spiel', '/restart spiel']) {
       expect(out).toContain(`>${c}<`);
