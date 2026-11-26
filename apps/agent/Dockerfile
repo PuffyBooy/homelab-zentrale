@@ -9,7 +9,7 @@
 # Pinned by digest; update tag and digest together.
 FROM docker:29-cli@sha256:4e60c31615e83523afbb59773b25d055c0da9edcd5f80a4c6a6eebad49de1a25 AS dockercli
 
-FROM node:22-bookworm-slim AS base
+FROM node:25-bookworm-slim AS base
 ENV PNPM_HOME=/pnpm PATH=/pnpm:$PATH CI=1
 RUN corepack enable
 WORKDIR /repo
@@ -23,7 +23,7 @@ RUN pnpm --filter @hz/agent... build
 RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
   pnpm --filter @hz/agent --prod deploy --legacy /out
 
-FROM node:22-bookworm-slim AS runtime
+FROM node:25-bookworm-slim AS runtime
 # util-linux: nsenter (host commands in the namespaces of host PID 1)
 # iproute2:   ss (listening ports)
 # iputils-ping: check.ping
