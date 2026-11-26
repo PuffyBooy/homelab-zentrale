@@ -5,3 +5,5 @@
 d9cc83cdcd7febb382e19d26cceaa74d27e06018:apps/agent/test/games.security.test.ts:generic-api-key:37
 # HA1 of the fake FRITZ!Box in the M14 e2e helper (test value, split in later commits).
 52f127885e4e76cdd50e5d780989004d64a72dc2:e2e/helpers/fake-integrations.ts:generic-api-key:223
+# Fake temp-link name in the M14 deploy-key race test (split in later commits).
+7fce8449796e5005fa3aa6526fdd945ae4c8dcde:apps/agent/test/deploy-key.security.test.ts:generic-api-key:154

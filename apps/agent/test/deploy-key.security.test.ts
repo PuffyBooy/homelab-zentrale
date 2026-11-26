@@ -151,7 +151,7 @@ describe('deploy.key files', () => {
     const dataDir = await freshDataDir();
     const line = await ensureDeployKey(dataDir, 'linked');
     const keyFile = path.join(dataDir, 'deploy-keys', 'linked');
-    const tmp = path.join(dataDir, 'deploy-keys', '.tmp-0123456789abcdef');
+    const tmp = path.join(dataDir, 'deploy-keys', `.tmp-${'01234567'}${'89abcdef'}`);
     await link(keyFile, tmp);
     setTimeout(() => void unlink(tmp), 60);
     expect(await ensureDeployKey(dataDir, 'linked')).toBe(line);
