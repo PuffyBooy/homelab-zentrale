@@ -264,3 +264,8 @@ Agents tragen hier Fragen ein, wenn die Spezifikation fehlt oder sich widerspric
 - 2026-11-26, M22 (Web): **Navigation.** „Cloud“ (`/cloud`) steht nach „Sicherheit“ mit der Taste `c` und dem Icon `cloud` (wie VMs; ein eigenes Icon fehlt im Set).
 - 2026-11-26, M22 (Web): **409 bei Bestellung/Start.** Die Web-App wertet `price_changed` (mit `currentEurPerHour`) und `over_budget` aus. Für einen Core ohne diese Codes gilt ein `conflict` mit Hinweistext („Budget“/„Preis“) oder frisch gelesene Preise und Budget als Rückfall. Der bestätigte Preis ist an Größe, Region, Disk und IP gebunden: jede Änderung nimmt das Häkchen weg.
 - 2026-11-26, M22 (Web): **Externe Adresse auf Cloud-Servern.** Annahme: leer = öffentliche IP der VM (ohne öffentliche IP die Tailscale-IP). Bitte im Core bestätigen.
+
+## M22 (Core)
+- Budget aufgebraucht: Auch ein Start eines Spiels durch den Admin auf der Gameserver-Seite wird abgelehnt (`over_budget`), nicht nur automatische Starts. Weiter geht es nur über „Starten“ auf der Seite Cloud mit ausdrücklicher Bestätigung. Annahme: sicherste Variante, weil jeder Start Geld kostet.
+- Kosten gelöschter Cloud-Server fallen mit dem Löschen aus der Monatsschätzung (die echte Azure-Rechnung zählt weiter).
+- Das gemeinsame VNet `hz-vnet-<region>` bleibt nach dem letzten Löschen stehen (kostet nichts).
