@@ -481,3 +481,246 @@ body,
 .app-pad {
   padding: var(--space-3);
 }
+
+/* ---------- Header ---------- */
+.app-switch {
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+/* ---------- Tile grid: 4 columns from 1200 px, 2 from 700 px, else 1 ---------- */
+@media (max-width: 1199px) {
+  .app-grid.hz-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .app-grid .hz-span-3,
+  .app-grid .hz-span-4 {
+    grid-column: span 2;
+  }
+}
+@media (max-width: 699px) {
+  .app-grid.hz-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .app-grid .hz-span-2,
+  .app-grid .hz-span-3,
+  .app-grid .hz-span-4 {
+    grid-column: auto;
+  }
+}
+
+.app-stack {
+  display: grid;
+  gap: var(--space-2);
+}
+.app-more {
+  justify-self: start;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--ink-muted);
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-md);
+}
+.app-more:hover {
+  color: var(--ink);
+}
+.app-scroll-x {
+  overflow-x: auto;
+}
+.app-scroll-x > .hz-srvlist {
+  min-width: 560px;
+}
+.app-empty-block {
+  display: grid;
+  gap: var(--space-4);
+}
+
+/* ---------- Server detail ---------- */
+.app-bars {
+  display: grid;
+  grid-template-columns: minmax(48px, max-content) auto 1fr;
+  gap: var(--space-3);
+}
+/* One shared column grid, so labels, bars and values line up across rows. */
+.app-bars > .hz-usage,
+.app-bars > .app-spark-row {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: subgrid;
+  align-items: center;
+}
+.app-spark-empty {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--ink-faint);
+  width: 192px;
+}
+.app-foot-text {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--ink-faint);
+}
+.app-metrics {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-5);
+}
+.app-line {
+  margin-top: var(--space-3);
+}
+.app-ports {
+  list-style: none;
+  margin: var(--space-3) 0 0;
+  padding: 0;
+  display: grid;
+  max-height: 220px;
+  overflow-y: auto;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+  line-height: 20px;
+  border-top: 1px solid var(--line);
+}
+.app-ports li {
+  display: grid;
+  grid-template-columns: 9ch minmax(0, 1fr) minmax(0, 1fr);
+  gap: var(--space-2);
+  padding: 2px 0;
+  border-bottom: 1px solid var(--line);
+}
+.app-port {
+  color: var(--ink);
+}
+.app-port-addr,
+.app-port-proc {
+  color: var(--ink-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.app-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+/* ---------- Dialog content ---------- */
+.app-dialog-wide {
+  width: min(640px, calc(100vw - 2 * var(--space-4)));
+}
+.app-enroll-state {
+  font-size: 13px;
+}
+.app-copy {
+  display: grid;
+  gap: var(--space-1);
+  min-width: 0;
+}
+.app-copy-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+.app-copy-code {
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  background: var(--terminal-bg);
+  color: var(--terminal-ink);
+  border-radius: var(--radius-md);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 20px;
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-height: 200px;
+  overflow: auto;
+}
+.app-copy-inline {
+  display: block;
+}
+.app-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.app-table th {
+  text-align: left;
+  font-weight: 400;
+  color: var(--ink-muted);
+  padding: var(--space-2) 0;
+  border-bottom: 1px solid var(--line);
+}
+.app-table th small {
+  display: block;
+  font-size: 12px;
+  color: var(--ink-faint);
+}
+.app-table td {
+  text-align: right;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  padding: var(--space-2) 0;
+  border-bottom: 1px solid var(--line);
+}
+.app-table tfoot th,
+.app-table tfoot td {
+  color: var(--ink);
+  font-weight: 600;
+  border-bottom: 0;
+}
+
+/* ---------- Alerts ---------- */
+.app-toasts {
+  position: fixed;
+  right: var(--space-5);
+  bottom: var(--space-5);
+  z-index: 20;
+  display: grid;
+  gap: var(--space-2);
+  justify-items: end;
+  max-width: calc(100vw - 2 * var(--space-4));
+}
+@media (max-width: 699px) {
+  .app-toasts {
+    right: var(--space-3);
+    left: var(--space-3);
+    bottom: calc(64px + var(--space-3) + env(safe-area-inset-bottom));
+  }
+}
+.app-toast-actions {
+  display: flex;
+  gap: var(--space-1);
+  flex: none;
+}
+.app-alert-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: var(--space-2);
+}
+.app-alert-meta {
+  display: block;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--ink-faint);
+  margin-top: 2px;
+}
+.app-alert-meta a {
+  color: var(--ink-muted);
+}
+/* Phones: actions of an alert line move below the text instead of squeezing it. */
+@media (max-width: 699px) {
+  .app-main .hz-alert {
+    flex-wrap: wrap;
+  }
+  .app-main .hz-alert-main {
+    flex-basis: calc(100% - 36px - var(--space-3) - 6ch);
+  }
+  .app-main .hz-alert > .hz-btn,
+  .app-main .hz-alert > .app-toast-actions {
+    margin-left: auto;
+  }
+}

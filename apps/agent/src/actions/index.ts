@@ -1,0 +1,128 @@
+import {
+  parseRpc,
+  terminalActions,
+  type AgentEvent,
+  type RpcAction,
+  type RpcEnvelope,
+  type RpcErrorCode,
+  type RpcRequest,
+  type RpcResult,
+} from '@hz/shared';
+import { resolveHomelabPath } from '../paths.js';
+import { checkHttp, checkPing, checkTcp } from './checks.js';
+import { containerRestart, containerStart, containerStop } from './container.js';
+import { cleanup, cleanupPreview } from './system-cleanup.js';
+import { systemReboot } from './system-reboot.js';
+import {
+  ActionError,
+  type ActionContext,
+  type ActionHandler,
+  type ActionHandlers,
+} from './types.js';
+
+export { ActionError } from './types.js';
+export type { ActionContext } from './types.js';
+
+const notImplemented = async (): Promise<never> => {
+  throw new ActionError('failed', 'not implemented in this version');
+};
+
+/** PTY needs node-pty; it arrives with the console milestone. */
+const ptyNotImplemented = notImplemented;
+
+/** One handler per allowlisted action. Unimplemented ones answer `failed`. */
+export const handlers: ActionHandlers = {
+  'container.start': containerStart,
+  'container.stop': containerStop,
+  'container.restart': containerRestart,
+  'container.update': notImplemented,
+  'container.logs': notImplemented,
+  'compose.up': notImplemented,
+  'compose.down': notImplemented,
+  'compose.pull': notImplemented,
+  'compose.write': notImplemented,
+  'game.rcon': notImplemented,
+  'game.backup': notImplemented,
+  'deploy.run': notImplemented,
+  'system.cleanupPreview': cleanupPreview,
+  'system.cleanup': cleanup,
+  'system.reboot': systemReboot,
+  'check.http': checkHttp,
+  'check.tcp': checkTcp,
+  'check.ping': checkPing,
+  'pty.open': ptyNotImplemented,
+  'pty.input': ptyNotImplemented,
+  'pty.resize': ptyNotImplemented,
+  'pty.close': ptyNotImplemented,
+};
+
+/** Param fields that carry a file system path below /opt/homelab/. */
+const PATH_FIELDS = ['dir', 'gameDir'] as const;
+
+type DenyCode = Extract<
+  RpcErrorCode,
+  'not_allowed' | 'invalid_params' | 'bad_path' | 'terminal_disabled' | 'confirm_mismatch'
+>;
+const DENY_CODES = new Set<RpcErrorCode>([
+  'not_allowed',
+  'invalid_params',
+  'bad_path',
+  'terminal_disabled',
+  'confirm_mismatch',
+]);
+
+export class Dispatcher {
+  constructor(
+    private readonly ctx: ActionContext,
+    /** Sends an event (denied) to the core. */
+    private readonly emit: (event: AgentEvent) => void,
+    private readonly table: ActionHandlers = handlers,
+  ) {}
+
+  private fail(id: string, code: RpcErrorCode, message: string): RpcResult {
+    return { type: 'rpc.result', id, ok: false, error: { code, message: message.slice(0, 500) } };
+  }
+
+  private deny(env: RpcEnvelope, code: DenyCode, message: string): RpcResult {
+    const action = env.action.slice(0, 64);
+    this.ctx.log.warn('rpc denied', { action, code, reason: message.slice(0, 200) });
+    this.emit({
+      type: 'event',
+      ts: new Date().toISOString(),
+      event: { kind: 'denied', action, reason: `${code}: ${message}`.slice(0, 200) },
+    });
+    return this.fail(env.id, code, message);
+  }
+
+  /** Validates (allowlist, params, terminal, paths) and runs one RPC. Never throws. */
+  async handle(env: RpcEnvelope): Promise<RpcResult> {
+    const parsed = parseRpc(env);
+    if (!parsed.ok) return this.deny(env, parsed.code, parsed.message);
+    const req = parsed.request;
+
+    if (terminalActions.includes(req.action) && !this.ctx.allowTerminal) {
+      return this.deny(env, 'terminal_disabled', 'terminal is disabled on this server');
+    }
+
+    const params = { ...(req.params as Record<string, unknown>) };
+    for (const field of PATH_FIELDS) {
+      if (!Object.hasOwn(params, field)) continue;
+      const check = await resolveHomelabPath(params[field], this.ctx.homelabRoot);
+      if (!check.ok) return this.deny(env, 'bad_path', `${field}: ${check.reason}`);
+      params[field] = check.path;
+    }
+
+    const handler = this.table[req.action] as ActionHandler<RpcAction>;
+    try {
+      const data = await handler(params as RpcRequest['params'], this.ctx, req.id);
+      return { type: 'rpc.result', id: req.id, ok: true, data: data ?? null };
+    } catch (err) {
+      if (err instanceof ActionError) {
+        if (DENY_CODES.has(err.code)) return this.deny(env, err.code as DenyCode, err.message);
+        return this.fail(req.id, err.code, err.message);
+      }
+      this.ctx.log.error('rpc failed', { action: req.action, error: err });
+      return this.fail(req.id, 'failed', 'action failed');
+    }
+  }
+}

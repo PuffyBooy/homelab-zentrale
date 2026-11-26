@@ -25,6 +25,12 @@ export const configSchema = z.object({
   HZ_BASE_URL: z.url().optional(),
   HZ_WEB_DIR: z.string().min(1).optional(),
   HZ_DEMO: boolFlag,
+  // Agent image shown in the enrollment one-liner (same variable and default as
+  // deploy/docker-compose.agent.yml).
+  HZ_AGENT_IMAGE: z
+    .string()
+    .regex(/^[a-z0-9][a-z0-9._/:@-]{0,254}$/, 'HZ_AGENT_IMAGE: ungültiger Image-Name')
+    .default('homelab-zentrale/agent:local'),
   // Fixed setup token, only for automated tests (e2e). Rejected unless NODE_ENV=test.
   HZ_SETUP_TOKEN: z
     .string()
@@ -41,6 +47,7 @@ export interface Config {
   baseUrl: string | undefined;
   webDir: string | undefined;
   demo: boolean;
+  agentImage: string;
   env: 'development' | 'production' | 'test';
   /** Only set with NODE_ENV=test. */
   setupToken: string | undefined;
@@ -80,6 +87,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     baseUrl: c.HZ_BASE_URL,
     webDir: c.HZ_WEB_DIR,
     demo: c.HZ_DEMO,
+    agentImage: c.HZ_AGENT_IMAGE,
     env: c.NODE_ENV,
     setupToken: c.HZ_SETUP_TOKEN,
   };

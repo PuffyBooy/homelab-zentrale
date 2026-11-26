@@ -1,4 +1,14 @@
-import { index, integer, sqliteTable, text } from 'drizzle-orm/sqlite-core';
+import { sql } from 'drizzle-orm';
+import {
+  index,
+  integer,
+  primaryKey,
+  real,
+  sqliteTable,
+  text,
+  unique,
+  uniqueIndex,
+} from 'drizzle-orm/sqlite-core';
 
 /**
  * Drizzle schema. Must match `migrations.ts` (checked by test/db.test.ts).
@@ -74,5 +84,171 @@ export const settings = sqliteTable('settings', {
   updatedAt: integer('updated_at').notNull(),
 });
 
+// ---- M2: servers, agents, metrics, containers, alerts ---------------------
+
+export const servers = sqliteTable('servers', {
+  /** Random public id (base64url). */
+  id: text('id').primaryKey(),
+  name: text('name').notNull().unique(),
+  location: text('location').notNull().default(''),
+  arch: text('arch'),
+  os: text('os'),
+  tailscaleIp: text('tailscale_ip'),
+  publicIp: text('public_ip'),
+  agentVersion: text('agent_version'),
+  /** Capabilities from the last hello ({terminal, docker}). */
+  capabilitiesJson: text('capabilities_json'),
+  /** Partial thresholds; missing keys use the defaults from @hz/shared. */
+  thresholdsJson: text('thresholds_json').notNull().default('{}'),
+  allowTerminal: integer('allow_terminal', { mode: 'boolean' }).notNull().default(false),
+  createdAt: integer('created_at').notNull(),
+  lastSeen: integer('last_seen'),
+});
+
+/** Latest metrics and inventory of a server (one row per server). */
+export const serverState = sqliteTable('server_state', {
+  serverId: text('server_id')
+    .primaryKey()
+    .references(() => servers.id, { onDelete: 'cascade' }),
+  /** Last `metrics` message without `type`. */
+  metricsJson: text('metrics_json'),
+  metricsAt: integer('metrics_at'),
+  systemJson: text('system_json'),
+  updatesJson: text('updates_json'),
+  rebootRequired: integer('reboot_required', { mode: 'boolean' }),
+  sshFailed24h: integer('ssh_failed_24h'),
+  fail2banBanned: integer('fail2ban_banned'),
+  listeningPortsJson: text('listening_ports_json'),
+  inventoryAt: integer('inventory_at'),
+});
+
+export const agentTokens = sqliteTable(
+  'agent_tokens',
+  {
+    id: text('id').primaryKey(),
+    serverId: text('server_id')
+      .notNull()
+      .references(() => servers.id, { onDelete: 'cascade' }),
+    /** SHA-256 of `agent:<token>`. The token itself is never stored. */
+    tokenHash: text('token_hash').notNull().unique(),
+    createdAt: integer('created_at').notNull(),
+    revokedAt: integer('revoked_at'),
+  },
+  (t) => [index('agent_tokens_server_id').on(t.serverId)],
+);
+
+export const enrollTokens = sqliteTable('enroll_tokens', {
+  id: text('id').primaryKey(),
+  name: text('name').notNull(),
+  location: text('location').notNull().default(''),
+  /** SHA-256 of `enroll:<token>`. */
+  tokenHash: text('token_hash').notNull().unique(),
+  createdAt: integer('created_at').notNull(),
+  expiresAt: integer('expires_at').notNull(),
+  usedAt: integer('used_at'),
+  /** Server created with this token. */
+  serverId: text('server_id'),
+});
+
+/** Raw samples, kept 48 h. Percentages 0..100, net in bytes per second. */
+export const metricsRaw = sqliteTable(
+  'metrics_raw',
+  {
+    serverId: text('server_id')
+      .notNull()
+      .references(() => servers.id, { onDelete: 'cascade' }),
+    ts: integer('ts').notNull(),
+    cpu: real('cpu').notNull(),
+    ram: real('ram').notNull(),
+    swap: real('swap').notNull(),
+    /** Highest usage of all disks. */
+    diskMax: real('disk_max'),
+    /** [{mount, pct}] */
+    diskJson: text('disk_json').notNull().default('[]'),
+    temp: real('temp'),
+    netIn: real('net_in').notNull(),
+    netOut: real('net_out').notNull(),
+  },
+  (t) => [index('metrics_raw_server_ts').on(t.serverId, t.ts), index('metrics_raw_ts').on(t.ts)],
+);
+
+const rollupColumns = {
+  serverId: text('server_id')
+    .notNull()
+    .references(() => servers.id, { onDelete: 'cascade' }),
+  /** Bucket start. */
+  ts: integer('ts').notNull(),
+  cpu: real('cpu').notNull(),
+  ram: real('ram').notNull(),
+  swap: real('swap').notNull(),
+  diskMax: real('disk_max'),
+  temp: real('temp'),
+  netIn: real('net_in').notNull(),
+  netOut: real('net_out').notNull(),
+  /** Number of raw samples in the bucket (weight for the next level). */
+  samples: integer('samples').notNull(),
+};
+
+/** 5-minute means, kept 30 days. */
+export const metrics5m = sqliteTable('metrics_5m', rollupColumns, (t) => [
+  primaryKey({ columns: [t.serverId, t.ts] }),
+  index('metrics_5m_ts').on(t.ts),
+]);
+
+/** Hourly means, kept 1 year. */
+export const metrics1h = sqliteTable('metrics_1h', { ...rollupColumns }, (t) => [
+  primaryKey({ columns: [t.serverId, t.ts] }),
+  index('metrics_1h_ts').on(t.ts),
+]);
+
+export const containers = sqliteTable(
+  'containers',
+  {
+    id: text('id').primaryKey(),
+    serverId: text('server_id')
+      .notNull()
+      .references(() => servers.id, { onDelete: 'cascade' }),
+    dockerId: text('docker_id').notNull(),
+    name: text('name').notNull(),
+    image: text('image').notNull(),
+    composeProject: text('compose_project'),
+    state: text('state').notNull(),
+    health: text('health').notNull(),
+    portsJson: text('ports_json').notNull().default('[]'),
+    /** Full ContainerInfo from the last inventory. */
+    infoJson: text('info_json').notNull(),
+    updatedAt: integer('updated_at').notNull(),
+  },
+  (t) => [unique().on(t.serverId, t.dockerId)],
+);
+
+export const alerts = sqliteTable(
+  'alerts',
+  {
+    id: text('id').primaryKey(),
+    /** Dedupe key: at most one open/acked alert per key. */
+    key: text('key').notNull(),
+    level: text('level').notNull(),
+    title: text('title').notNull(),
+    body: text('body').notNull(),
+    serverId: text('server_id').references(() => servers.id, { onDelete: 'set null' }),
+    source: text('source').notNull(),
+    state: text('state').notNull(),
+    openedAt: integer('opened_at').notNull(),
+    ackedAt: integer('acked_at'),
+    resolvedAt: integer('resolved_at'),
+  },
+  (t) => [
+    uniqueIndex('alerts_active_key')
+      .on(t.key)
+      .where(sql`state != 'resolved'`),
+    index('alerts_opened_at').on(t.openedAt),
+    index('alerts_server_id').on(t.serverId),
+  ],
+);
+
 export type User = typeof users.$inferSelect;
 export type Session = typeof sessions.$inferSelect;
+export type ServerRow = typeof servers.$inferSelect;
+export type ServerStateRow = typeof serverState.$inferSelect;
+export type AlertRow = typeof alerts.$inferSelect;

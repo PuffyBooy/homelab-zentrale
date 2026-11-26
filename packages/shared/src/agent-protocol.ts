@@ -305,6 +305,27 @@ export const rejectSchema = z.strictObject({
   code: z.enum(['bad_token', 'revoked', 'protocol', 'name_taken', 'invalid']),
 });
 
+/**
+ * WebSocket close codes the core uses on /agent. After `reject` the core closes
+ * with REJECTED (or REVOKED); an agent should not retry a rejected token in a
+ * tight loop.
+ */
+export const AGENT_CLOSE = {
+  /** Another connection of the same server replaced this one. */
+  REPLACED: 4000,
+  /** Sent after a `reject` (bad token, protocol, name taken, invalid hello). */
+  REJECTED: 4001,
+  /** No valid `hello` within 10 s. */
+  HELLO_TIMEOUT: 4002,
+  /** The agent token was revoked or the server was deleted. */
+  REVOKED: 4003,
+  /** Too many invalid or too many messages. */
+  POLICY: 1008,
+} as const;
+
+/** Time the agent has to send `hello` after connecting. */
+export const HELLO_TIMEOUT_MS = 10_000;
+
 // RPC params, one schema per allowed action -------------------------------
 
 const containerIdParams = z.strictObject({ id: containerRefSchema });

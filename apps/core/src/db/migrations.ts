@@ -65,4 +65,136 @@ CREATE TABLE settings (
 );
 `,
   },
+  {
+    version: 2,
+    name: 'servers',
+    sql: `
+CREATE TABLE servers (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL UNIQUE,
+  location TEXT NOT NULL DEFAULT '',
+  arch TEXT,
+  os TEXT,
+  tailscale_ip TEXT,
+  public_ip TEXT,
+  agent_version TEXT,
+  capabilities_json TEXT,
+  thresholds_json TEXT NOT NULL DEFAULT '{}',
+  allow_terminal INTEGER NOT NULL DEFAULT 0,
+  created_at INTEGER NOT NULL,
+  last_seen INTEGER
+);
+
+CREATE TABLE server_state (
+  server_id TEXT PRIMARY KEY REFERENCES servers(id) ON DELETE CASCADE,
+  metrics_json TEXT,
+  metrics_at INTEGER,
+  system_json TEXT,
+  updates_json TEXT,
+  reboot_required INTEGER,
+  ssh_failed_24h INTEGER,
+  fail2ban_banned INTEGER,
+  listening_ports_json TEXT,
+  inventory_at INTEGER
+);
+
+CREATE TABLE agent_tokens (
+  id TEXT PRIMARY KEY,
+  server_id TEXT NOT NULL REFERENCES servers(id) ON DELETE CASCADE,
+  token_hash TEXT NOT NULL UNIQUE,
+  created_at INTEGER NOT NULL,
+  revoked_at INTEGER
+);
+CREATE INDEX agent_tokens_server_id ON agent_tokens(server_id);
+
+CREATE TABLE enroll_tokens (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  location TEXT NOT NULL DEFAULT '',
+  token_hash TEXT NOT NULL UNIQUE,
+  created_at INTEGER NOT NULL,
+  expires_at INTEGER NOT NULL,
+  used_at INTEGER,
+  server_id TEXT
+);
+
+CREATE TABLE metrics_raw (
+  server_id TEXT NOT NULL REFERENCES servers(id) ON DELETE CASCADE,
+  ts INTEGER NOT NULL,
+  cpu REAL NOT NULL,
+  ram REAL NOT NULL,
+  swap REAL NOT NULL,
+  disk_max REAL,
+  disk_json TEXT NOT NULL DEFAULT '[]',
+  temp REAL,
+  net_in REAL NOT NULL,
+  net_out REAL NOT NULL
+);
+CREATE INDEX metrics_raw_server_ts ON metrics_raw(server_id, ts);
+CREATE INDEX metrics_raw_ts ON metrics_raw(ts);
+
+CREATE TABLE metrics_5m (
+  server_id TEXT NOT NULL REFERENCES servers(id) ON DELETE CASCADE,
+  ts INTEGER NOT NULL,
+  cpu REAL NOT NULL,
+  ram REAL NOT NULL,
+  swap REAL NOT NULL,
+  disk_max REAL,
+  temp REAL,
+  net_in REAL NOT NULL,
+  net_out REAL NOT NULL,
+  samples INTEGER NOT NULL,
+  PRIMARY KEY (server_id, ts)
+);
+CREATE INDEX metrics_5m_ts ON metrics_5m(ts);
+
+CREATE TABLE metrics_1h (
+  server_id TEXT NOT NULL REFERENCES servers(id) ON DELETE CASCADE,
+  ts INTEGER NOT NULL,
+  cpu REAL NOT NULL,
+  ram REAL NOT NULL,
+  swap REAL NOT NULL,
+  disk_max REAL,
+  temp REAL,
+  net_in REAL NOT NULL,
+  net_out REAL NOT NULL,
+  samples INTEGER NOT NULL,
+  PRIMARY KEY (server_id, ts)
+);
+CREATE INDEX metrics_1h_ts ON metrics_1h(ts);
+
+CREATE TABLE containers (
+  id TEXT PRIMARY KEY,
+  server_id TEXT NOT NULL REFERENCES servers(id) ON DELETE CASCADE,
+  docker_id TEXT NOT NULL,
+  name TEXT NOT NULL,
+  image TEXT NOT NULL,
+  compose_project TEXT,
+  state TEXT NOT NULL,
+  health TEXT NOT NULL,
+  ports_json TEXT NOT NULL DEFAULT '[]',
+  info_json TEXT NOT NULL,
+  updated_at INTEGER NOT NULL,
+  UNIQUE (server_id, docker_id)
+);
+
+CREATE TABLE alerts (
+  id TEXT PRIMARY KEY,
+  key TEXT NOT NULL,
+  level TEXT NOT NULL,
+  title TEXT NOT NULL,
+  body TEXT NOT NULL,
+  server_id TEXT REFERENCES servers(id) ON DELETE SET NULL,
+  source TEXT NOT NULL,
+  state TEXT NOT NULL,
+  opened_at INTEGER NOT NULL,
+  acked_at INTEGER,
+  resolved_at INTEGER
+);
+-- At most one open or acked alert per key (dedupe).
+CREATE UNIQUE INDEX alerts_active_key ON alerts(key) WHERE state != 'resolved';
+CREATE INDEX alerts_opened_at ON alerts(opened_at);
+CREATE INDEX alerts_server_id ON alerts(server_id);
+`,
+  },
 ];

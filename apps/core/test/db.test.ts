@@ -18,6 +18,15 @@ const tables = [
   schema.recoveryCodes,
   schema.auditLog,
   schema.settings,
+  schema.servers,
+  schema.serverState,
+  schema.agentTokens,
+  schema.enrollTokens,
+  schema.metricsRaw,
+  schema.metrics5m,
+  schema.metrics1h,
+  schema.containers,
+  schema.alerts,
 ];
 
 describe('database', () => {

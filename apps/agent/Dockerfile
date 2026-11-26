@@ -1,0 +1,47 @@
+# syntax=docker/dockerfile:1.7
+# Homelab-Zentrale agent. Multi-arch (linux/amd64, linux/arm64). Build context is the repo root:
+#   docker build -f apps/agent/Dockerfile -t homelab-zentrale/agent:local .
+#   docker buildx build --platform linux/amd64,linux/arm64 -f apps/agent/Dockerfile .
+# Run it with deploy/docker-compose.agent.yml (rights and mounts are explained there).
+
+FROM node:22-bookworm-slim AS base
+ENV PNPM_HOME=/pnpm PATH=/pnpm:$PATH CI=1
+RUN corepack enable
+WORKDIR /repo
+
+# Build stage: install only what the agent needs, build, copy the production deps.
+FROM base AS build
+COPY . .
+RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
+  pnpm install --frozen-lockfile --filter @hz/agent...
+RUN pnpm --filter @hz/agent... build
+RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
+  pnpm --filter @hz/agent --prod deploy --legacy /out
+
+FROM node:22-bookworm-slim AS runtime
+# util-linux: nsenter (host commands in the namespaces of host PID 1)
+# iproute2:   ss (listening ports)
+# iputils-ping: check.ping
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends util-linux iproute2 iputils-ping \
+  && rm -rf /var/lib/apt/lists/*
+# The runtime never needs npm, corepack or yarn; removing them drops their dependency CVEs.
+RUN rm -rf /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/corepack \
+    /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/corepack /opt/yarn* \
+    /usr/local/bin/yarn /usr/local/bin/yarnpkg
+ENV NODE_ENV=production \
+    HZ_AGENT_DATA=/data \
+    HZ_AGENT_HOST_EXEC=nsenter \
+    HZ_AGENT_HOST_PROC=/host/proc \
+    HZ_AGENT_HOST_ROOT=/host/proc/1/root
+WORKDIR /app
+COPY --from=build /out /app
+RUN mkdir -p /data && chown node:node /data && chmod 0700 /data
+VOLUME ["/data"]
+# Least privilege by default: as `node` the agent can still report metrics.
+# Docker socket, nsenter and host files need root; deploy/docker-compose.agent.yml
+# sets `user: "0:0"` explicitly together with a minimal capability set.
+USER node
+# No port: the agent only dials out to the core (docs/NETWORK.md).
+HEALTHCHECK NONE
+CMD ["node", "dist/index.js"]

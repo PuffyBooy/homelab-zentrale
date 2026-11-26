@@ -57,3 +57,111 @@ export function describeUserAgent(ua: string): string {
   if (browser && os) return `${browser} · ${os}`;
   return browser ?? os ?? (ua.trim().slice(0, 40) || 'Unbekanntes Gerät');
 }
+
+// ---------------------------------------------------------------------------
+// Numbers and units (brand book: "7,8 GB", "23 %", "21,4 °C").
+
+const numFmt = new Map<number, Intl.NumberFormat>();
+function nf(digits: number): Intl.NumberFormat {
+  let f = numFmt.get(digits);
+  if (!f) {
+    f = new Intl.NumberFormat('de-AT', {
+      minimumFractionDigits: 0,
+      maximumFractionDigits: digits,
+      useGrouping: false,
+    });
+    numFmt.set(digits, f);
+  }
+  return f;
+}
+
+/** Decimal comma, at most `digits` fraction digits, no grouping: 7,8 · 1024 · 0. */
+export function formatNumber(v: number, digits = 1): string {
+  // Intl prints "-0" for tiny negatives.
+  const r = Math.abs(v) < 0.5 * 10 ** -digits ? 0 : v;
+  return nf(digits).format(r);
+}
+
+/** "23 %", rounded to whole percent. Null-safe: "—". */
+export function formatPercent(v: number | null | undefined): string {
+  return v == null ? '—' : `${formatNumber(Math.round(v), 0)} %`;
+}
+
+/** "21,4 °C". */
+export function formatTemp(v: number | null | undefined): string {
+  return v == null ? '—' : `${formatNumber(v, 1)} °C`;
+}
+
+const UNITS = ['B', 'KB', 'MB', 'GB', 'TB', 'PB'] as const;
+
+function byteParts(bytes: number): { value: number; unit: string } {
+  let v = Math.max(0, bytes);
+  let i = 0;
+  while (v >= 1024 && i < UNITS.length - 1) {
+    v /= 1024;
+    i++;
+  }
+  return { value: v, unit: UNITS[i] ?? 'B' };
+}
+
+/** "7,8 GB", "512 MB", "0 B". Binary steps (like df -h), one decimal below 100. */
+export function formatBytes(bytes: number | null | undefined): string {
+  if (bytes == null || !Number.isFinite(bytes)) return '—';
+  const { value, unit } = byteParts(bytes);
+  return `${formatNumber(value, value >= 100 || unit === 'B' ? 0 : 1)} ${unit}`;
+}
+
+/** "5,8 / 8 GB": both values in the unit of the total. */
+export function formatBytesOf(used: number, total: number): string {
+  const { unit } = byteParts(total);
+  const div = 1024 ** UNITS.indexOf(unit as (typeof UNITS)[number]);
+  const digits = (n: number): number => (n >= 100 || unit === 'B' ? 0 : 1);
+  const u = used / div;
+  const t = total / div;
+  return `${formatNumber(u, digits(u))} / ${formatNumber(t, digits(t))} ${unit}`;
+}
+
+/** Network rate: "1,2 MB/s", "340 KB/s". */
+export function formatRate(bytesPerSecond: number | null | undefined): string {
+  if (bytesPerSecond == null) return '—';
+  return `${formatBytes(bytesPerSecond)}/s`;
+}
+
+/** Uptime "12 T 4 h", "4 h 12 Min", "12 Min". */
+export function formatUptime(seconds: number | null | undefined): string {
+  if (seconds == null || !Number.isFinite(seconds) || seconds < 0) return '—';
+  const m = Math.floor(seconds / 60);
+  const h = Math.floor(m / 60);
+  const d = Math.floor(h / 24);
+  if (d > 0) return h % 24 ? `${d} T ${h % 24} h` : `${d} T`;
+  if (h > 0) return m % 60 ? `${h} h ${m % 60} Min` : `${h} h`;
+  return `${m} Min`;
+}
+
+/** Short uptime for narrow list columns: "41 T", "4 h", "12 Min". */
+export function formatUptimeShort(seconds: number | null | undefined): string {
+  if (seconds == null || !Number.isFinite(seconds) || seconds < 0) return '—';
+  const m = Math.floor(seconds / 60);
+  const h = Math.floor(m / 60);
+  const d = Math.floor(h / 24);
+  if (d > 0) return `${d} T`;
+  if (h > 0) return `${h} h`;
+  return `${m} Min`;
+}
+
+/** "23:04" for today, "24.11. 23:04" for other days. */
+export function formatWhen(d: Date, now: Date = new Date()): string {
+  const sameDay =
+    d.getFullYear() === now.getFullYear() &&
+    d.getMonth() === now.getMonth() &&
+    d.getDate() === now.getDate();
+  if (sameDay) return formatTime(d);
+  const day = String(d.getDate()).padStart(2, '0');
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  return `${day}.${month}. ${formatTime(d)}`;
+}
+
+/** Plural helper: plural(1, 'Problem', 'Probleme') -> "1 Problem". */
+export function plural(n: number, one: string, many: string): string {
+  return `${formatNumber(n, 0)} ${n === 1 ? one : many}`;
+}

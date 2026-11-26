@@ -1,0 +1,466 @@
+import { and, count, eq, notInArray } from 'drizzle-orm';
+import {
+  defaultThresholds,
+  thresholdsPatchSchema,
+  thresholdsSchema,
+  type AgentEvent,
+  type ContainerInfo,
+  type Disk,
+  type Hello,
+  type Inventory,
+  type ListeningPort,
+  type Metrics,
+  type ServerDetail,
+  type ServerSummary,
+  type SystemInfo,
+  type Thresholds,
+  type ThresholdsPatch,
+} from '@hz/shared';
+import type { FastifyBaseLogger } from 'fastify';
+import type { AlertService } from '../alerts/service.js';
+import type { AgentSink } from '../agents/hub.js';
+import type { Clock } from '../clock.js';
+import { randomToken } from '../crypto.js';
+import { writeAudit } from '../db/audit.js';
+import type { Db } from '../db/index.js';
+import {
+  containers,
+  servers,
+  serverState,
+  type ServerRow,
+  type ServerStateRow,
+} from '../db/schema.js';
+import { toRawRow, type MetricsStore } from '../metrics/store.js';
+import { syncServerAlerts } from './alert-texts.js';
+import {
+  evaluateStatus,
+  publicReason,
+  WINDOW_TOLERANCE_MS,
+  type StatusInput,
+  type StatusResult,
+} from './status.js';
+
+type StoredMetrics = Omit<Metrics, 'type'>;
+
+export interface ConnectionInfo {
+  isConnected(serverId: string): boolean;
+  disconnectedAt(serverId: string): number | null;
+}
+
+/** serverId and whether it was deleted. */
+export type ServerListener = (serverId: string, deleted: boolean) => void;
+
+const parse = <T>(json: string | null): T | null =>
+  json === null ? null : (JSON.parse(json) as T);
+const round1 = (v: number): number => Math.round(v * 10) / 10;
+const pct = (used: number, total: number): number => (total > 0 ? (used / total) * 100 : 0);
+
+export function thresholdsOf(row: Pick<ServerRow, 'thresholdsJson'>): Thresholds {
+  let partial: unknown;
+  try {
+    partial = JSON.parse(row.thresholdsJson);
+  } catch {
+    partial = {};
+  }
+  const p = thresholdsPatchSchema.safeParse(partial);
+  return thresholdsSchema.parse({ ...defaultThresholds, ...(p.success ? p.data : {}) });
+}
+
+/** Applies a patch; keys that are absent or undefined keep their value. */
+export function mergeThresholds(base: Thresholds, patch: ThresholdsPatch): Thresholds {
+  const out: Thresholds = { ...base };
+  for (const [k, v] of Object.entries(patch)) {
+    if (typeof v === 'number') out[k as keyof Thresholds] = v;
+  }
+  return out;
+}
+
+/** Merged thresholds must keep warn <= crit. */
+export function thresholdsConsistent(t: Thresholds): boolean {
+  return t.ramWarn <= t.ramCrit && t.diskWarn <= t.diskCrit;
+}
+
+/**
+ * Servers: state from agents, status rules, summaries for API and live channel.
+ * Implements the AgentSink of the hub.
+ */
+export class ServerService implements AgentSink {
+  private readonly lastSeen = new Map<string, number>();
+  private readonly lastSummary = new Map<string, string>();
+  private readonly listeners = new Set<ServerListener>();
+  /** Demo servers (HZ_DEMO=1) count as connected without a socket. */
+  private readonly virtual = new Set<string>();
+  private connections: ConnectionInfo = { isConnected: () => false, disconnectedAt: () => null };
+  private readonly bootAt: number;
+
+  constructor(
+    private readonly deps: {
+      db: Db;
+      now: Clock;
+      metrics: MetricsStore;
+      alerts: AlertService;
+      log: FastifyBaseLogger;
+    },
+  ) {
+    this.bootAt = deps.now();
+  }
+
+  setConnections(c: ConnectionInfo): void {
+    this.connections = c;
+  }
+
+  markVirtual(serverId: string): void {
+    this.virtual.add(serverId);
+  }
+
+  onChange(fn: ServerListener): () => void {
+    this.listeners.add(fn);
+    return () => this.listeners.delete(fn);
+  }
+
+  private emit(id: string, deleted: boolean): void {
+    for (const fn of this.listeners) fn(id, deleted);
+  }
+
+  isConnected(id: string): boolean {
+    return this.virtual.has(id) || this.connections.isConnected(id);
+  }
+
+  row(id: string): ServerRow | undefined {
+    return this.deps.db.select().from(servers).where(eq(servers.id, id)).get();
+  }
+
+  private state(id: string): ServerStateRow | undefined {
+    return this.deps.db.select().from(serverState).where(eq(serverState.serverId, id)).get();
+  }
+
+  private lastSeenOf(row: ServerRow): number | null {
+    return this.lastSeen.get(row.id) ?? row.lastSeen;
+  }
+
+  // ---- AgentSink -------------------------------------------------------------
+
+  onConnected(server: ServerRow, hello: Hello, enrolled: boolean): void {
+    const now = this.deps.now();
+    this.lastSeen.set(server.id, now);
+    this.deps.db
+      .update(servers)
+      .set({
+        arch: hello.arch,
+        os: hello.os,
+        agentVersion: hello.version,
+        capabilitiesJson: JSON.stringify(hello.capabilities),
+        lastSeen: now,
+      })
+      .where(eq(servers.id, server.id))
+      .run();
+    if (enrolled) {
+      writeAudit(this.deps.db, now, {
+        actor: 'system',
+        action: 'server.enrolled',
+        target: server.id,
+        details: { name: server.name },
+      });
+    }
+    this.refresh(server.id, true);
+  }
+
+  onDisconnected(serverId: string): void {
+    this.refresh(serverId, true);
+  }
+
+  onSeen(serverId: string): void {
+    this.lastSeen.set(serverId, this.deps.now());
+  }
+
+  onMetrics(serverId: string, m: Metrics): void {
+    this.ingestMetrics(serverId, m);
+  }
+
+  onInventory(serverId: string, inv: Inventory): void {
+    this.ingestInventory(serverId, inv);
+  }
+
+  onEvent(serverId: string, ev: AgentEvent): void {
+    const e = ev.event;
+    if (e.kind === 'denied') {
+      this.deps.log.warn({ serverId, action: e.action }, 'agent denied an action');
+      writeAudit(this.deps.db, this.deps.now(), {
+        actor: 'system',
+        action: 'agent.denied',
+        target: serverId,
+        details: { action: e.action, reason: e.reason },
+      });
+    } else {
+      this.deps.log.debug({ serverId, kind: e.kind }, 'agent event');
+    }
+  }
+
+  terminalAllowed(serverId: string): boolean {
+    return this.row(serverId)?.allowTerminal ?? false;
+  }
+
+  // ---- ingestion -------------------------------------------------------------
+
+  /** Stores a metrics sample. The core's receive time is used, not the agent clock. */
+  ingestMetrics(serverId: string, m: Metrics | StoredMetrics): void {
+    const now = this.deps.now();
+    const stored: StoredMetrics = {
+      ts: m.ts,
+      cpu: m.cpu,
+      ...(m.load1 !== undefined ? { load1: m.load1 } : {}),
+      ram: m.ram,
+      swap: m.swap,
+      disks: m.disks,
+      temp: m.temp,
+      net: m.net,
+      uptimeS: m.uptimeS,
+    };
+    this.deps.metrics.insert(toRawRow(serverId, now, stored));
+    const json = JSON.stringify(stored);
+    this.deps.db
+      .insert(serverState)
+      .values({ serverId, metricsJson: json, metricsAt: now })
+      .onConflictDoUpdate({
+        target: serverState.serverId,
+        set: { metricsJson: json, metricsAt: now },
+      })
+      .run();
+    this.lastSeen.set(serverId, now);
+    this.deps.db.update(servers).set({ lastSeen: now }).where(eq(servers.id, serverId)).run();
+    this.refresh(serverId, true);
+  }
+
+  ingestInventory(serverId: string, inv: Omit<Inventory, 'type'>): void {
+    const now = this.deps.now();
+    const db = this.deps.db;
+    db.transaction((tx) => {
+      const values = {
+        systemJson: JSON.stringify(inv.system),
+        updatesJson: inv.updates === null ? null : JSON.stringify(inv.updates),
+        rebootRequired: inv.rebootRequired,
+        sshFailed24h: inv.sshFailed24h,
+        fail2banBanned: inv.fail2banBanned,
+        listeningPortsJson: JSON.stringify(inv.listeningPorts),
+        inventoryAt: now,
+      };
+      tx.insert(serverState)
+        .values({ serverId, ...values })
+        .onConflictDoUpdate({ target: serverState.serverId, set: values })
+        .run();
+      tx.update(servers)
+        .set({
+          tailscaleIp: inv.system.tailscaleIp ?? null,
+          publicIp: inv.system.publicIp ?? null,
+          os: inv.system.os,
+          arch: inv.system.arch,
+          lastSeen: now,
+        })
+        .where(eq(servers.id, serverId))
+        .run();
+      const ids = inv.containers.map((c) => c.dockerId);
+      tx.delete(containers)
+        .where(
+          ids.length > 0
+            ? and(eq(containers.serverId, serverId), notInArray(containers.dockerId, ids))
+            : eq(containers.serverId, serverId),
+        )
+        .run();
+      for (const c of inv.containers) this.upsertContainer(tx, serverId, c, now);
+    });
+    this.lastSeen.set(serverId, now);
+    this.refresh(serverId, true);
+  }
+
+  private upsertContainer(tx: Db, serverId: string, c: ContainerInfo, now: number): void {
+    const values = {
+      name: c.name,
+      image: c.image,
+      composeProject: c.composeProject ?? null,
+      state: c.state,
+      health: c.health,
+      portsJson: JSON.stringify(c.ports),
+      infoJson: JSON.stringify(c),
+      updatedAt: now,
+    };
+    tx.insert(containers)
+      .values({ id: randomToken(16), serverId, dockerId: c.dockerId, ...values })
+      .onConflictDoUpdate({ target: [containers.serverId, containers.dockerId], set: values })
+      .run();
+  }
+
+  // ---- status ----------------------------------------------------------------
+
+  private statusInput(row: ServerRow, st: ServerStateRow | undefined, t: Thresholds): StatusInput {
+    const now = this.deps.now();
+    const m = parse<StoredMetrics>(st?.metricsJson ?? null);
+    const windowMs = Math.max(t.cpuWarnMinutes, t.ramCritMinutes) * 60_000 + WINDOW_TOLERANCE_MS;
+    const connected = this.isConnected(row.id);
+    return {
+      connected,
+      disconnectedAt: connected ? null : this.connections.disconnectedAt(row.id),
+      lastSeen: this.lastSeenOf(row),
+      observedSince: this.bootAt,
+      samples: m ? this.deps.metrics.samples(row.id, now - windowMs) : [],
+      latest: m
+        ? {
+            cpu: m.cpu,
+            ramPct: pct(m.ram.usedBytes, m.ram.totalBytes),
+            disks: m.disks
+              .filter((d) => d.totalBytes > 0)
+              .map((d) => ({ mount: d.mount, pct: pct(d.usedBytes, d.totalBytes) })),
+            temp: m.temp,
+          }
+        : null,
+      updates: parse<{ total: number; security: number }>(st?.updatesJson ?? null),
+      rebootRequired: st?.rebootRequired ?? null,
+    };
+  }
+
+  private build(row: ServerRow): {
+    summary: ServerSummary;
+    result: StatusResult;
+    thresholds: Thresholds;
+    state: ServerStateRow | undefined;
+  } {
+    const st = this.state(row.id);
+    const t = thresholdsOf(row);
+    const input = this.statusInput(row, st, t);
+    const result = evaluateStatus(input, t, this.deps.now());
+    const m = parse<StoredMetrics>(st?.metricsJson ?? null);
+    const counts = this.deps.db
+      .select({ state: containers.state, n: count() })
+      .from(containers)
+      .where(eq(containers.serverId, row.id))
+      .groupBy(containers.state)
+      .all();
+    const lastSeen = this.lastSeenOf(row);
+    const diskPct = input.latest?.disks.length
+      ? Math.max(...input.latest.disks.map((d) => d.pct))
+      : null;
+    const summary: ServerSummary = {
+      id: row.id,
+      name: row.name,
+      location: row.location,
+      arch: row.arch,
+      os: row.os,
+      tailscaleIp: row.tailscaleIp,
+      publicIp: row.publicIp,
+      status: result.status,
+      reasons: result.reasons.map(publicReason),
+      connected: input.connected,
+      lastSeen: lastSeen === null ? null : new Date(lastSeen).toISOString(),
+      agentVersion: row.agentVersion,
+      cpu: m ? round1(m.cpu) : null,
+      ramPct: input.latest ? round1(input.latest.ramPct) : null,
+      diskPct: diskPct === null ? null : round1(diskPct),
+      temp: m?.temp ?? null,
+      uptimeS: m?.uptimeS ?? null,
+      allowTerminal: row.allowTerminal,
+      containersRunning: counts.find((c) => c.state === 'running')?.n ?? 0,
+      containersTotal: counts.reduce((a, c) => a + c.n, 0),
+    };
+    return { summary, result, thresholds: t, state: st };
+  }
+
+  summary(id: string): ServerSummary | null {
+    const row = this.row(id);
+    return row ? this.build(row).summary : null;
+  }
+
+  /** Sorted: crit, warn, then by name (SPEC 5.1). */
+  list(): ServerSummary[] {
+    const order = { crit: 0, warn: 1, off: 2, ok: 3 } as const;
+    return this.deps.db
+      .select()
+      .from(servers)
+      .all()
+      .map((r) => this.build(r).summary)
+      .sort((a, b) => order[a.status] - order[b.status] || a.name.localeCompare(b.name));
+  }
+
+  detail(id: string): ServerDetail | null {
+    const row = this.row(id);
+    if (!row) return null;
+    const { summary, thresholds, state: st } = this.build(row);
+    const m = parse<StoredMetrics>(st?.metricsJson ?? null);
+    return {
+      server: summary,
+      thresholds,
+      system: parse<SystemInfo>(st?.systemJson ?? null),
+      ram: m ? m.ram : null,
+      swap: m ? m.swap : null,
+      disks: m ? (m.disks as Disk[]) : [],
+      net: m ? m.net : null,
+      updates: parse<{ total: number; security: number }>(st?.updatesJson ?? null),
+      rebootRequired: st?.rebootRequired ?? null,
+      sshFailed24h: st?.sshFailed24h ?? null,
+      fail2banBanned: st?.fail2banBanned ?? null,
+      listeningPorts: parse<ListeningPort[]>(st?.listeningPortsJson ?? null) ?? [],
+    };
+  }
+
+  /**
+   * Re-evaluates one server, syncs its alerts and notifies listeners if the
+   * summary changed (or always with `force`, e.g. after new metrics).
+   */
+  refresh(id: string, force = false): void {
+    const row = this.row(id);
+    if (!row) return;
+    const { summary, result, thresholds } = this.build(row);
+    syncServerAlerts(this.deps.alerts, result, {
+      serverId: row.id,
+      name: row.name,
+      connected: summary.connected,
+      now: this.deps.now(),
+      thresholds,
+      current: {
+        cpu: summary.cpu,
+        ramPct: summary.ramPct,
+        diskPct: summary.diskPct,
+        temp: summary.temp,
+      },
+    });
+    const json = JSON.stringify(summary);
+    const changed = this.lastSummary.get(id) !== json;
+    this.lastSummary.set(id, json);
+    if (changed || force) this.emit(id, false);
+  }
+
+  /** Every 5 s from the scheduler: offline detection without new messages. */
+  refreshAll(): void {
+    for (const r of this.deps.db.select({ id: servers.id }).from(servers).all()) this.refresh(r.id);
+  }
+
+  update(
+    id: string,
+    patch: { location?: string; thresholds?: ThresholdsPatch; allowTerminal?: boolean },
+  ): boolean {
+    const row = this.row(id);
+    if (!row) return false;
+    const set: Partial<ServerRow> = {};
+    if (patch.location !== undefined) set.location = patch.location;
+    if (patch.allowTerminal !== undefined) set.allowTerminal = patch.allowTerminal;
+    if (patch.thresholds !== undefined) {
+      const current = thresholdsPatchSchema.safeParse(parse(row.thresholdsJson) ?? {});
+      set.thresholdsJson = JSON.stringify({
+        ...(current.success ? current.data : {}),
+        ...patch.thresholds,
+      });
+    }
+    if (Object.keys(set).length > 0) {
+      this.deps.db.update(servers).set(set).where(eq(servers.id, id)).run();
+    }
+    this.refresh(id, true);
+    return true;
+  }
+
+  delete(id: string): boolean {
+    const r = this.deps.db.delete(servers).where(eq(servers.id, id)).run();
+    this.lastSeen.delete(id);
+    this.lastSummary.delete(id);
+    this.virtual.delete(id);
+    if (r.changes > 0) this.emit(id, true);
+    return r.changes > 0;
+  }
+}
