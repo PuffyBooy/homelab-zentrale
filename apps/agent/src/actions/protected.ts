@@ -1,9 +1,9 @@
 import os from 'node:os';
 import { ActionError } from './types.js';
 
-/** Containers with this label (agent, core) are never stopped, restarted or replaced. */
+/** Containers with this label (agent, core, M17 updater helper) are never stopped, restarted or replaced. */
 export const ROLE_LABEL = 'hz.role';
-const PROTECTED_ROLES = new Set(['agent', 'core']);
+export const PROTECTED_ROLES: ReadonlySet<string> = new Set(['agent', 'core', 'updater']);
 const COMPOSE_DIR_LABEL = 'com.docker.compose.project.working_dir';
 
 interface InspectLike {

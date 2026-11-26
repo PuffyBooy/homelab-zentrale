@@ -5,6 +5,7 @@ import type { Logger } from '../log.js';
 import type { StreamManager } from '../streams.js';
 import type { WakeManager } from './game-wake.js';
 import type { PtyManager } from './pty.js';
+import type { UpdateService } from '../update/service.js';
 
 /** Thrown by actions; becomes rpc.result {ok:false, error:{code, message}}. */
 export class ActionError extends Error {
@@ -42,6 +43,10 @@ export interface ActionContext {
   pty?: PtyManager;
   /** Wake listeners of sleeping games (game.wake.*); set by index.ts. */
   wake?: WakeManager;
+  /** M16: systemd units system.service may control (HZ_AGENT_SERVICES, already filtered). */
+  services?: readonly string[];
+  /** M17: image updates (update.*); set by index.ts when Docker is available. */
+  updates?: UpdateService;
 }
 
 export type ActionHandler<A extends RpcAction> = (

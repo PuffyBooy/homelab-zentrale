@@ -34,7 +34,17 @@
  *       game_wake and the core starts the game again (status ok),
  *    f. stop -> off, DELETE with a wrong confirmName is refused, DELETE with the right one
  *       removes container and folder.
- * 8. stops the agent, waits until the server is crit (<= 100 s) and
+ * 8. M17 auto-update (skipped with HZ_SMOKE_SKIP_UPDATE=1). Core and agent run from a local
+ *    registry:2 (127.0.0.1:5000), so the agent can pull "their" tag:
+ *    a. core: a derived image (`FROM <core>` + another org.opencontainers.image.version) is
+ *       pushed under the core's tag, POST /api/servers/:id/update {target: core} -> the run
+ *       ends `updated`, the core container was replaced (new id, new image), /api/health
+ *       answers, the agent reconnects,
+ *    b. agent: same with a derived agent image -> `updated`, homelab-agent runs the new image,
+ *    c. broken agent: a derived image whose HEALTHCHECK always fails -> `rolled_back`,
+ *       homelab-agent runs the previous image again, an open warn alert update:<id>:agent,
+ *    d. the exited updater helper is removed by the agent afterwards.
+ * 9. stops the agent, waits until the server is crit (<= 100 s) and
  *    GET /api/alerts shows an open crit alert for it.
  * Cleans up containers and volumes in every case. On failure it prints core, agent and
  * game container logs.
@@ -74,6 +84,11 @@ import {
   type ServerSummary,
 } from '../../packages/shared/src/api/servers.js';
 import { liveServerMessageSchema, type LiveServerMessage } from '../../packages/shared/src/live.js';
+import {
+  updateNowResponseSchema,
+  updatesResponseSchema,
+  type UpdateRun,
+} from '../../packages/shared/src/api/updates.js';
 
 const CORE_IMAGE = process.env.HZ_SMOKE_CORE_IMAGE ?? 'homelab-zentrale/core:local';
 const AGENT_IMAGE = process.env.HZ_SMOKE_AGENT_IMAGE ?? 'homelab-zentrale/agent:local';
@@ -90,6 +105,18 @@ const NEW_IMAGE = 'busybox:1.37';
 const SMOKE_TAG = 'busybox:hz-smoke';
 const AGENT_CONTAINER = 'homelab-agent';
 const SKIP_GAME = process.env.HZ_SMOKE_SKIP_GAME === '1';
+const SKIP_UPDATE = process.env.HZ_SMOKE_SKIP_UPDATE === '1';
+/** M17: local registry, so the agent can pull the tags core and agent run with. */
+const REGISTRY_NAME = 'hz-smoke-registry';
+const REGISTRY = `127.0.0.1:${Number(process.env.HZ_SMOKE_REGISTRY_PORT ?? 5000)}`;
+const REG_CORE = `${REGISTRY}/homelab-core:smoke`;
+const REG_AGENT = `${REGISTRY}/homelab-agent:smoke`;
+const CORE_VOLUME = 'hz-smoke-core-data';
+const DERIVED = ['hz-smoke/core:v2', 'hz-smoke/agent:v2', 'hz-smoke/agent:broken'] as const;
+/** Image refs core and agent run with (the registry tags unless HZ_SMOKE_SKIP_UPDATE=1). */
+let coreRef = CORE_IMAGE;
+let agentRef = AGENT_IMAGE;
+let registryStarted = false;
 const GAME = 'ci-paper';
 const GAME_CONTAINER = `game-${GAME}`;
 const GAME_DIR = `/opt/homelab/games/${GAME}`;
@@ -149,7 +176,7 @@ function dockerFull(
 
 const composeEnv = (): NodeJS.ProcessEnv => ({
   ...process.env,
-  HZ_AGENT_IMAGE: AGENT_IMAGE,
+  HZ_AGENT_IMAGE: agentRef,
   HZ_AGENT_ENV_FILE: envFile,
 });
 const compose = (args: string[]) =>
@@ -864,6 +891,205 @@ async function gameChecks(serverId: string): Promise<void> {
   }
 }
 
+/** Starts registry:2 and pushes core + agent under the tags they will run with. */
+async function prepareRegistry(): Promise<void> {
+  dockerFull(['rm', '-f', REGISTRY_NAME]);
+  docker([
+    'run',
+    '-d',
+    '--name',
+    REGISTRY_NAME,
+    '--network',
+    'host',
+    '-e',
+    `REGISTRY_HTTP_ADDR=${REGISTRY}`,
+    'registry:2',
+  ]);
+  registryStarted = true;
+  await waitFor('local registry', 30, async () => {
+    const r = await fetch(`http://${REGISTRY}/v2/`);
+    return r.ok ? true : null;
+  });
+  for (const [local, tag] of [
+    [CORE_IMAGE, REG_CORE],
+    [AGENT_IMAGE, REG_AGENT],
+  ] as const) {
+    docker(['tag', local, tag]);
+    docker(['push', '-q', tag]);
+  }
+  coreRef = REG_CORE;
+  agentRef = REG_AGENT;
+  log(`registry ${REGISTRY}: core and agent pushed`);
+}
+
+/**
+ * Builds `FROM <base>` (a local image, nothing is pulled) + a new OCI version label (and optionally a failing health
+ * check), tags it as `localTag` and pushes it under `pushAs`. Returns the image id.
+ */
+function deriveAndPush(
+  base: string,
+  localTag: string,
+  version: string,
+  pushAs: string,
+  broken = false,
+): string {
+  const dir = mkdtempSync(path.join(tmp, 'img-'));
+  writeFileSync(
+    path.join(dir, 'Dockerfile'),
+    [
+      `FROM ${base}`,
+      `LABEL org.opencontainers.image.version=${version}`,
+      ...(broken
+        ? [
+            // Healthy never: the updater must roll back.
+            'HEALTHCHECK --interval=5s --timeout=3s --start-period=5s --retries=2 CMD ["node", "-e", "process.exit(1)"]',
+          ]
+        : []),
+      '',
+    ].join('\n'),
+  );
+  docker(['build', '-q', '-t', localTag, dir]);
+  docker(['tag', localTag, pushAs]);
+  docker(['push', '-q', pushAs]);
+  const id = imageId(localTag);
+  log(`pushed ${pushAs} = ${localTag} (${version}, ${id.slice(7, 19)})`);
+  return id;
+}
+
+async function updates() {
+  return updatesResponseSchema.parse(await json(await api('GET', '/api/updates'), 'updates'));
+}
+
+/** Starts an update run and waits until it is no longer running (the core may restart meanwhile). */
+async function runUpdate(
+  serverId: string,
+  target: 'agent' | 'core',
+  timeoutS: number,
+): Promise<UpdateRun> {
+  const { runId } = updateNowResponseSchema.parse(
+    await json(
+      await api('POST', `/api/servers/${serverId}/update`, { target }),
+      `update ${target}`,
+    ),
+  );
+  log(`update ${target}: run ${runId} started`);
+  const run = await waitFor(
+    `update run ${target}`,
+    timeoutS,
+    async () => {
+      // Errors (core restarting) are retried by waitFor.
+      const r = (await updates()).runs.find((x) => x.id === runId);
+      if (!r) throw new Fatal(`run ${runId} not listed`);
+      return r.status === 'running' ? null : r;
+    },
+    3000,
+  );
+  log(
+    `update ${target}: ${run.status}${run.message ? ` (${run.message})` : ''} ${run.from ?? ''} -> ${run.to ?? ''}`,
+  );
+  return run;
+}
+
+function containerByRole(role: string): { id: string; image: string; running: boolean }[] {
+  const ids = docker(['ps', '-a', '-q', '--no-trunc', '--filter', `label=hz.role=${role}`])
+    .split('\n')
+    .map((x) => x.trim())
+    .filter(Boolean);
+  return ids.map((id) => {
+    const [image = '', running = ''] = docker([
+      'inspect',
+      '--format',
+      '{{.Image}} {{.State.Running}}',
+      id,
+    ])
+      .trim()
+      .split(' ');
+    return { id, image, running: running === 'true' };
+  });
+}
+
+async function waitConnected(what: string, timeoutS = 120): Promise<ServerSummary> {
+  return waitFor(what, timeoutS, async () => {
+    const s = await findServer();
+    return s?.connected ? s : null;
+  });
+}
+
+async function updateChecks(serverId: string): Promise<void> {
+  // The core must know it runs on this server (inventory: container with hz.role=core).
+  await waitFor('updates: hostsCore', 120, async () => {
+    const st = (await updates()).servers.find((x) => x.serverId === serverId);
+    return st?.hostsCore ? st : null;
+  });
+
+  // a. core
+  const coreBefore = containerByRole('core');
+  if (coreBefore.length !== 1)
+    throw new Error(`expected one core container, got ${coreBefore.length}`);
+  const coreV2 = deriveAndPush(CORE_IMAGE, DERIVED[0], 'smoke-core-2', REG_CORE);
+  const coreRun = await runUpdate(serverId, 'core', 6 * 60);
+  if (coreRun.status !== 'updated')
+    throw new Error(`core update: ${coreRun.status} ${coreRun.message ?? ''}`);
+  const coreAfter = containerByRole('core');
+  const core = coreAfter[0];
+  if (coreAfter.length !== 1 || !core)
+    throw new Error(`after the core update: ${coreAfter.length} core containers`);
+  if (core.id === coreBefore[0]?.id) throw new Error('core container was not replaced');
+  if (core.image !== coreV2) throw new Error(`core runs ${core.image}, expected ${coreV2}`);
+  if (!core.running) throw new Error('new core container is not running');
+  const health = await fetch(`${BASE}/api/health`);
+  if (!health.ok) throw new Error(`/api/health after the core update: HTTP ${health.status}`);
+  await waitConnected('agent reconnected after the core update');
+  log('core update: replaced, healthy, agent connected');
+
+  // b. agent
+  const agentV2 = deriveAndPush(AGENT_IMAGE, DERIVED[1], 'smoke-agent-2', REG_AGENT);
+  const agentRun = await runUpdate(serverId, 'agent', 8 * 60);
+  if (agentRun.status !== 'updated')
+    throw new Error(`agent update: ${agentRun.status} ${agentRun.message ?? ''}`);
+  const agentImage = docker(['inspect', '--format', '{{.Image}}', AGENT_CONTAINER]).trim();
+  if (agentImage !== agentV2) throw new Error(`agent runs ${agentImage}, expected ${agentV2}`);
+  await waitConnected('new agent connected');
+  log('agent update: new image runs and is connected');
+
+  // c. broken agent image -> rolled back
+  deriveAndPush(DERIVED[1], DERIVED[2], 'smoke-agent-broken', REG_AGENT, true);
+  const brokenRun = await runUpdate(serverId, 'agent', 8 * 60);
+  if (brokenRun.status !== 'rolled_back') {
+    throw new Error(
+      `broken agent image: ${brokenRun.status} ${brokenRun.message ?? ''} (expected rolled_back)`,
+    );
+  }
+  const back = containerByRole('agent').filter((c) => c.running);
+  if (back.length !== 1 || back[0]?.image !== agentV2) {
+    throw new Error(
+      `after the rollback: ${JSON.stringify(back)} (expected one agent on ${agentV2})`,
+    );
+  }
+  await waitConnected('agent connected again after the rollback');
+  const warn = await waitFor('warn alert for the rollback', 30, async () => {
+    const alerts = alertListResponseSchema.parse(
+      await json(
+        await api('GET', `/api/alerts?state=open&serverId=${encodeURIComponent(serverId)}`),
+        'alerts',
+      ),
+    );
+    return (
+      alerts.alerts.find((a) => a.key === `update:${serverId}:agent` && a.level === 'warn') ?? null
+    );
+  });
+  log(`rollback: old agent runs again, alert "${warn.title}"`);
+
+  // d. the agent removes the exited helper (30 s after sending the result).
+  await waitFor('updater helper removed', 120, async () =>
+    containerByRole('updater').length === 0 ? true : null,
+  );
+  // Later steps (and a re-run) use the good image under the tag again.
+  docker(['tag', DERIVED[1], REG_AGENT]);
+  docker(['push', '-q', REG_AGENT]);
+  log('M17 auto-update checks done');
+}
+
 async function findServer(): Promise<ServerSummary | null> {
   const list = serverListResponseSchema.parse(
     await json(await api('GET', '/api/servers'), 'servers'),
@@ -929,11 +1155,24 @@ function cleanup(): void {
   } catch {
     // not started
   }
+  // M17 leftovers: updater helpers, renamed old containers, the core volume, registry, images.
+  for (const filter of ['label=hz.role=updater', 'name=-hz-old-']) {
+    const r = dockerFull(['ps', '-a', '-q', '--filter', filter]);
+    for (const id of r.stdout
+      .split('\n')
+      .map((x) => x.trim())
+      .filter(Boolean)) {
+      dockerFull(['rm', '-f', id]);
+    }
+  }
   try {
     docker(['rm', '-f', '-v', CORE_NAME]);
   } catch {
     // not started
   }
+  dockerFull(['volume', 'rm', CORE_VOLUME]);
+  if (registryStarted) dockerFull(['rm', '-f', '-v', REGISTRY_NAME]);
+  dockerFull(['rmi', ...DERIVED, REG_CORE, REG_AGENT]);
   rmSync(tmp, { recursive: true, force: true });
 }
 
@@ -947,6 +1186,11 @@ function dumpLogs(): void {
     ['ps', '-a', '--format', '{{.Names}}\t{{.Image}}\t{{.Status}}'],
     ['logs', '--tail', '200', CORE_NAME],
     ['compose', '-p', AGENT_PROJECT, '-f', composeFile, 'logs', '--tail', '200'],
+    ...dockerFull(['ps', '-a', '-q', '--filter', 'label=hz.role=updater'])
+      .stdout.split('\n')
+      .map((x) => x.trim())
+      .filter(Boolean)
+      .map((id) => ['logs', '--tail', '200', id]),
     ...(gameCreated
       ? [
           ['logs', '--tail', '200', GAME_CONTAINER],
@@ -965,11 +1209,18 @@ function dumpLogs(): void {
 
 async function main(): Promise<void> {
   log(`core ${CORE_IMAGE}, agent ${AGENT_IMAGE}`);
+  if (SKIP_UPDATE) log('update checks skipped (HZ_SMOKE_SKIP_UPDATE=1)');
+  else await prepareRegistry();
   docker([
     'run',
     '-d',
     '--name',
     CORE_NAME,
+    // M17: the agent finds and updates the core by this label; the DB survives in the volume.
+    '--label',
+    'hz.role=core',
+    '-v',
+    `${CORE_VOLUME}:/data`,
     '--network',
     'host',
     '-e',
@@ -982,7 +1233,7 @@ async function main(): Promise<void> {
     'HZ_HOST=127.0.0.1',
     '-e',
     `HZ_PORT=${PORT}`,
-    CORE_IMAGE,
+    coreRef,
   ]);
 
   await waitFor('core /api/health', 60, async () => {
@@ -1046,6 +1297,7 @@ async function main(): Promise<void> {
   await containerChecks(connected.id);
   if (SKIP_GAME) log('game checks skipped (HZ_SMOKE_SKIP_GAME=1)');
   else await gameChecks(connected.id);
+  if (!SKIP_UPDATE) await updateChecks(connected.id);
 
   compose(['stop', '--timeout', '5']);
   const stoppedAt = Date.now();

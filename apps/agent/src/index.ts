@@ -18,6 +18,12 @@ import { normalizeArch, type HostContext } from './host.js';
 import { createLogger } from './log.js';
 import { PtyManager } from './actions/pty.js';
 import { StreamManager } from './streams.js';
+import { markConnected, markDisconnected } from './health.js';
+import { UpdateService } from './update/service.js';
+import type { ReplaceDocker } from './update/replace.js';
+
+/** While connected, saved update results are looked for this often (the helper writes them late). */
+const RESULT_FLUSH_MS = 15_000;
 
 async function agentVersion(): Promise<string> {
   try {
@@ -43,6 +49,12 @@ async function main(): Promise<void> {
   }
   const log = createLogger(config.logLevel);
   log.addSecret(config.token);
+  if (config.ignoredServices.length > 0) {
+    log.warn('HZ_AGENT_SERVICES: entries ignored (invalid or on the deny list)', {
+      entries: config.ignoredServices,
+    });
+  }
+  await markDisconnected();
 
   const docker = await openDocker(config.dockerSocket);
   const host: HostContext = {
@@ -85,6 +97,27 @@ async function main(): Promise<void> {
       }
     },
   });
+  // M17 image updates (core and agent); results go out as events once connected.
+  const updates = docker
+    ? new UpdateService({
+        docker: docker as unknown as ReplaceDocker,
+        dataDir: config.dataDir,
+        dockerSocket: config.dockerSocket,
+        log,
+        emit: (msg) => conn.send(msg),
+      })
+    : undefined;
+  const flushUpdates = () => {
+    if (!updates || !conn.isReady()) return;
+    void updates
+      .flush()
+      .catch((err: unknown) => log.warn('update results not sent', { error: err }));
+  };
+  // A core swap that died with the previous agent process: finish or undo it now
+  // (the core may be down, so this cannot wait for a connection).
+  await updates
+    ?.recoverAtStart()
+    .catch((err: unknown) => log.error('update recovery failed', { error: err }));
   const dispatcher = new Dispatcher(
     {
       name: config.name,
@@ -106,6 +139,8 @@ async function main(): Promise<void> {
       dataDir: config.dataDir,
       ...(pty ? { pty } : {}),
       wake,
+      services: config.services,
+      ...(updates ? { updates } : {}),
     },
     (event) => conn.send(event),
   );
@@ -129,8 +164,19 @@ async function main(): Promise<void> {
     onTransfer: (msg) => {
       if (!streams.deliver(msg)) log.debug('transfer frame for unknown stream dropped');
     },
-    onDisconnect: () => streams.cancelAll(),
+    onDisconnect: () => {
+      streams.cancelAll();
+      void markDisconnected();
+    },
+    onReady: () => {
+      void markConnected();
+      void updates
+        ?.onReady()
+        .catch((err: unknown) => log.warn('update results not sent', { error: err }));
+    },
   });
+  const flushTimer = setInterval(flushUpdates, RESULT_FLUSH_MS);
+  flushTimer.unref();
 
   // Docker events: report state changes at once and push a fresh inventory
   // (debounced, so a burst of events costs one inventory).
@@ -174,6 +220,8 @@ async function main(): Promise<void> {
     streams.cancelAll();
     pty?.closeAll();
     conn.stop();
+    clearInterval(flushTimer);
+    void markDisconnected();
     for (const t of timers) clearTimeout(t);
     // Free the game ports before exiting (bounded: exit closes them anyway).
     const exit = setTimeout(() => process.exit(0), 1000);

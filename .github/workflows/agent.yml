@@ -41,10 +41,11 @@ jobs:
           .
 
   smoke:
-    name: docker smoke (core + agent + game)
+    name: docker smoke (core + agent + game + auto-update)
     runs-on: ubuntu-latest
-    # Image builds ~10 min, Paper download + world generation up to 9 min, rest ~5 min.
-    timeout-minutes: 50
+    # Image builds ~10 min, Paper download + world generation up to 9 min, M17 updates
+    # (core, agent, rollback) ~6 min, rest ~5 min.
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
@@ -63,7 +64,8 @@ jobs:
         run: |
           # The game image comes from the template, so the smoke always uses the pinned tag.
           game_image="$(node -p "require('./templates/games/minecraft-java/template.json').image")"
-          for img in busybox:1.36 busybox:1.37 "$game_image"; do
+          # registry:2: local registry for the M17 update checks.
+          for img in busybox:1.36 busybox:1.37 registry:2 "$game_image"; do
             ok=0
             for i in 1 2 3 4; do
               if docker pull -q "$img"; then ok=1; break; fi

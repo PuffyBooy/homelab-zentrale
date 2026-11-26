@@ -33,6 +33,22 @@
 # - read_only + tmpfs /tmp, no-new-privileges: the image itself stays immutable
 #                               (the docker CLI keeps its config in /tmp/.docker).
 #
+# Services (M16, HZ_AGENT_SERVICES in agent.env, e.g. HZ_AGENT_SERVICES=nginx.service,smbd):
+# the only systemd units the UI may start/stop/restart (systemctl via the same nsenter as
+# reboot). Empty = list only. tailscaled, docker, containerd, ssh/sshd, dbus, systemd-*,
+# networking, NetworkManager and getty are refused whatever this list says.
+#
+# Auto-update (M17): the agent updates the core container on this host (hz.role=core) itself.
+# To replace *itself* it starts a short-lived helper container from its current image
+# (label hz.role=updater, `node dist/updater.js`). The helper needs the Docker socket because
+# renaming/creating/stopping/starting/removing the agent container is only possible through
+# the Docker API (root-equivalent, like the agent's own socket). It gets nothing else: only
+# the socket and the agent-data volume (for the result file), no network, read-only root,
+# cap_drop ALL, no-new-privileges; it journals every step to /data and is restarted
+# on failure (max 3) to finish or undo the swap. The image HEALTHCHECK is healthy only while
+# the agent is connected to the core (/tmp/hz-connected on the tmpfs below); the helper
+# rolls back unless the new agent becomes healthy within 3 min.
+#
 # Web console (HZ_AGENT_ALLOW_TERMINAL, default 0 = every pty.* is refused): set
 # HZ_AGENT_ALLOW_TERMINAL=1 in agent.env (install-agent.sh --allow-terminal), not here, so the
 # env file stays the single switch. The console is a login shell on the host started with the
@@ -66,6 +82,7 @@ services:
     network_mode: host
     read_only: true
     tmpfs:
+      # Also holds /tmp/hz-connected, the M17 health marker (healthy = connected to the core).
       - /tmp
     cap_drop:
       - ALL
