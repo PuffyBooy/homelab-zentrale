@@ -51,6 +51,7 @@ export async function makeApp(
     /** M20/M21 module test hooks (e.g. the fake DNS providers of domains-helpers.ts). */
     features?: AppDeps['features'];
     discordFetch?: AppDeps['discordFetch'];
+    cloudFetch?: AppDeps['cloudFetch'];
     haOptions?: AppDeps['haOptions'];
     consoleOptions?: AppDeps['consoleOptions'];
     /**
@@ -94,6 +95,7 @@ export async function makeApp(
     gameFetch: opts.gameFetch ?? (() => Promise.reject(new Error('no network in tests'))),
     ...(opts.features ? { features: opts.features } : {}),
     discordFetch: opts.discordFetch ?? (() => Promise.reject(new Error('no network in tests'))),
+    cloudFetch: opts.cloudFetch ?? (() => Promise.reject(new Error('no network in tests'))),
     pushTransport: opts.pushTransport ?? {
       send: () => Promise.reject(new Error('no network in tests')),
     },

@@ -433,6 +433,13 @@ export function pageMeta(pathname: string, data: PageData = {}): PageMeta {
       serverSwitch: false,
     };
   }
+  if (pathname === '/cloud') {
+    return {
+      title: plain('Cloud'),
+      sub: 'Cloud · Azure · Server laufen nur, solange gespielt wird',
+      serverSwitch: false,
+    };
+  }
   if (pathname === '/security') {
     return {
       title: plain('Sicherheit'),

@@ -57,6 +57,7 @@ describe('optional modules', () => {
       speedtest: false,
       domains: false,
       apps: false,
+      cloud: false,
     });
     const state = await t.app.inject({
       method: 'GET',
@@ -165,6 +166,7 @@ describe('optional modules', () => {
       speedtest: false,
       domains: false,
       apps: false,
+      cloud: false,
     });
     // Off and games on: no step-up.
     expect((await put(t, cookie, { games: false })).statusCode).toBe(200);
@@ -187,6 +189,7 @@ describe('optional modules', () => {
       speedtest: false,
       domains: false,
       apps: false,
+      cloud: false,
     });
     // Invalid input.
     for (const body of [{}, { shell: true }, { github: 'yes' }, []]) {

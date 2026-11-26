@@ -103,6 +103,9 @@ import { setupOps, type OpsServices } from './ops/index.js';
 import { setupDiscordBot, type DiscordBotHandle } from './discord/index.js';
 import type { FetchLike as DiscordFetch } from './discord/rest.js';
 import { setupVoice, type VoiceHandle } from './voice/index.js';
+import { setupCloud } from './cloud/index.js';
+import type { AzureFetch } from './cloud/azure.js';
+import type { CloudService } from './cloud/service.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 
@@ -148,6 +151,8 @@ export interface AppDeps {
   discordFetch?: DiscordFetch;
   /** M20/M21 modules: fake HTTP, short timers, template dirs (tests). */
   features?: FeatureDeps;
+  /** M22: transport to Azure (tests: a fake Azure). */
+  cloudFetch?: AzureFetch;
 }
 
 /** Core services, decorated on the app as `hzCore` (routes, tests). */
@@ -186,6 +191,8 @@ export interface CoreServices {
   discordBot: DiscordBotHandle;
   /** Echo Show / Alexa through Home Assistant helpers (voice/index.ts). */
   voice: VoiceHandle;
+  /** M22 cloud servers (cloud/index.ts). */
+  cloud: CloudService;
   integrations: Integrations;
   notify: NotifyService;
   wol: WolService;
@@ -731,6 +738,24 @@ export async function buildApp(config: Config, deps: AppDeps = {}): Promise<Fast
     games,
   });
 
+  // ---- M22: cloud servers (Azure) -------------------------------------------------
+  const cloud = await setupCloud(app, {
+    db: db.db,
+    box,
+    now,
+    log: app.log.child({ mod: 'cloud' }),
+    config,
+    alerts,
+    hub,
+    tokens,
+    onboarding,
+    servers,
+    games,
+    modules,
+    scheduler,
+    ...(deps.cloudFetch ? { fetch: deps.cloudFetch } : {}),
+  });
+
   // ---- M14: integrations (Proxmox, DNS filter, FRITZ!Box, Uptime Kuma) ------------
   const integrations = new Integrations({
     db: db.db,
@@ -814,6 +839,7 @@ export async function buildApp(config: Config, deps: AppDeps = {}): Promise<Fast
     ops,
     discordBot,
     voice,
+    cloud,
     integrations,
     notify,
     wol,
@@ -859,8 +885,8 @@ export async function buildApp(config: Config, deps: AppDeps = {}): Promise<Fast
     else if (m === 'storage') storage.setEnabled(on);
     else if (m === 'discordbot') discordBot.setEnabled(on);
     else if (m === 'voice') voice.setEnabled(on);
-    // M14 integrations; M20/M21 modules (features.ts) switch themselves.
-    else integrations.setModule(m, on);
+    // M14 integrations; M20/M21 modules (features.ts) and cloud (cloud/index.ts) switch themselves.
+    else if (m !== 'cloud') integrations.setModule(m, on);
     app.log.info({ module: m, on }, 'module switched');
   });
   checks.start();
@@ -973,6 +999,7 @@ export async function buildApp(config: Config, deps: AppDeps = {}): Promise<Fast
     tokens,
     metrics,
     alerts,
+    ownedByCloud: (id) => cloud.ownsServer(id),
   });
   await app.register(onboardingRoutes, { prefix: '/api', db: db.db, now, onboarding });
   await app.register(installScriptRoutes, { onboarding });

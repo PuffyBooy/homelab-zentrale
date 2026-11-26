@@ -46,7 +46,8 @@ export function ModulesTile(): ReactElement {
         Ausgeschaltete Module verschwinden aus Navigation und Übersicht, ihre Abfragen und Jobs
         ruhen. Daten und Einstellungen bleiben erhalten. Module mit Zugangsdaten (GitHub, Home
         Assistant, die Anbindungen, Domains), Module, die von außen steuern (Discord-Bot,
-        Sprachsteuerung), und Geplante Aufgaben einschalten braucht einen Code.
+        Sprachsteuerung) oder Geld kosten (Cloud), und Geplante Aufgaben einschalten braucht einen
+        Code.
       </p>
       {modules.isError ? <FormError title={errorText(modules.error)} /> : null}
       {m ? (

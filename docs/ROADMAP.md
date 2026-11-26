@@ -174,7 +174,7 @@ Wunsch des Admins vom 26.11.2026. Vier neue Module (alle standardmäßig aus, Ei
 ## M20: Automatik und Netzwerk (Aufgaben, Selbstheilung, Speedtest, Domains)
 **Ziel:** Wiederkehrende Arbeit und kleine Ausfälle erledigt die Zentrale selbst; Internet-Geschwindigkeit, eigene Domains und Zertifikate sind an einem Ort. Vier optionale Module, alle Standard aus (`tasks` und `domains` mit Step-up beim Einschalten). M14 bis M19 gehören parallelen Threads (Anbindungen, Game-Relay, Server-Detail, Auto-Update, Ops-Zusatzmodule).
 
-- **WP Schema** (`packages/shared`): `agent-automation.ts` (Agent-Aktionen `task.exec`, `speedtest.run`, `cert.write`, `cert.remove`, `app.remove`, per `...automationRpcParams` in der Allowlist, Fähigkeit `capabilities.tasks`), `api/tasks.ts`, `api/selfheal.ts`, `api/speedtest.ts`, `api/domains.ts`, Module in `api/modules.ts`, Migration 17.
+- **WP Schema** (`packages/shared`): `agent-automation.ts` (Agent-Aktionen `task.exec`, `speedtest.run`, `cert.write`, `cert.remove`, `app.remove`, per `...automationRpcParams` in der Allowlist, Fähigkeit `capabilities.tasks`), `api/tasks.ts`, `api/selfheal.ts`, `api/speedtest.ts`, `api/domains.ts`, Module in `api/modules.ts`, Migration 18.
 - **WP Core ∥** (`apps/core/src/tasks|selfheal|speedtest|domains`, verdrahtet über `features.ts`):
   - **Geplante Aufgaben pro Server:** Container neu starten/starten/stoppen, Stack aktualisieren (pull + up), Docker aufräumen, wöchentlich zu Uhrzeiten oder alle N Minuten (ab 5). `Befehl ausführen` nur, wenn der Agent mit `HZ_AGENT_ALLOW_TASKS=1` läuft, Anlegen/Ändern/Starten mit Step-up, Befehl verschlüsselt gespeichert, nie im Log. Letzte 50 Läufe mit Ausgabe, Meldung bei Fehler.
   - **Selbstheilung:** `unhealthy` länger als die Schonfrist, Absturz (wenn gewählt) oder verknüpfter Website-Check DOWN → Neustart. Höchstens 3 Neustarts in 30 Min (einstellbar), dann „aufgegeben“ mit CRIT-Meldung, bis der Container 10 Min gesund ist oder der Admin zurücksetzt. Nie `hz.role`, nie vom Admin oder von M10 gestoppte Container, abgestürzte `wichtig`-Container bleiben bei M10.
@@ -196,6 +196,17 @@ Wunsch des Admins vom 26.11.2026. Vier neue Module (alle standardmäßig aus, Ei
 - **WP Web ∥** (`apps/web`): Seite „Apps“ (Katalog nach Kategorien, Installieren-Dialog mit Server, Bind-Adresse, Parametern und Vorschau, installierte Apps mit Status und „Öffnen“), Editor für eigene Vorlagen.
 
 **Abnahme:** Vaultwarden wird auf einem Sim-Server installiert, läuft, wird aktualisiert und entfernt; eine eigene Vorlage mit `privileged: true` wird abgelehnt; ein belegter Port verhindert die Installation. Sicherheitstests: jede verbotene Compose-Option, Pfad-Ausbruch (`../`, absolute Pfade, Symlinks), Parameterwerte mit `$`/Zeilenumbruch, Passwörter nur mit Step-up lesbar, Entfernen nur mit Step-up, nie Container mit `hz.role`.
+
+---
+
+## M22: Cloud-Server (zuerst Azure)
+Wunsch des Admins vom 26.11.2026: Azure-Konto einmal verknüpfen, dann bestellt die Zentrale beim Anlegen eines Gameservers selbst einen passenden Server und zahlt nur, wenn wirklich gespielt wird. Modul `cloud` (Standard aus, Einschalten mit Step-up), generisch über `CLOUD_PROVIDERS`, damit später weitere Anbieter dazukommen. Schemas: `packages/shared/src/api/cloud.ts`.
+
+- **WP Schema** (`packages/shared`): Azure-Zugang (Tenant, App, Secret, Abo, Ressourcengruppe, Region, Tailscale-Auth-Key, Budget), feste Größen-, Disk- und Regionsliste mit Preis-Schätzung, Größen-Empfehlung pro Spiel-RAM, Maschinen mit Zuständen, Bestellung mit bestätigtem Preis und optionalem Gameserver.
+- **WP Core ∥** (`apps/core/src/cloud`): Azure-Client nur gegen feste Hosts (Token per Client Credentials, ARM-REST für VNet, NSG, öffentliche IP, NIC, VM; Retail Prices API für echte Preise), cloud-init installiert Docker, Tailscale und den Agent mit Einzeiler-Code (M11), danach wird der Gameserver darauf angelegt und die NSG öffnet genau seine Ports. Schlafmodus: liegen alle Spiele einer Maschine die eingestellte Zeit still, wird die VM deallocated; ein Start eines Spiels (Admin, Benutzerlink, Discord, Sprache) startet zuerst die VM. Laufzeit pro Monat, Kosten-Schätzung, Budget mit Warnung bei 80 % und Sperre automatischer Starts ab 100 %. Löschen mit Step-up und Namensbestätigung räumt alle Azure-Ressourcen der Maschine weg.
+- **WP Web ∥** (`apps/web`): Seite „Cloud“ (Zugang, Budget, Maschinen mit Zustand, Kosten, Starten/Schlafen/Löschen), im Gameserver-Formular das Ziel „Neuer Azure-Server“ mit empfohlener Größe, Kosten pro Stunde/Monat und Bestätigung, Schalter unter Module.
+
+**Abnahme:** Gegen eine Azure-Attrappe (Test und e2e) wird eine Maschine mit Minecraft bestellt (empfohlen B2ms, nicht die größte), der simulierte Agent meldet sich, der Gameserver entsteht darauf; nach der Leerlaufzeit wird die VM deallocated, ein Start über den Benutzerlink startet zuerst die VM; das Budget warnt und sperrt automatische Starts; Löschen verlangt Step-up und Namen. Sicherheitstests: Modul aus = 404, nur feste Azure-Hosts (Override nur mit `HZ_DEMO=1` auf 127.0.0.1), keine Pfadteile aus Eingaben ohne Prüfung, Secrets nie in Antwort, Log oder Fehler, Secret verworfen bei Wechsel von Tenant/App/Abo, keine Bestellung ohne passenden bestätigten Preis, NSG nur Spielports (kein SSH, kein RCON), VM ohne Passwort.
 
 ---
 

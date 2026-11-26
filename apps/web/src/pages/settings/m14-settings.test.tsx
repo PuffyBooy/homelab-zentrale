@@ -52,6 +52,7 @@ describe('Einstellungen → Anbindungen', () => {
         speedtest: false,
         domains: false,
         apps: false,
+        cloud: false,
       }),
     ).toEqual(['proxmox', 'fritzbox']);
   });

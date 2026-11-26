@@ -41,6 +41,7 @@ describe('navigation', () => {
       'Konsole',
       'Log-Suche',
       'Sicherheit',
+      'Cloud',
     ]);
   });
 
@@ -91,6 +92,7 @@ describe('shortcuts', () => {
       '`',
       'l',
       's',
+      'c',
     ]);
     expect(shortcutLabel({ id: 'x', label: 'X', icon: 'bell' }, 9)).toBe('');
     // Same targets with the keyed items as NavRail shows them.
@@ -100,11 +102,13 @@ describe('shortcuts', () => {
     expect(shortcutTarget('\u00a0', keyed)).toBeUndefined();
   });
 
-  it('opens Log-Suche with l and Sicherheit with s', () => {
+  it('opens Log-Suche with l, Sicherheit with s and Cloud with c', () => {
     expect(shortcutTarget('l')).toBe('/logs');
     expect(shortcutTarget('s')).toBe('/security');
+    expect(shortcutTarget('c')).toBe('/cloud');
     expect(activeNavId('/logs')).toBe('logs');
     expect(activeNavId('/security')).toBe('security');
+    expect(activeNavId('/cloud')).toBe('cloud');
   });
 
   it('ignores plain keys while typing', () => {
@@ -144,6 +148,7 @@ describe('shortcuts', () => {
       speedtest: false,
       domains: false,
       apps: false,
+      cloud: false,
     });
     expect(items.map((i) => i.id)).toEqual([
       'overview',
@@ -176,6 +181,7 @@ describe('shortcuts', () => {
       speedtest: false,
       domains: false,
       apps: false,
+      cloud: false,
     });
     expect(shortcutTarget('9', items)).toBe('/console');
   });

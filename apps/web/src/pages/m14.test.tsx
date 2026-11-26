@@ -138,6 +138,7 @@ describe('VMs page', () => {
         speedtest: false,
         domains: false,
         apps: false,
+        cloud: false,
       },
     });
     expect(off.title.rest).toBe('Proxmox ist ausgeschaltet.');

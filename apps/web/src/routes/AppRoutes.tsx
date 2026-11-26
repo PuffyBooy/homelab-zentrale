@@ -82,6 +82,11 @@ const SecurityPage = page(
 /** Sicherheit shows while either of its modules is on. */
 const SECURITY_MODULES: readonly ModuleId[] = ['vulnscan', 'fail2ban'];
 
+const CloudPage = page(
+  () => import('../pages/cloud/CloudPage.js'),
+  (m) => m.CloudPage,
+);
+
 const VmsPage = page(
   () => import('../pages/vms/VmsPage.js'),
   (m) => m.VmsPage,
@@ -145,6 +150,7 @@ const BUILT = new Set([
   '/automation',
   '/logs',
   '/security',
+  '/cloud',
 ]);
 
 export function AppRoutes(): ReactElement {
@@ -222,6 +228,7 @@ export function AppRoutes(): ReactElement {
         <Route path="automation" element={<G m={AUTOMATION} c={AutomationPage} />} />
         <Route path="logs" element={<G m="logsearch" c={LogSearchPage} />} />
         <Route path="security" element={<G m={SECURITY_MODULES} c={SecurityPage} />} />
+        <Route path="cloud" element={<G m="cloud" c={CloudPage} />} />
         {navItems
           .filter((it) => it.href && !BUILT.has(it.href))
           .map((it) => (

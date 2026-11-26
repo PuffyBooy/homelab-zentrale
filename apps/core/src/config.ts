@@ -97,6 +97,11 @@ export const configSchema = z.object({
   // until the admin account exists; after the first setup only Einstellungen -> Module
   // decides.
   HZ_INITIAL_MODULES: optionalEnv(initialModules),
+  // M22: Azure endpoints for tests and e2e (a fake Azure). Used only with HZ_DEMO=1 and
+  // only when the value is exactly http://127.0.0.1:<port> (cloud/azure.ts), else ignored.
+  HZ_AZURE_LOGIN_URL: optionalEnv(z.string().max(100)),
+  HZ_AZURE_MANAGEMENT_URL: optionalEnv(z.string().max(100)),
+  HZ_AZURE_PRICES_URL: optionalEnv(z.string().max(100)),
   NODE_ENV: z.enum(['development', 'production', 'test']).default('production'),
 });
 
@@ -123,6 +128,8 @@ export interface Config {
   timeZone: string;
   /** Wizard module choice, applied only before the first setup. */
   initialModules: Partial<Record<ModuleId, boolean>> | undefined;
+  /** Raw Azure endpoint overrides; cloud/azure.ts decides whether they apply. */
+  azureOverrides: { login?: string; management?: string; prices?: string };
 }
 
 export function isLoopback(host: string): boolean {
@@ -174,5 +181,10 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     vapidSubject: c.HZ_VAPID_SUBJECT,
     timeZone: c.HZ_TIMEZONE ?? DEFAULT_TIME_ZONE,
     initialModules: c.HZ_INITIAL_MODULES,
+    azureOverrides: {
+      ...(c.HZ_AZURE_LOGIN_URL !== undefined ? { login: c.HZ_AZURE_LOGIN_URL } : {}),
+      ...(c.HZ_AZURE_MANAGEMENT_URL !== undefined ? { management: c.HZ_AZURE_MANAGEMENT_URL } : {}),
+      ...(c.HZ_AZURE_PRICES_URL !== undefined ? { prices: c.HZ_AZURE_PRICES_URL } : {}),
+    },
   };
 }

@@ -56,6 +56,24 @@ export class ModuleService {
     return changed;
   }
 
+  private readonly offGuards = new Map<ModuleId, () => string | null>();
+
+  /** A module may refuse being switched off (fixed German reason, or null). */
+  setOffGuard(id: ModuleId, fn: () => string | null): void {
+    this.offGuards.set(id, fn);
+  }
+
+  /** Reason why this patch must not switch a module off, or null. */
+  offRefusal(patch: { [K in ModuleId]?: boolean | undefined }): string | null {
+    const current = this.get();
+    for (const m of MODULES) {
+      if (patch[m] !== false || !current[m]) continue;
+      const why = this.offGuards.get(m)?.() ?? null;
+      if (why !== null) return why;
+    }
+    return null;
+  }
+
   onChange(fn: (id: ModuleId, on: boolean) => void): () => void {
     this.listeners.add(fn);
     return () => this.listeners.delete(fn);
@@ -91,6 +109,7 @@ const MODULE_PREFIXES: Record<ModuleId, readonly string[]> = {
   speedtest: ['/api/speedtest'],
   domains: ['/api/domains'],
   apps: ['/api/apps'],
+  cloud: ['/api/cloud'],
 };
 
 /** Module routes below another prefix (decoded path or route pattern). */
