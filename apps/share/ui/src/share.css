@@ -260,3 +260,13 @@ body {
     height: 220px;
   }
 }
+
+/* M12: own whitelist requests */
+.sh-requests {
+  display: grid;
+  gap: var(--space-1);
+  margin-top: var(--space-3);
+}
+.sh-requests:empty {
+  display: none;
+}

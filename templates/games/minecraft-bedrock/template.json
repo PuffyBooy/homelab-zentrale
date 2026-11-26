@@ -7,7 +7,10 @@
   "ports": [{ "name": "game", "container": 19132, "protocol": "udp", "default": 19132, "count": 1 }],
   "query": { "method": "minecraft-bedrock", "port": "game" },
   "rcon": { "supported": false },
+  "wake": "minecraft-bedrock",
+  "arch": ["amd64", "arm64"],
   "dataDir": "./data",
+  "worldPaths": ["worlds"],
   "fields": [
     {
       "key": "VERSION",

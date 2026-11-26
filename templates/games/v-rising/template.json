@@ -1,0 +1,59 @@
+{
+  "$schema": "../template.schema.json",
+  "id": "v-rising",
+  "name": "V Rising",
+  "image": "trueosiris/vrising:2026-04-23-1036",
+  "ram": {
+    "min": "4G",
+    "recommended": "8G"
+  },
+  "ports": [
+    {
+      "name": "game",
+      "container": 9876,
+      "protocol": "udp",
+      "default": 9876,
+      "count": 2
+    }
+  ],
+  "query": {
+    "method": "gamedig",
+    "port": "game",
+    "type": "vrising"
+  },
+  "rcon": {
+    "supported": false
+  },
+  "wake": "raw",
+  "arch": [
+    "amd64"
+  ],
+  "dataDir": "./data",
+  "fields": [
+    {
+      "key": "SERVERNAME",
+      "label": "Servername",
+      "type": "text",
+      "default": "Homelab",
+      "pattern": "[A-Za-z0-9 ._-]{1,40}"
+    },
+    {
+      "key": "WORLDNAME",
+      "label": "Weltname",
+      "type": "text",
+      "default": "world1",
+      "pattern": "[A-Za-z0-9_-]{1,40}"
+    },
+    {
+      "key": "MEMORY",
+      "label": "RAM",
+      "type": "select",
+      "options": [
+        "4G",
+        "8G",
+        "12G"
+      ],
+      "default": "8G"
+    }
+  ]
+}

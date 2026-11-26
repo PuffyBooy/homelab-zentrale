@@ -1,4 +1,4 @@
-import { randomBytes } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { gameResponseSchema, type ContainerInfo, type GameSummary } from '@hz/shared';
 import {
@@ -10,6 +10,7 @@ import {
   type Received,
   type WsClient,
 } from './agent-helpers.js';
+import type { FetchLike } from '../src/checks/rdap.js';
 import { authHeaders, completeSetup, makeApp, type TestApp } from './helpers.js';
 
 /** Fake secret generated at runtime (no secret-looking literals in the repo, gitleaks). */
@@ -47,6 +48,14 @@ export interface AgentBehaviour {
   memBytes: number;
   /** Text appended to every rcon output. */
   rconSuffix: string;
+  /** M12: jars in data/plugins|mods (game.mods.*). */
+  mods: { fileName: string; sizeBytes: number; sha512: string }[];
+  /** M12: game.restore outcome. */
+  restore: 'ok' | 'fail';
+  /** M12: archive bytes game.export sends (world download); null: no answer (M11 tests). */
+  exportData: Buffer | null;
+  /** M12: game.export fails before transfer.begin. */
+  exportFail: boolean;
 }
 
 export interface GameSetup {
@@ -68,6 +77,9 @@ export interface GameSetup {
 }
 
 let dockerSeq = 0x100000000000;
+/** Backup file name like game.backup writes it: <name>-YYYYMMDD-HHMMSS.tar.zst. */
+export const backupName = (name: string, seq: number): string =>
+  `${name}-20261125-12${String(seq).padStart(4, '0')}.tar.zst`;
 const nextDockerId = (): string => (dockerSeq++).toString(16).padStart(12, '0');
 
 /**
@@ -77,11 +89,17 @@ const nextDockerId = (): string => (dockerSeq++).toString(16).padStart(12, '0');
  */
 export async function withGames(
   clients: WsClient[],
-  opts: { captureLogs?: boolean; templatesDir?: string; ramPct?: number } = {},
+  opts: {
+    captureLogs?: boolean;
+    templatesDir?: string;
+    ramPct?: number;
+    gameFetch?: FetchLike;
+  } = {},
 ): Promise<GameSetup> {
   const t = await makeApp({
     env: { HZ_GAME_TEMPLATES_DIR: opts.templatesDir ?? FIXTURE_TEMPLATES },
     liveOptions: { throttleMs: 10, appendThrottleMs: 5 },
+    ...(opts.gameFetch ? { gameFetch: opts.gameFetch } : {}),
     ...(opts.captureLogs ? { captureLogs: true } : {}),
   });
   const admin = await completeSetup(t);
@@ -96,6 +114,10 @@ export async function withGames(
     backup: { kind: 'ok', sizeBytes: 123_456 },
     memBytes: 3 * 1024 ** 3,
     rconSuffix: '',
+    mods: [],
+    restore: 'ok',
+    exportData: null,
+    exportFail: false,
   };
   const pongs = { n: 0 };
   const inventory = () =>
@@ -140,6 +162,7 @@ export async function withGames(
           startedAt: new Date(t.clock.t).toISOString(),
           ports: [],
           memBytes: behaviour.memBytes,
+          game: name,
         });
         e.agent.send(inventory());
         ok({ output: '' });
@@ -196,7 +219,7 @@ export async function withGames(
           progress('backup: 12.5 MiB written\n');
           progress(
             `result ${JSON.stringify({
-              path: `/opt/homelab/backups/${name}/${name}-${String(backupSeq).padStart(3, '0')}.tar.zst`,
+              path: `/opt/homelab/backups/${name}/${backupName(name, backupSeq)}`,
               sizeBytes: b.sizeBytes,
             })}\n`,
           );
@@ -209,6 +232,68 @@ export async function withGames(
             ...(b.error ? { error: b.error } : {}),
           });
         }
+        return;
+      }
+      case 'game.wake.arm':
+        ok({ listening: params.ports });
+        return;
+      case 'game.mods.list':
+        ok({ files: behaviour.mods });
+        return;
+      case 'game.mods.install': {
+        const f = {
+          fileName: String(params.fileName),
+          sizeBytes: Number(params.sizeBytes),
+          sha512: String(params.sha512),
+        };
+        behaviour.mods.push(f);
+        ok(f);
+        return;
+      }
+      case 'game.mods.remove':
+        behaviour.mods = behaviour.mods.filter((m) => m.fileName !== params.fileName);
+        ok(null);
+        return;
+      case 'game.restore': {
+        if (behaviour.restore === 'fail') {
+          e.agent.send({ type: 'stream.end', streamId: id, code: 1, error: 'failed' });
+          return;
+        }
+        ok(null);
+        e.agent.send({
+          type: 'stream.data',
+          streamId: id,
+          channel: 'progress',
+          chunk: `restore: extracting\nresult ${JSON.stringify({ entries: 42 })}\n`,
+        });
+        e.agent.send({ type: 'stream.end', streamId: id, code: 0 });
+        return;
+      }
+      case 'game.export': {
+        if (behaviour.exportData === null) {
+          ok(null);
+          return;
+        }
+        if (behaviour.exportFail) {
+          e.agent.send({ type: 'stream.end', streamId: id, code: 1, error: 'failed' });
+          return;
+        }
+        ok(null);
+        const data = behaviour.exportData;
+        const chunk = 48 * 1024;
+        const chunks = Math.ceil(data.length / chunk);
+        const sha256 = createHash('sha256').update(data).digest('hex');
+        e.agent.send({ type: 'transfer.begin', streamId: id, bytes: data.length, sha256, chunks });
+        for (let i = 0; i < chunks; i += 1) {
+          e.agent.send({
+            type: 'transfer.chunk',
+            streamId: id,
+            seq: i,
+            data: data.subarray(i * chunk, (i + 1) * chunk).toString('base64'),
+          });
+        }
+        e.agent.send({ type: 'transfer.end', streamId: id, bytes: data.length, sha256, chunks });
+        e.agent.send({ type: 'stream.end', streamId: id, code: 0 });
         return;
       }
       default:

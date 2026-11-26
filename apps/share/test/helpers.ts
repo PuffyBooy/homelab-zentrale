@@ -180,7 +180,9 @@ export const okStatus = {
     address: 'mc.example.at:25565',
     players: { online: 1, max: 10, names: ['Steve'] },
     whitelist: true,
+    sleeping: false,
   },
+  whitelistRequests: [],
 };
 
 export function shareHeaders(extra: Record<string, string> = {}): Record<string, string> {

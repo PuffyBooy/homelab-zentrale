@@ -1,0 +1,32 @@
+# Rendered by the core (see templates/games/README.md).
+# - Game port and query port (PORT_GAME, PORT_GAME_END = +1) are the same inside and
+#   outside. Password and player limit live in persistentdata/Settings (edit there).
+# - The world (persistentdata) is in ./data (backed up); the server files live in the
+#   named volume `server` and are removed with the game (compose down --volumes).
+# - The image is amd64 only (Wine).
+services:
+  server:
+    image: trueosiris/vrising:2026-04-23-1036
+    container_name: game-${GAME_NAME}
+    restart: unless-stopped
+    mem_limit: ${MEMORY}
+    stop_grace_period: 60s
+    env_file:
+      - .env
+    environment:
+      SERVERNAME: ${SERVERNAME}
+      WORLDNAME: ${WORLDNAME}
+      GAMEPORT: ${PORT_GAME}
+      QUERYPORT: ${PORT_GAME_END}
+      TZ: ${TZ}
+    ports:
+      - '${PORT_GAME}-${PORT_GAME_END}:${PORT_GAME}-${PORT_GAME_END}/udp'
+    volumes:
+      - server:/mnt/vrising/server
+      - ./data:/mnt/vrising/persistentdata
+    labels:
+      homelab.game: ${GAME_NAME}
+      homelab.template: v-rising
+
+volumes:
+  server:

@@ -7,7 +7,10 @@
   "ports": [{ "name": "game", "container": 2456, "protocol": "udp", "default": 2456, "count": 3 }],
   "query": { "method": "gamedig", "port": "game", "type": "valheim" },
   "rcon": { "supported": false },
+  "wake": "raw",
+  "arch": ["amd64"],
   "dataDir": "./data",
+  "worldPaths": ["worlds_local"],
   "fields": [
     {
       "key": "SERVER_NAME",

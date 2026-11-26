@@ -64,7 +64,9 @@ describe('share schemas', () => {
         address: null,
         players: null,
         whitelist: true,
+        sleeping: false,
       },
+      whitelistRequests: [],
     };
     expect(shareStatusResponseSchema.safeParse(ok).success).toBe(true);
     for (const extra of [

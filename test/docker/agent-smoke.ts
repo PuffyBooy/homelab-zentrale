@@ -27,6 +27,11 @@
  *       .env is root 0600): compose.yml + .env interpolate, no unset variable,
  *    d. step-up (fresh TOTP), RCON `list` and `tps` through the API,
  *    e. backup -> a backup entry with sizeBytes > 0, the file exists, no .partial left,
+ *    e2. M12 sleep mode: PUT autoStopMinutes 1 + wakeOnConnect -> the core stops the empty
+ *       server and arms the agent's wake listener (game.wake.arm), the summary says
+ *       sleeping; a Minecraft status ping on the game port answers "Schläft" and does NOT
+ *       wake it; a login handshake gets the "Server startet" disconnect, the agent sends
+ *       game_wake and the core starts the game again (status ok),
  *    f. stop -> off, DELETE with a wrong confirmName is refused, DELETE with the right one
  *       removes container and folder.
  * 8. stops the agent, waits until the server is crit (<= 100 s) and
@@ -481,6 +486,133 @@ function tcpOpen(port: number): Promise<boolean> {
   });
 }
 
+// Minimal Minecraft Java client (server list ping and login handshake), strictly bounded.
+
+function mcVarInt(n: number): Buffer {
+  const out: number[] = [];
+  let v = n >>> 0;
+  do {
+    let b = v & 0x7f;
+    v >>>= 7;
+    if (v !== 0) b |= 0x80;
+    out.push(b);
+  } while (v !== 0);
+  return Buffer.from(out);
+}
+
+function mcFrame(id: number, payload: Buffer): Buffer {
+  const body = Buffer.concat([mcVarInt(id), payload]);
+  return Buffer.concat([mcVarInt(body.length), body]);
+}
+
+function mcHandshake(port: number, nextState: 1 | 2): Buffer {
+  const host = Buffer.from('127.0.0.1');
+  const p = Buffer.alloc(2);
+  p.writeUInt16BE(port);
+  return mcFrame(
+    0,
+    Buffer.concat([mcVarInt(767), mcVarInt(host.length), host, p, mcVarInt(nextState)]),
+  );
+}
+
+/** Sends `data`, returns what the server sent until it closed (max 64 KiB, 10 s). */
+function mcExchange(port: number, data: Buffer): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const s = net.connect({ host: '127.0.0.1', port });
+    const chunks: Buffer[] = [];
+    let size = 0;
+    const t = setTimeout(() => s.destroy(), 10_000);
+    s.once('connect', () => s.write(data));
+    s.on('data', (c: Buffer) => {
+      size += c.length;
+      if (size > 64 * 1024) s.destroy();
+      else chunks.push(c);
+    });
+    s.once('error', (err) => {
+      clearTimeout(t);
+      reject(err);
+    });
+    s.once('close', () => {
+      clearTimeout(t);
+      resolve(Buffer.concat(chunks).toString('utf8'));
+    });
+  });
+}
+
+/** Status request (+ ping, so the listener closes the connection after the pong). */
+function mcStatus(port: number): Promise<string> {
+  const ping = Buffer.alloc(8);
+  ping.writeBigInt64BE(42n);
+  return mcExchange(
+    port,
+    Buffer.concat([mcHandshake(port, 1), mcFrame(0, Buffer.alloc(0)), mcFrame(1, ping)]),
+  );
+}
+
+function mcLogin(port: number): Promise<string> {
+  const name = Buffer.from('hzsmoke');
+  return mcExchange(
+    port,
+    Buffer.concat([mcHandshake(port, 2), mcFrame(0, Buffer.concat([mcVarInt(name.length), name]))]),
+  );
+}
+
+/** M12: sleep after 1 min without players, "Schläft" in the server list, a login wakes. */
+async function sleepWakeChecks(gameId: string, gamePort: number): Promise<void> {
+  await json(
+    await api('PUT', `/api/games/${gameId}`, { autoStopMinutes: 1, wakeOnConnect: true }),
+    'PUT games/:id (sleep mode)',
+  );
+  const asleep = await waitGame(gameId, 'game asleep', 300, (g) => g.sleeping, false);
+  log(`game asleep: ${asleep.status} "${asleep.statusText}"`);
+  const state = docker([
+    'ps',
+    '-a',
+    '--filter',
+    `name=^${GAME_CONTAINER}$`,
+    '--format',
+    '{{.State}}',
+  ]).trim();
+  if (state === 'running') throw new Error('game container still running while asleep');
+
+  const status = await waitFor(
+    'sleeping server list answer',
+    30,
+    async () => {
+      const text = await mcStatus(gamePort).catch(() => '');
+      return text.includes('Schläft') ? text : null;
+    },
+    1000,
+  );
+  if (!status.includes('"online":0')) throw new Error(`unexpected status: ${status.slice(0, 300)}`);
+  log('server list ping while asleep: "Schläft"');
+  // A server list ping must not wake the game.
+  await new Promise((r) => setTimeout(r, 5000));
+  const still = await getGame(gameId);
+  if (!still.sleeping) throw new Error('a server list ping woke the game');
+  if (docker(['ps', '--filter', `name=^${GAME_CONTAINER}$`, '--format', '{{.State}}']).trim()) {
+    throw new Error('game container started after a server list ping');
+  }
+
+  const disconnect = await mcLogin(gamePort);
+  if (!disconnect.includes('Server startet')) {
+    throw new Error(`login got no wake message: ${disconnect.slice(0, 300)}`);
+  }
+  log('login while asleep: "Server startet, bitte in 1 Minute neu verbinden."');
+  const awake = await waitGame(
+    gameId,
+    'game awake (game_wake -> start)',
+    GAME_READY_S,
+    (g) => !g.sleeping && g.status === 'ok',
+  );
+  log(`game woke up: ${awake.status} "${awake.statusText}"`);
+  // Back to "never sleep", so the stop below is a plain stop.
+  await json(
+    await api('PUT', `/api/games/${gameId}`, { autoStopMinutes: 0 }),
+    'PUT games/:id (sleep off)',
+  );
+}
+
 /** docker CLI inside the agent container (root there; the game files are root 0600/0640). */
 function inAgent(args: string[]): { code: number; stdout: string; stderr: string } {
   return dockerFull(['exec', '-e', 'DOCKER_CONFIG=/tmp/.docker', AGENT_CONTAINER, ...args]);
@@ -680,6 +812,9 @@ async function gameChecks(serverId: string): Promise<void> {
       (g) => g.status === 'ok',
     );
     if (afterBackup.lastBackupAt === null) throw new Error('lastBackupAt not set');
+
+    // e2. sleep mode: sleep, "Schläft" without waking, login wakes (M12)
+    await sleepWakeChecks(game.id, gamePort);
 
     // f. stop and delete
     await json(await api('POST', `/api/games/${game.id}/stop`), 'games/:id/stop');

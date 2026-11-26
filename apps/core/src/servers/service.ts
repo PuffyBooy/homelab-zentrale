@@ -1,6 +1,7 @@
 import { count, eq } from 'drizzle-orm';
 import {
   defaultThresholds,
+  serverNetworkSchema,
   thresholdsPatchSchema,
   thresholdsSchema,
   type AgentEvent,
@@ -11,6 +12,7 @@ import {
   type ListeningPort,
   type Metrics,
   type ServerDetail,
+  type ServerNetwork,
   type ServerSummary,
   type SystemInfo,
   type Thresholds,
@@ -52,6 +54,18 @@ export interface ContainerSync {
   /** Returns true if a container changed (the server counts are refreshed). */
   onEvent(serverId: string, event: AgentEvent['event']): boolean;
   removeServer(serverId: string): void;
+}
+
+/** Event game_wake of an agent (M12). */
+export type GameWakeListener = (
+  serverId: string,
+  e: { gameId: string; port: number; protocol: 'tcp' | 'udp' },
+) => void;
+
+/** Stored network value, or null when unset or unknown. */
+export function serverNetworkOf(v: string | null): ServerNetwork | null {
+  const p = serverNetworkSchema.safeParse(v);
+  return p.success ? p.data : null;
 }
 
 /** serverId and whether it was deleted. */
@@ -98,6 +112,8 @@ export class ServerService implements AgentSink {
   private readonly lastSummary = new Map<string, string>();
   private readonly listeners = new Set<ServerListener>();
   private readonly inventoryListeners = new Set<InventoryListener>();
+  private readonly wakeListeners = new Set<GameWakeListener>();
+  private readonly connectListeners = new Set<(serverId: string) => void>();
   /** Demo servers (HZ_DEMO=1) count as connected without a socket. */
   private readonly virtual = new Set<string>();
   private connections: ConnectionInfo = { isConnected: () => false, disconnectedAt: () => null };
@@ -131,6 +147,18 @@ export class ServerService implements AgentSink {
   onChange(fn: ServerListener): () => void {
     this.listeners.add(fn);
     return () => this.listeners.delete(fn);
+  }
+
+  /** M12: a sleeping game got a connection (event game_wake of this server's agent). */
+  onGameWake(fn: GameWakeListener): () => void {
+    this.wakeListeners.add(fn);
+    return () => this.wakeListeners.delete(fn);
+  }
+
+  /** After every hello of an agent (also a reconnect), once the server is stored. */
+  onAgentConnected(fn: (serverId: string) => void): () => void {
+    this.connectListeners.add(fn);
+    return () => this.connectListeners.delete(fn);
   }
 
   onInventoryStored(fn: InventoryListener): () => void {
@@ -183,6 +211,16 @@ export class ServerService implements AgentSink {
       });
     }
     this.refresh(server.id, true);
+    for (const fn of this.connectListeners) {
+      try {
+        fn(server.id);
+      } catch (err) {
+        this.deps.log.error(
+          { err: err instanceof Error ? err.name : 'error' },
+          'connect hook failed',
+        );
+      }
+    }
   }
 
   onDisconnected(serverId: string): void {
@@ -211,6 +249,9 @@ export class ServerService implements AgentSink {
         target: serverId,
         details: { action: e.action, reason: e.reason },
       });
+    } else if (e.kind === 'game_wake') {
+      this.deps.log.info({ serverId, gameId: e.gameId, protocol: e.protocol }, 'game wake event');
+      for (const fn of this.wakeListeners) fn(serverId, e);
     } else {
       this.deps.log.debug({ serverId, kind: e.kind }, 'agent event');
       if (this.containerSync?.onEvent(serverId, e)) this.refresh(serverId);
@@ -354,6 +395,7 @@ export class ServerService implements AgentSink {
       temp: m?.temp ?? null,
       uptimeS: m?.uptimeS ?? null,
       allowTerminal: row.allowTerminal,
+      network: serverNetworkOf(row.network),
       containersRunning: counts.find((c) => c.state === 'running')?.n ?? 0,
       containersTotal: counts.reduce((a, c) => a + c.n, 0),
     };
@@ -431,13 +473,19 @@ export class ServerService implements AgentSink {
 
   update(
     id: string,
-    patch: { location?: string; thresholds?: ThresholdsPatch; allowTerminal?: boolean },
+    patch: {
+      location?: string;
+      thresholds?: ThresholdsPatch;
+      allowTerminal?: boolean;
+      network?: ServerNetwork | null;
+    },
   ): boolean {
     const row = this.row(id);
     if (!row) return false;
     const set: Partial<ServerRow> = {};
     if (patch.location !== undefined) set.location = patch.location;
     if (patch.allowTerminal !== undefined) set.allowTerminal = patch.allowTerminal;
+    if (patch.network !== undefined) set.network = patch.network;
     if (patch.thresholds !== undefined) {
       const current = thresholdsPatchSchema.safeParse(parse(row.thresholdsJson) ?? {});
       set.thresholdsJson = JSON.stringify({

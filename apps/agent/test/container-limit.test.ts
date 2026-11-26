@@ -79,4 +79,14 @@ describe('inventory: role and cpuLimit', () => {
     expect(mapContainer(listed({}), { cpuLimit: null })?.cpuLimit).toBeNull();
     expect(mapContainer(listed({}))).not.toHaveProperty('cpuLimit');
   });
+
+  it('reports the homelab.game label only when it is a valid game folder name (M12)', () => {
+    expect(mapContainer(listed({ 'homelab.game': 'mc-survival' }))?.game).toBe('mc-survival');
+    for (const bad of ['../etc', 'MC', 'a', '-x', 'a'.repeat(40), 'mc/../x', '']) {
+      const c = mapContainer(listed({ 'homelab.game': bad }));
+      expect(c, bad).not.toBeNull();
+      expect(c).not.toHaveProperty('game');
+    }
+    expect(mapContainer(listed({}))).not.toHaveProperty('game');
+  });
 });

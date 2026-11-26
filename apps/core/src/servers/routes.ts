@@ -139,12 +139,14 @@ export const serverRoutes: FastifyPluginAsync<ServerRoutesOptions> = async (app,
       ...(body.location !== undefined ? { location: body.location } : {}),
       ...(body.thresholds !== undefined ? { thresholds: body.thresholds } : {}),
       ...(body.allowTerminal !== undefined ? { allowTerminal: body.allowTerminal } : {}),
+      ...(body.network !== undefined ? { network: body.network } : {}),
     });
     audit('server.updated', row.id, {
       name: row.name,
       fields: Object.keys(body),
       ...(body.allowTerminal !== undefined ? { allowTerminal: body.allowTerminal } : {}),
       ...(body.thresholds !== undefined ? { thresholds: body.thresholds } : {}),
+      ...(body.network !== undefined ? { network: body.network } : {}),
     });
     return serverUpdateResponseSchema.parse(o.servers.detail(row.id));
   });

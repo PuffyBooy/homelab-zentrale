@@ -13,6 +13,7 @@ import {
   createShare,
   emptyDraft,
   EXPIRY_OPTIONS,
+  PERM_HINT,
   PERM_TEXT,
   permsFor,
   permsText,
@@ -64,7 +65,8 @@ function CreateForm({
   onCreated: (c: ShareCreated) => void;
 }): ReactElement {
   const qc = useQueryClient();
-  const allowed = permsFor(game.templateId);
+  // Whitelist requests are approved over RCON: only offered when the game has it.
+  const allowed = permsFor(game.templateId).filter((p) => p !== 'whitelist_request' || game.rcon);
   const [draft, setDraft] = useState<ShareDraft>(emptyDraft);
   const [errors, setErrors] = useState<ShareDraftErrors>({});
   const create = useMutation({
@@ -116,7 +118,7 @@ function CreateForm({
           <Toggle
             key={p}
             label={PERM_TEXT[p]}
-            hint={p === 'console_write' ? 'schließt Konsole lesen ein' : undefined}
+            hint={PERM_HINT[p]}
             checked={draft.perms.includes(p)}
             onChange={(on) => set('perms', togglePerm(draft.perms, p, on))}
           />

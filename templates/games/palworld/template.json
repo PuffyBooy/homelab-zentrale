@@ -17,7 +17,10 @@
   ],
   "query": { "method": "gamedig", "port": "api", "type": "palworld" },
   "rcon": { "supported": true, "port": 25575 },
+  "wake": "raw",
+  "arch": ["amd64", "arm64"],
   "dataDir": "./data",
+  "worldPaths": ["SaveGames"],
   "fields": [
     {
       "key": "SERVER_NAME",

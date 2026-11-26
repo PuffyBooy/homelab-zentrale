@@ -1,9 +1,13 @@
 import http from 'node:http';
+import { Readable, Transform } from 'node:stream';
+import { pipeline } from 'node:stream/promises';
+import type { ReadableStream as NodeReadableStream } from 'node:stream/web';
 import type { Config } from './config.js';
 import type { Logger } from './log.js';
 import { clientIp, rateLimitKey } from './client-ip.js';
 import {
   checkCoreAnswer,
+  checkDownloadHeaders,
   findRoute,
   sharePinFrom,
   shareTokenFrom,
@@ -17,6 +21,14 @@ export const MAX_BODY = 4 * 1024;
 const MAX_CORE_BODY = 4 * 1024 * 1024;
 const CORE_TIMEOUT_MS = 10_000;
 const MAX_IN_FLIGHT = 32;
+/** World downloads (M12): the core builds the archive first, then streams it. */
+export const DOWNLOAD_HEADERS_TIMEOUT_MS = 16 * 60_000;
+/** No byte from the core for this long during a download: abort. */
+export const DOWNLOAD_IDLE_MS = 2 * 60_000;
+/** Downloads at once over all friends (each is a long-lived core connection). */
+export const MAX_DOWNLOADS = 4;
+/** World downloads per IP and hour (the core allows 1 per link and hour). */
+export const WORLD_PER_IP_HOUR = 3;
 
 /** Limits per IP (IPv6 per /64) and minute. */
 export const LIMITS = {
@@ -173,8 +185,111 @@ export function createGateway(deps: GatewayDeps): http.Server {
     poll: new RateLimiter(LIMITS.poll, 60_000),
     page: new RateLimiter(LIMITS.page, 60_000),
     global: new RateLimiter(LIMITS.global, 60_000, 1),
+    world: new RateLimiter(WORLD_PER_IP_HOUR, 60 * 60_000),
   };
   let inFlight = 0;
+  let downloads = 0;
+
+  /**
+   * GET /s/api/world: the core's file answer is piped to the friend chunk by
+   * chunk (backpressure through pipeline), never buffered. Only a 200 with
+   * application/zstd, a valid size and our file name passes; more bytes than
+   * announced end the response.
+   */
+  async function proxyDownload(
+    res: http.ServerResponse,
+    route: ApiRoute,
+    url: string,
+    headers: Record<string, string>,
+    ctx: Ctx,
+  ): Promise<void> {
+    if (downloads >= MAX_DOWNLOADS) {
+      return sendError(res, 503, { ok: false, error: 'unavailable', retryAfter: 60 });
+    }
+    downloads += 1;
+    const ctrl = new AbortController();
+    let timer = setTimeout(() => ctrl.abort(), DOWNLOAD_HEADERS_TIMEOUT_MS);
+    // The friend went away (also while the core still builds the archive): abort
+    // the core request, so the slot is freed and the core cancels the export.
+    const onClose = (): void => {
+      if (!res.writableFinished) ctrl.abort();
+    };
+    res.once('close', onClose);
+    try {
+      let coreRes: Response;
+      try {
+        coreRes = await doFetch(url, {
+          method: 'GET',
+          headers: { ...headers, Accept: 'application/zstd, application/json' },
+          redirect: 'error',
+          signal: ctrl.signal,
+        });
+      } catch {
+        logger.warn('core unreachable', { route: ctx.route, reason: 'network' });
+        return sendError(res, 502, { ok: false, error: 'unavailable' });
+      }
+      clearTimeout(timer);
+      if (coreRes.status !== 200) {
+        const type = coreRes.headers.get('content-type') ?? '';
+        const text = /^application\/json\b/i.test(type)
+          ? await readCapped(coreRes, 16 * 1024)
+          : null;
+        if (text === null) await coreRes.body?.cancel().catch(() => undefined);
+        let json: unknown = undefined;
+        try {
+          json = text === null ? undefined : JSON.parse(text);
+        } catch {
+          json = undefined;
+        }
+        const outcome = checkCoreAnswer(route, coreRes.status, json);
+        if (outcome.kind === 'error') return sendError(res, outcome.status, outcome.body);
+        logger.warn('core answer refused', { route: ctx.route, coreStatus: coreRes.status });
+        return sendError(res, 502, { ok: false, error: 'unavailable' });
+      }
+      const ok = checkDownloadHeaders({
+        type: coreRes.headers.get('content-type'),
+        length: coreRes.headers.get('content-length'),
+        disposition: coreRes.headers.get('content-disposition'),
+      });
+      if (!ok || !coreRes.body) {
+        await coreRes.body?.cancel().catch(() => undefined);
+        logger.warn('core answer refused', { route: ctx.route, coreStatus: 200 });
+        return sendError(res, 502, { ok: false, error: 'unavailable' });
+      }
+      res.writeHead(200, {
+        ...SECURITY_HEADERS,
+        'Content-Type': 'application/zstd',
+        'Content-Length': String(ok.length),
+        'Content-Disposition': ok.disposition,
+        'Cache-Control': 'no-store',
+      });
+      let seen = 0;
+      timer = setTimeout(() => ctrl.abort(), DOWNLOAD_IDLE_MS);
+      const guard = new Transform({
+        transform(chunk: Buffer, _enc, cb) {
+          seen += chunk.length;
+          clearTimeout(timer);
+          timer = setTimeout(() => ctrl.abort(), DOWNLOAD_IDLE_MS);
+          if (seen > ok.length) {
+            cb(new Error('more bytes than announced'));
+            return;
+          }
+          cb(null, chunk);
+        },
+      });
+      const body = Readable.fromWeb(coreRes.body as unknown as NodeReadableStream);
+      try {
+        await pipeline(body, guard, res);
+      } catch {
+        logger.warn('download aborted', { route: ctx.route, bytes: seen });
+        res.destroy();
+      }
+    } finally {
+      clearTimeout(timer);
+      res.off('close', onClose);
+      downloads -= 1;
+    }
+  }
 
   const limited = (res: http.ServerResponse, retryAfter: number, json: boolean): void => {
     if (json) {
@@ -250,6 +365,17 @@ export function createGateway(deps: GatewayDeps): http.Server {
     };
     if (pin !== undefined) headers['X-Share-Pin'] = pin;
     if (body !== undefined) headers['Content-Type'] = 'application/json';
+    if (route.download) {
+      const w = limiters.world.hit(rateLimitKey(ctx.ip), now());
+      if (!w.ok) return limited(res, w.retryAfter, true);
+      return proxyDownload(
+        res,
+        route,
+        `${config.coreUrl}/api/share-gateway/${route.name}${query}`,
+        headers,
+        ctx,
+      );
+    }
 
     inFlight += 1;
     try {

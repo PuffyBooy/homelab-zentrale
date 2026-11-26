@@ -205,3 +205,8 @@ export async function withStepUpSession<T>(
     await ctx.close();
   }
 }
+
+/** Loopback origin of a core a spec started itself (never leaves the machine). */
+export function loopbackOrigin(port: number): string {
+  return `http://127.0.0.1:${port}`;
+}

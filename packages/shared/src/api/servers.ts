@@ -69,6 +69,9 @@ export type StatusReason = z.infer<typeof statusReasonSchema>;
 export const serverIdSchema = z.string().regex(/^[A-Za-z0-9_-]{8,64}$/);
 export const serverIdParamsSchema = z.strictObject({ id: serverIdSchema });
 
+export const serverNetworkSchema = z.enum(['home', 'cloud', 'vps', 'other']);
+export type ServerNetwork = z.infer<typeof serverNetworkSchema>;
+
 export const serverSummarySchema = z.strictObject({
   id: serverIdSchema,
   name: agentNameSchema,
@@ -91,6 +94,13 @@ export const serverSummarySchema = z.strictObject({
   temp: z.number().nullable(),
   uptimeS: z.number().nullable(),
   allowTerminal: z.boolean(),
+  /**
+   * M12: where the server sits, for the port forwarding hint of game servers:
+   * home = behind a home router, cloud = cloud VM with a provider firewall
+   * (e.g. Oracle Security List + iptables), vps = VPS with provider firewall,
+   * other / null = generic hint.
+   */
+  network: serverNetworkSchema.nullable(),
   containersRunning: z.number().int().nonnegative(),
   containersTotal: z.number().int().nonnegative(),
 });
@@ -155,6 +165,8 @@ export const serverUpdateRequestSchema = z.strictObject({
   thresholds: thresholdsPatchSchema.optional(),
   /** Changing this needs step-up. */
   allowTerminal: z.boolean().optional(),
+  /** M12: null clears it. */
+  network: serverNetworkSchema.nullable().optional(),
 });
 export type ServerUpdateRequest = z.infer<typeof serverUpdateRequestSchema>;
 

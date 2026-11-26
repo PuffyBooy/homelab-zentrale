@@ -14,8 +14,10 @@
 # - pid: host                   /proc shows host processes; /host/proc/1 is the host init, which
 #                               nsenter and the host file view (/host/proc/1/root) need.
 # - network_mode: host          host network counters, listening ports (ss), tailscale IP, and
-#                               checks/pings from this server's own network.
-#                               Also wol.send: Wake-on-LAN broadcasts must leave on the host LAN.
+#                               checks/pings from this server's own network; M12 wake listeners
+#                               of sleeping games bind their published host ports (>= 1024 only,
+#                               no data is ever forwarded). Also wol.send: Wake-on-LAN broadcasts
+#                               must leave on the host LAN.
 # - /proc -> /host/proc:ro      host mount table and network counters, read-only.
 # - /sys -> /host/sys:ro        hardware sensors (systeminformation also reads /sys), read-only.
 # - /opt/homelab (same path)    the only directory actions may write to (compose.write, games).

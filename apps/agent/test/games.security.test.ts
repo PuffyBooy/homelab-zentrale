@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
+  GAMEDIG_TYPES as SHARED_GAMEDIG_TYPES,
   gameStatusDataSchema,
   rconDataSchema,
   rpcParamsByAction,
@@ -382,12 +383,15 @@ describe('game.rcon', () => {
 describe('game.status', () => {
   it('gamedig types come from an allowlist', () => {
     const base = { gameDir: '/opt/homelab/games/x', port: 1, timeoutMs: 1000 };
+    // M12: every shared GAMEDIG_TYPES entry is accepted, and only those.
+    expect([...GAMEDIG_TYPES.keys()].sort()).toEqual([...SHARED_GAMEDIG_TYPES].sort());
+    expect([...GAMEDIG_TYPES].filter(([, v]) => v.password).map(([k]) => k)).toEqual(['palworld']);
     for (const t of GAMEDIG_TYPES.keys()) {
       expect(() =>
         checkGamedigType({ ...base, method: 'gamedig', gamedigType: t as never }),
       ).not.toThrow();
     }
-    for (const t of ['minecraft', 'teamspeak3', 'satisfactory', 'csgo', undefined]) {
+    for (const t of ['minecraft', 'teamspeak3', 'asa', 'csgo', undefined]) {
       expect(() =>
         checkGamedigType({ ...base, method: 'gamedig', ...(t ? { gamedigType: t as never } : {}) }),
       ).toThrow(/gamedigType/);

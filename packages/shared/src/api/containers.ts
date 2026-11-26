@@ -41,6 +41,8 @@ export const containerSummarySchema = z.strictObject({
   memBytes: z.number().nullable(),
   restartCount: z.number().int().nullable(),
   updatedAt: z.iso.datetime(),
+  /** M12: value of the label homelab.game (game folder name), null for other containers. */
+  game: z.string().nullable(),
   /** M10: priority, protection (hz.role) and throttle state (api/throttle.ts). */
   ...containerControlFields,
 });

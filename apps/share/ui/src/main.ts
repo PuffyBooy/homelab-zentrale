@@ -1,19 +1,25 @@
-import { request, type Credentials, type RequestSpec, type Result } from './api.js';
+import { download, request, type Credentials, type RequestSpec, type Result } from './api.js';
 import { alertBox, append, button, field, h, icon, statusDot, tile } from './dom.js';
 import {
   ACTION_TEXT,
   commandError,
   controlsFor,
+  downloadErrorLine,
+  downloadName,
   errorLine,
   expiresText,
+  formatWhen,
   isConsoleResponse,
   isFinal,
   isOutputResponse,
   isShareStatus,
+  isSleeping,
   mergeLines,
   messageFor,
   pinText,
   playerError,
+  progressText,
+  REQUEST_STATE_TEXT,
   screenFor,
   statusLine,
   tokenFromPath,
@@ -195,12 +201,18 @@ class ReadyView {
   private readonly foot = h('p', { class: 'sh-foot' });
   readonly consolePart: ConsolePart | null;
   private readonly whitelistPart: HTMLElement | null;
+  private readonly requestPart: RequestPart | null;
+  private readonly worldPart: HTMLElement | null;
 
   constructor(s: ShareStatus) {
     this.status = s;
     this.controls = controlsFor(s);
     this.consolePart = this.controls.console ? new ConsolePart(this.controls.command) : null;
     this.whitelistPart = this.controls.whitelist ? whitelistTile() : null;
+    this.requestPart = this.controls.whitelistRequest
+      ? new RequestPart((next) => this.update(next))
+      : null;
+    this.worldPart = this.controls.worldDownload ? worldTile(() => this.status.game.name) : null;
     this.root = h(
       'main',
       { class: 'sh-page' },
@@ -209,6 +221,8 @@ class ReadyView {
       this.errorSlot,
       this.consolePart?.root,
       this.whitelistPart,
+      this.requestPart?.root,
+      this.worldPart,
       this.foot,
     );
     this.render();
@@ -236,6 +250,7 @@ class ReadyView {
     this.title.textContent = game.name;
     this.sub.textContent = statusLine(game);
     this.foot.textContent = `Benutzerlink für ${person} · ${expiresText(expiresAt)}`;
+    this.requestPart?.render(this.status.whitelistRequests);
     this.renderGame();
   }
 
@@ -273,7 +288,9 @@ class ReadyView {
         'header',
         { class: 'hz-tile-head' },
         h('div', { class: 'hz-tile-title' }, icon('gamepad', 12), h('span', {}, g.name)),
-        statusDot(g.status, g.statusText),
+        isSleeping(g)
+          ? statusDot(g.status, 'Schläft – Starten weckt den Server', 'Schläft')
+          : statusDot(g.status, g.statusText),
       ),
       h(
         'div',
@@ -585,6 +602,161 @@ function whitelistTile(): HTMLElement {
   });
   remove.addEventListener('click', () => run('remove'));
   return tile({ title: 'Whitelist', icon: 'users', body: [form] });
+}
+
+// ---- M12: whitelist request -----------------------------------------------------------
+
+class RequestPart {
+  readonly root: HTMLElement;
+  private readonly list = h('div', { class: 'sh-requests' });
+
+  constructor(onStatus: (s: ShareStatus) => void) {
+    const player = field(
+      'Spielername',
+      {
+        autocomplete: 'off',
+        autocapitalize: 'none',
+        spellcheck: 'false',
+        maxlength: 16,
+        placeholder: 'Steve',
+      },
+      'Genau so, wie er im Spiel heißt. Der Admin bestätigt die Anfrage.',
+    );
+    const send = button({ label: 'Anfrage senden', type: 'submit', icon: 'plus' });
+    const out = h('div', { class: 'sh-slot', 'aria-live': 'polite' });
+    const form = h(
+      'form',
+      { class: 'hz-form', novalidate: true },
+      player.root,
+      h('div', { class: 'hz-form-actions' }, send),
+      out,
+    );
+    form.addEventListener('submit', (e) => {
+      e.preventDefault();
+      const name = player.input.value.trim();
+      const err = playerError(name);
+      player.setError(err);
+      if (err) {
+        player.input.focus();
+        return;
+      }
+      send.disabled = true;
+      const myGen = gen;
+      void call({
+        method: 'POST',
+        path: '/s/api/whitelist-request',
+        body: { player: name },
+        guard: isShareStatus,
+      }).then((r) => {
+        if (myGen !== gen) return;
+        send.disabled = false;
+        if (r.ok) {
+          player.input.value = '';
+          out.replaceChildren(
+            alertBox('ok', `Anfrage für ${name} gesendet.`, 'Der Admin bekommt eine Meldung.'),
+          );
+          onStatus(r.data);
+        } else if (r.failure.error === 'busy') {
+          out.replaceChildren(alertBox('warn', `Für ${name} gibt es schon eine Anfrage.`));
+        } else if (!fail(r.failure)) {
+          out.replaceChildren(alertBox('crit', errorLine(r.failure)));
+        }
+      });
+    });
+    this.root = tile({
+      title: 'Auf die Whitelist',
+      icon: 'users',
+      body: [form, this.list],
+    });
+  }
+
+  render(requests: ShareStatus['whitelistRequests']): void {
+    if (!requests.length) {
+      this.list.replaceChildren();
+      return;
+    }
+    this.list.replaceChildren(
+      h('div', { class: 'hz-label' }, 'Deine Anfragen'),
+      ...requests.map((r) => {
+        const st = REQUEST_STATE_TEXT[r.state];
+        return h(
+          'div',
+          { class: 'hz-row' },
+          statusDot(st.status, st.text, st.text),
+          h(
+            'div',
+            { class: 'hz-row-main' },
+            h('span', { class: 'hz-row-name' }, r.player),
+            h('span', { class: 'hz-row-sub' }, formatWhen(new Date(r.createdAt))),
+          ),
+        );
+      }),
+    );
+  }
+}
+
+// ---- M12: world download ------------------------------------------------------------------
+
+function worldTile(gameName: () => string): HTMLElement {
+  const get = button({ label: 'Welt herunterladen', icon: 'cloud' });
+  const out = h('div', { class: 'sh-slot', 'aria-live': 'polite' });
+  const progress = h('p', { class: 'sh-text', hidden: true });
+  get.addEventListener('click', () => {
+    get.disabled = true;
+    out.replaceChildren();
+    progress.hidden = false;
+    progress.textContent = 'Server packt die Welt …';
+    const myGen = gen;
+    let last = 0;
+    void download(cred, '/s/api/world', (loaded, total) => {
+      // Update the line at most every 256 KB, not on every chunk.
+      if (loaded - last < 256 * 1024 && loaded !== total) return;
+      last = loaded;
+      progress.textContent = `Lädt … ${progressText(loaded, total)}`;
+    }).then((r) => {
+      if (myGen !== gen) return;
+      get.disabled = false;
+      progress.hidden = true;
+      if (r.ok) {
+        const name = downloadName(r.data.disposition, gameName());
+        saveBlob(r.data.blob, name);
+        out.replaceChildren(
+          alertBox(
+            'ok',
+            `${name} gespeichert.`,
+            `${progressText(r.data.blob.size, null)}. Nächster Download in 1 Stunde.`,
+          ),
+        );
+        say(`${name} gespeichert.`);
+      } else if (!fail(r.failure)) {
+        out.replaceChildren(alertBox('crit', downloadErrorLine(r.failure)));
+      }
+    });
+  });
+  return tile({
+    title: 'Welt',
+    icon: 'cloud',
+    body: [
+      h(
+        'p',
+        { class: 'sh-text' },
+        'Die Welt als tar.zst. Höchstens 1× pro Stunde, kann mehrere GB groß sein. Die Seite lädt sie zuerst ganz, dann speichert der Browser die Datei.',
+      ),
+      h('div', { class: 'hz-form-actions' }, get),
+      progress,
+      out,
+    ],
+  });
+}
+
+/** Saves a Blob as a file through a temporary object URL (no token in any URL). */
+function saveBlob(blob: Blob, name: string): void {
+  const url = URL.createObjectURL(blob);
+  const a = h('a', { href: url, download: name, hidden: true });
+  document.body.append(a);
+  a.click();
+  a.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
 }
 
 // ---- polling -----------------------------------------------------------------------------

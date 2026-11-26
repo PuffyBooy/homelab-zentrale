@@ -2,10 +2,29 @@
   "id": "minecraft-java",
   "name": "Minecraft Java",
   "image": "itzg/minecraft-server",
-  "ram": { "min": "4G", "recommended": "6G" },
-  "ports": [{ "name": "game", "container": 25565, "protocol": "tcp", "default": 25565 }],
-  "query": { "method": "minecraft", "port": "game" },
-  "rcon": { "supported": true, "port": 25575, "tpsCommand": "tps" },
+  "ram": {
+    "min": "4G",
+    "recommended": "6G"
+  },
+  "ports": [
+    {
+      "name": "game",
+      "container": 25565,
+      "protocol": "tcp",
+      "default": 25565
+    }
+  ],
+  "query": {
+    "method": "minecraft",
+    "port": "game"
+  },
+  "rcon": {
+    "supported": true,
+    "port": 25575,
+    "tpsCommand": "tps",
+    "sayCommand": "say {msg}",
+    "whitelistAddCommand": "whitelist add {player}"
+  },
   "dataDir": "./data",
   "fields": [
     {
@@ -37,7 +56,13 @@
       "options": ["4G", "6G", "8G"],
       "default": "6G"
     },
-    { "key": "SEED", "label": "Seed", "type": "text", "default": "", "optional": true },
+    {
+      "key": "SEED",
+      "label": "Seed",
+      "type": "text",
+      "default": "",
+      "optional": true
+    },
     {
       "key": "MOTD",
       "label": "Beschreibung",
@@ -45,8 +70,31 @@
       "default": "Ein Homelab-Server",
       "optional": true
     },
-    { "key": "LEVEL", "label": "Weltname", "type": "text", "default": "world" },
-    { "key": "ENABLE_WHITELIST", "label": "Whitelist", "type": "boolean", "default": true },
-    { "key": "ONLINE_MODE", "label": "Online-Mode", "type": "boolean", "default": true }
-  ]
+    {
+      "key": "LEVEL",
+      "label": "Weltname",
+      "type": "text",
+      "default": "world"
+    },
+    {
+      "key": "ENABLE_WHITELIST",
+      "label": "Whitelist",
+      "type": "boolean",
+      "default": true
+    },
+    {
+      "key": "ONLINE_MODE",
+      "label": "Online-Mode",
+      "type": "boolean",
+      "default": true
+    }
+  ],
+  "wake": "minecraft",
+  "mods": {
+    "typeField": "TYPE",
+    "versionField": "VERSION",
+    "plugins": ["PAPER"],
+    "mods": ["FABRIC"]
+  },
+  "worldPaths": ["world"]
 }

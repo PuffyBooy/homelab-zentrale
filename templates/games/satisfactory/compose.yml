@@ -1,0 +1,38 @@
+# Rendered by the core (see templates/games/README.md).
+# - Satisfactory wants the same game and messaging ports inside and outside, so the
+#   container listens on PORT_GAME / PORT_MESSAGING directly.
+# - SERVERPASSWORD (secret field, used when the server is claimed) comes from .env.
+# - Saves and settings are in ./data (backed up); the ~8 GB game files live in the
+#   named volume `server` and are removed with the game (compose down --volumes).
+# - The image is amd64 only.
+services:
+  server:
+    image: wolveix/satisfactory-server:v1.10.0
+    container_name: game-${GAME_NAME}
+    restart: unless-stopped
+    mem_limit: ${MEMORY}
+    stop_grace_period: 60s
+    env_file:
+      - .env
+    environment:
+      PUID: '1000'
+      PGID: '1000'
+      MAXPLAYERS: ${MAXPLAYERS}
+      SERVERNAME: ${SERVERNAME}
+      SERVERGAMEPORT: ${PORT_GAME}
+      SERVERMESSAGINGPORT: ${PORT_MESSAGING}
+      STEAMBETA: 'false'
+      TZ: ${TZ}
+    ports:
+      - '${PORT_GAME}:${PORT_GAME}/tcp'
+      - '${PORT_GAME}:${PORT_GAME}/udp'
+      - '${PORT_MESSAGING}:${PORT_MESSAGING}/tcp'
+    volumes:
+      - ./data:/config
+      - server:/config/gamefiles
+    labels:
+      homelab.game: ${GAME_NAME}
+      homelab.template: satisfactory
+
+volumes:
+  server:

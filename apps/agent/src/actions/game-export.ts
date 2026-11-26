@@ -18,6 +18,7 @@ import {
   TransferFailure,
   exportFileName,
   exportTarArgs,
+  resolveWorldMembers,
   listAndCheckArchive,
   type Compression,
 } from './game-transfer.js';
@@ -80,6 +81,8 @@ interface ExportJob {
   game: GameDir;
   tmp: string;
   maxBytes: number;
+  /** tar members: ['data'] or the checked world paths (data/<path>). */
+  members?: string[];
 }
 
 export async function runExport(
@@ -182,11 +185,14 @@ export async function runExport(
     tmpCreated = true;
     const own = fh;
 
-    progress(`$ tar ${compression === 'zstd' ? '--zstd' : '--gzip'} -c -C ${game.dir} data`);
+    const members = job.members ?? ['data'];
+    progress(
+      `$ tar ${compression === 'zstd' ? '--zstd' : '--gzip'} -c -C ${game.dir} ${members.join(' ')}`,
+    );
     let tooLarge = false;
     tar = ctx.spawn(
       'tar',
-      exportTarArgs(tmp, game.dir, compression),
+      exportTarArgs(tmp, game.dir, compression, members),
       { onStdout: () => undefined, onStderr: () => undefined },
       { timeoutMs: TAR_TIMEOUT_MS, maxOutputBytes: 1024 * 1024 },
     );
@@ -290,6 +296,8 @@ export async function gameExport(
   const st = await lstat(data).catch(() => null);
   if (!st) throw new ActionError('not_found', 'the game has no data folder', false);
   if (!st.isDirectory()) throw new ActionError('bad_path', 'data is not a directory');
+  // M12 world download: only the template's world folders, never configs with passwords.
+  const members = params.paths ? await resolveWorldMembers(game.dir, params.paths) : undefined;
   const backupDir = await ensureBackupDir(game.root, game.name);
   const tmp = path.join(backupDir, exportFileName(rpcId));
 
@@ -298,7 +306,12 @@ export async function gameExport(
   try {
     const sink = ctx.streams.open(rpcId);
     started = true;
-    void runExport({ game, tmp, maxBytes: params.maxBytes }, ctx, sink, opts).finally(release);
+    void runExport(
+      { game, tmp, maxBytes: params.maxBytes, ...(members ? { members } : {}) },
+      ctx,
+      sink,
+      opts,
+    ).finally(release);
     return { streamId: rpcId };
   } finally {
     if (!started) release();

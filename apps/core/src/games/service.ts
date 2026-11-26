@@ -1,19 +1,25 @@
 import { basename } from 'node:path';
-import { and, asc, desc, eq, inArray, or } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, isNull, or, type SQL } from 'drizzle-orm';
 import type { FastifyBaseLogger } from 'fastify';
 import type { z } from 'zod';
 import {
   backupDoneDataSchema,
+  backupFileNameSchema,
   gameBackupsPurgeDataSchema,
+  gameRestoreDoneDataSchema,
   gameStatusDataSchema,
+  gameWakeArmDataSchema,
   homelabPathSchema,
   rconDataSchema,
+  type ModKind,
+  type ServerNetwork,
   type ContainerState,
   type GameStatusData,
   type GameSummary,
   type GameTemplate,
   type ListeningPort,
   type PortMapping,
+  type RpcAction,
   type RpcParamsInput,
   type gameBackupSchema,
   type gameCreateRequestSchema,
@@ -74,6 +80,7 @@ import {
 } from './render.js';
 import { parseBackupResult, translateProgress, type BackupDone } from './agent-text.js';
 import { gameState, type GamePhase } from './status.js';
+import { serverNetworkOf } from '../servers/service.js';
 import type { LoadedTemplate } from './templates.js';
 
 export type GameCreateRequest = z.output<typeof gameCreateRequestSchema>;
@@ -112,6 +119,14 @@ const INTENT_TTL_MS = 5 * 60_000;
 const EVENT_BUFFER = 200;
 const EVENT_MAX_CHARS = 16 * 1024;
 const RESTART_REASON = 'Zentrale neu gestartet';
+/** M12 sleep mode: MOTD in the Minecraft server list (charset of game.wake.arm). */
+export const SLEEP_MOTD = 'Schläft – zum Aufwecken verbinden';
+export const SLEEP_TEXT = 'Schläft';
+/** A wake that did not fit into RAM: the listeners are armed again after this. */
+export const WAKE_RETRY_MS = 60_000;
+const WAKE_TIMEOUT_MS = 15_000;
+/** game.restore: the agent extracts large worlds; generous like a backup. */
+const RESTORE_TIMEOUT_MS = 2 * 60 * 60_000 + 5 * 60_000;
 /** game.backup not_found: the template has no ./data (CS2) or the folder is gone. */
 export const NOTHING_TO_BACK_UP = 'Keine Weltdaten zum Sichern';
 
@@ -200,6 +215,49 @@ export interface GamePublisher {
 }
 
 export type GameListener = (id: string, deleted: boolean) => void;
+
+/** M12 lifecycle events (Discord): online after a start, offline, asleep, woken. */
+export type GameLifecycleEvent = 'online' | 'offline' | 'sleep' | 'wake';
+export type GameLifecycleListener = (id: string, event: GameLifecycleEvent) => void;
+/**
+ * M12 statistics: called after each status poll of a game (`status` null when the
+ * game does not run or does not answer, then open sessions end).
+ */
+export type GameStatusListener = (row: GameServerRow, status: GameStatusData | null) => void;
+
+/** Docker arch name of a server (hello.arch is Node's process.arch), null if unknown. */
+export function dockerArch(arch: string | null): 'amd64' | 'arm64' | null {
+  if (arch === null) return null;
+  const a = arch.toLowerCase();
+  if (a === 'x64' || a === 'amd64' || a === 'x86_64') return 'amd64';
+  if (a === 'arm64' || a === 'aarch64') return 'arm64';
+  return null;
+}
+
+/** Mods/plugins kind of a game: template.mods and the server type value (Paper / Fabric). */
+export function modsKindOf(
+  t: GameTemplate | undefined,
+  values: Record<string, unknown>,
+): ModKind | null {
+  if (!t?.mods) return null;
+  const v = values[t.mods.typeField];
+  if (typeof v !== 'string') return null;
+  if (t.mods.plugins.includes(v)) return 'plugins';
+  if (t.mods.mods.includes(v)) return 'mods';
+  return null;
+}
+
+/** Wake listener ports: public host ports of the game that the wake mode can serve (max 4). */
+export function wakePorts(
+  mode: 'minecraft' | 'minecraft-bedrock' | 'raw',
+  ports: readonly HostPort[],
+): { port: number; protocol: 'tcp' | 'udp' }[] {
+  const want = mode === 'minecraft' ? 'tcp' : mode === 'minecraft-bedrock' ? 'udp' : null;
+  return publicGamePorts(ports)
+    .filter((p) => want === null || p.proto === want)
+    .slice(0, 4)
+    .map((p) => ({ port: p.port, protocol: p.proto }));
+}
 
 export interface GameServiceDeps {
   db: Db;
@@ -292,6 +350,12 @@ export class GameService {
   private refreshQueued = false;
   private control: GameControl | null = null;
   private portAudit: GamePortAudit | null = null;
+  private readonly lifecycle = new Set<GameLifecycleListener>();
+  private readonly statusListeners = new Set<GameStatusListener>();
+  /** Games that announce `online` when they are next seen ok (after a start). */
+  private readonly pendingOnline = new Set<string>();
+  /** Sleeping games whose listeners are re-armed at this time (wake refused by RAM). */
+  private readonly rearmAt = new Map<string, number>();
 
   constructor(private readonly deps: GameServiceDeps) {
     this.templates = deps.templates;
@@ -340,6 +404,36 @@ export class GameService {
         { err: err instanceof Error ? err.name : 'error' },
         'port list release failed',
       );
+    }
+  }
+
+  onLifecycle(fn: GameLifecycleListener): () => void {
+    this.lifecycle.add(fn);
+    return () => this.lifecycle.delete(fn);
+  }
+
+  onStatus(fn: GameStatusListener): () => void {
+    this.statusListeners.add(fn);
+    return () => this.statusListeners.delete(fn);
+  }
+
+  private announce(id: string, event: GameLifecycleEvent): void {
+    for (const fn of this.lifecycle) {
+      try {
+        fn(id, event);
+      } catch (err) {
+        this.logError(err, 'game lifecycle hook failed');
+      }
+    }
+  }
+
+  private reportStatus(row: GameServerRow, status: GameStatusData | null): void {
+    for (const fn of this.statusListeners) {
+      try {
+        fn(row, status);
+      } catch (err) {
+        this.logError(err, 'game status hook failed');
+      }
     }
   }
 
@@ -465,6 +559,11 @@ export class GameService {
     return this.deps.db.select().from(servers).where(eq(servers.id, id)).get();
   }
 
+  /** M12: network of a server (home / cloud / vps / other), for the forwarding hint. */
+  networkOf(serverId: string): ServerNetwork | null {
+    return serverNetworkOf(this.serverRow(serverId)?.network ?? null);
+  }
+
   templateList(): TemplateInfo[] {
     return [...this.templates.values()].map(({ template: t }) => ({
       id: t.id,
@@ -480,23 +579,33 @@ export class GameService {
       })),
       rcon: t.rcon.supported,
       fields: t.fields,
+      wake: t.wake !== 'none',
+      mods: t.mods !== undefined,
+      arch: t.arch,
     }));
   }
 
-  /** The game's container: compose project in its folder, or container_name game-<name>. */
+  /**
+   * M12: refuses a server whose CPU architecture the template's image does not
+   * support (400 "Läuft nicht auf arm64"). Unknown architecture is allowed.
+   */
+  checkArch(templateId: string, serverId: string): void {
+    const t = this.templates.get(templateId)?.template;
+    const arch = dockerArch(this.serverRow(serverId)?.arch ?? null);
+    if (!t || arch === null || t.arch.includes(arch)) return;
+    throw new HttpError(400, 'invalid_input', undefined, `Läuft nicht auf ${arch}`);
+  }
+
+  /**
+   * The game's container: label homelab.game = <name> first (M12); containers
+   * without the label by compose project in its folder or container_name
+   * game-<name>. A container labelled for another game never matches.
+   */
   private containerOf(row: GameServerRow): ContainerRow | undefined {
     const list = this.deps.db
       .select()
       .from(containers)
-      .where(
-        and(
-          eq(containers.serverId, row.serverId),
-          or(
-            eq(containers.composeDir, gameDirOf(row.name)),
-            eq(containers.name, `game-${row.name}`),
-          ),
-        ),
-      )
+      .where(gameContainerWhere(row.serverId, row.name))
       .all();
     return list.find((c) => c.state === 'running') ?? list[0];
   }
@@ -505,15 +614,7 @@ export class GameService {
     return this.deps.db
       .select({ id: containers.id })
       .from(containers)
-      .where(
-        and(
-          eq(containers.serverId, row.serverId),
-          or(
-            eq(containers.composeDir, gameDirOf(row.name)),
-            eq(containers.name, `game-${row.name}`),
-          ),
-        ),
-      )
+      .where(gameContainerWhere(row.serverId, row.name))
       .all()
       .map((r) => r.id);
   }
@@ -558,6 +659,9 @@ export class GameService {
     const memMatch = typeof mem === 'string' ? /^(\d{1,3})([GM])$/.exec(mem) : null;
     const lastBackup = this.lastBackupAt(row.id);
     const running = c?.state === 'running';
+    const sleeping = row.sleeping && row.phase === 'stopped' && !running;
+    // Asleep is shown as such, also while the agent is away (it re-arms on hello).
+    const statusText = sleeping && state.status === 'off' ? SLEEP_TEXT : state.statusText;
     return {
       id: row.id,
       name: row.name,
@@ -569,7 +673,7 @@ export class GameService {
       address: main ? `${host}:${main.port}` : host,
       ports: publicPorts.map((p) => ({ name: p.name, port: p.port, protocol: p.protocol })),
       status: state.status,
-      statusText: state.statusText,
+      statusText,
       players: state.live && status?.players ? status.players : null,
       tps: state.live ? (status?.tps ?? null) : null,
       ramBytes: running ? (c.memBytes ?? null) : null,
@@ -578,6 +682,9 @@ export class GameService {
         : null,
       rcon: tpl?.rcon.supported ?? row.rconSecretEnc !== null,
       autoStopMinutes: row.autoStopMinutes,
+      wakeOnConnect: row.wakeOnConnect && tpl !== undefined && tpl.wake !== 'none',
+      sleeping,
+      modsKind: modsKindOf(tpl, values),
       externalAddress: row.externalAddress,
       values,
       lastBackupAt: lastBackup === null ? null : iso(lastBackup),
@@ -668,6 +775,8 @@ export class GameService {
   }
 
   private cleanup(id: string): void {
+    this.pendingOnline.delete(id);
+    this.rearmAt.delete(id);
     this.busy.delete(id);
     this.waiting.delete(id);
     this.events.delete(id);
@@ -827,14 +936,10 @@ export class GameService {
     const foreign = this.deps.db
       .select({ id: containers.id })
       .from(containers)
-      .where(
-        and(
-          eq(containers.serverId, server.id),
-          or(eq(containers.composeDir, dir), eq(containers.name, `game-${req.name}`)),
-        ),
-      )
+      .where(gameContainerWhere(server.id, req.name, true))
       .get();
     if (taken || foreign) throw new HttpError(409, 'conflict');
+    this.checkArch(t.id, server.id);
     if (!this.deps.hub.isConnected(server.id)) throw new HttpError(409, 'agent_offline');
     const { ports, rconPort } = this.resolvePorts(t, server.id, req.ports);
     const rconPassword = t.rcon.supported ? randomToken(24) : null;
@@ -864,6 +969,9 @@ export class GameService {
               : box.encrypt(JSON.stringify(values.secrets), `game_servers.secrets:${id}`),
           externalAddress: req.externalAddress,
           autoStopMinutes: req.autoStopMinutes,
+          wakeOnConnect: req.wakeOnConnect,
+          sleeping: false,
+          modsRestartNeeded: false,
           phase: 'setup',
           phaseText: 'Wird vorbereitet',
           statusJson: null,
@@ -996,6 +1104,7 @@ export class GameService {
       details: { name: row.name },
     });
     this.emit(id);
+    this.announce(id, 'online');
   }
 
   // ---- polling -----------------------------------------------------------------------
@@ -1064,7 +1173,10 @@ export class GameService {
     );
     await Promise.all(
       rows.map(async (row) => {
-        if (this.containerOf(row)?.state !== 'running') return;
+        if (this.containerOf(row)?.state !== 'running') {
+          this.reportStatus(row, null);
+          return;
+        }
         const prev = parse<GameStatusData>(row.statusJson);
         let st: GameStatusData | null;
         try {
@@ -1084,9 +1196,18 @@ export class GameService {
           })
           .where(eq(gameServers.id, row.id))
           .run();
+        this.reportStatus(row, st.online ? st : null);
       }),
     );
     this.refreshAll();
+    for (const id of [...this.pendingOnline]) {
+      const sum = this.summary(id);
+      if (!sum) this.pendingOnline.delete(id);
+      else if (sum.status === 'ok' || sum.status === 'warn') {
+        this.pendingOnline.delete(id);
+        this.announce(id, 'online');
+      }
+    }
   }
 
   /** Every minute: stop running games that had no players for autoStopMinutes. */
@@ -1104,18 +1225,169 @@ export class GameService {
     );
     for (const row of due) {
       try {
-        await this.action(row.id, 'stop', 'system');
+        await this.action(row.id, 'stop', 'system', { sleep: true });
       } catch {
         continue;
       }
+      const asleep = await this.fallAsleep(row.id);
       this.deps.alerts.log(
         `game:${row.id}:autostop`,
         'info',
-        `Gameserver ${row.name} automatisch gestoppt`,
-        `Seit ${row.autoStopMinutes} Min keine Spieler (${clockTime(now)}).`,
+        asleep ? `Gameserver ${row.name} schläft` : `Gameserver ${row.name} automatisch gestoppt`,
+        asleep
+          ? `Seit ${row.autoStopMinutes} Min keine Spieler (${clockTime(now)}). Der erste Login weckt ihn.`
+          : `Seit ${row.autoStopMinutes} Min keine Spieler (${clockTime(now)}).`,
         row.serverId,
         'game',
       );
+      this.announce(row.id, asleep ? 'sleep' : 'offline');
+    }
+    // Wakes that did not fit into RAM: listen again.
+    for (const [id, at] of [...this.rearmAt]) {
+      if (at > now) continue;
+      this.rearmAt.delete(id);
+      const row = this.row(id);
+      if (row?.sleeping && !this.busy.has(id)) await this.arm(row);
+    }
+  }
+
+  // ---- M12 sleep mode ------------------------------------------------------------
+
+  /** Whether the game should get wake listeners when it is stopped by the sleep mode. */
+  private wakeMode(row: GameServerRow): 'minecraft' | 'minecraft-bedrock' | 'raw' | null {
+    const t = this.templates.get(row.templateId)?.template;
+    if (!t || !row.wakeOnConnect || t.wake === 'none') return null;
+    return t.wake;
+  }
+
+  /**
+   * After a sleep-mode stop: game.wake.arm on the game's public host ports. On
+   * success the game is `sleeping` ("Schläft"). Returns whether it sleeps.
+   */
+  private async fallAsleep(id: string): Promise<boolean> {
+    const row = this.row(id);
+    if (!row || row.phase !== 'stopped' || this.wakeMode(row) === null) return false;
+    return this.arm(row);
+  }
+
+  /** game.wake.arm; sets sleeping. False (and a progress line) when it fails. */
+  private async arm(row: GameServerRow): Promise<boolean> {
+    const mode = this.wakeMode(row);
+    const ports = mode === null ? [] : wakePorts(mode, storedOf(row).ports);
+    if (mode === null || ports.length === 0) return false;
+    if (!this.deps.hub.isConnected(row.serverId)) {
+      // Listeners are armed again when the agent says hello.
+      this.setSleeping(row.id, true);
+      return true;
+    }
+    try {
+      const data = await this.deps.hub.call(
+        row.serverId,
+        'game.wake.arm',
+        { gameId: row.name, mode, ports, motd: SLEEP_MOTD },
+        { timeoutMs: WAKE_TIMEOUT_MS },
+      );
+      const parsed = gameWakeArmDataSchema.safeParse(data);
+      if (!parsed.success || parsed.data.listening.length === 0) {
+        throw new RpcError('failed', 'no listener');
+      }
+    } catch (err) {
+      this.event(row.id, 'error', `Aufwecken nicht möglich: ${rpcReason(err, 'Lauschen')}`);
+      this.setSleeping(row.id, false);
+      return false;
+    }
+    this.setSleeping(row.id, true);
+    return true;
+  }
+
+  /** game.wake.disarm, errors ignored (the agent drops listeners on restart anyway). */
+  private async disarm(row: GameServerRow, serverId = row.serverId): Promise<void> {
+    this.rearmAt.delete(row.id);
+    if (!row.sleeping) return;
+    if (this.deps.hub.isConnected(serverId)) {
+      try {
+        await this.deps.hub.call(
+          serverId,
+          'game.wake.disarm',
+          { gameId: row.name },
+          { timeoutMs: WAKE_TIMEOUT_MS },
+        );
+      } catch (err) {
+        this.logError(err, 'game.wake.disarm failed');
+      }
+    }
+    this.setSleeping(row.id, false);
+  }
+
+  private setSleeping(id: string, sleeping: boolean): void {
+    const r = this.deps.db
+      .update(gameServers)
+      .set({ sleeping, updatedAt: this.deps.now() })
+      .where(eq(gameServers.id, id))
+      .run();
+    if (r.changes > 0) this.emit(id);
+  }
+
+  /**
+   * Event game_wake of `serverId`'s agent: only for a game of THIS server (by
+   * folder name) that is sleeping. Starts it on the normal start path with the
+   * RAM reserve; if it does not fit, it stays asleep, an alert says why, and
+   * the listeners are armed again after a minute.
+   */
+  onWake(serverId: string, gameFolder: string): void {
+    if (!this.active) return;
+    const row = this.deps.db
+      .select()
+      .from(gameServers)
+      .where(and(eq(gameServers.serverId, serverId), eq(gameServers.name, gameFolder)))
+      .get();
+    if (!row?.sleeping || row.phase !== 'stopped' || this.busy.has(row.id)) return;
+    this.track(this.wake(row));
+  }
+
+  private async wake(row: GameServerRow): Promise<void> {
+    try {
+      await this.action(row.id, 'start', 'system');
+    } catch (err) {
+      if (err instanceof HttpError && err.code === 'insufficient_ram') {
+        this.deps.alerts.raise(
+          `game:${row.id}:wake`,
+          'warn',
+          `Gameserver ${row.name} konnte nicht aufwachen`,
+          `${err.userMessage ?? 'Zu wenig RAM'} (${clockTime(this.deps.now())}). Er schläft weiter.`,
+          row.serverId,
+          'game',
+        );
+      } else {
+        this.event(row.id, 'error', `Aufwecken fehlgeschlagen: ${rpcReason(err, 'Start')}`);
+      }
+      // The agent closed its listeners on the wake: listen again in a minute.
+      this.setSleeping(row.id, true);
+      this.rearmAt.set(row.id, this.deps.now() + WAKE_RETRY_MS);
+      return;
+    }
+    writeAudit(this.deps.db, this.deps.now(), {
+      actor: 'system',
+      action: 'game.woken',
+      target: row.id,
+      details: { name: row.name, serverId: row.serverId },
+    });
+    const refused = `game:${row.id}:wake`;
+    if (this.deps.alerts.active(refused)) {
+      this.deps.alerts.resolve(refused, {
+        title: `Gameserver ${row.name} ist aufgewacht`,
+        body: `Gestartet um ${clockTime(this.deps.now())}.`,
+      });
+    }
+    this.announce(row.id, 'wake');
+  }
+
+  /** The agent said hello: its listeners are gone, arm every sleeping game of it again. */
+  rearmServer(serverId: string): void {
+    if (!this.active) return;
+    for (const row of this.rows()) {
+      if (row.serverId !== serverId || !row.sleeping || this.busy.has(row.id)) continue;
+      this.track(this.arm(row));
     }
   }
 
@@ -1145,6 +1417,8 @@ export class GameService {
     action: 'start' | 'stop' | 'restart' | 'backup',
     /** `admin`, `system` or `share:<id>` (a friend's link). */
     actor: 'admin' | 'system' | `share:${string}` = 'admin',
+    /** `sleep`: stop of the sleep mode (keeps wake listeners possible, no offline message). */
+    opts: { sleep?: boolean } = {},
   ): Promise<GameSummary> {
     const row = this.requireRow(id);
     if (action === 'backup') {
@@ -1175,6 +1449,8 @@ export class GameService {
     const hub = this.deps.hub;
     const cIds = this.containerIds(row);
     try {
+      // A start (also through a link or a wake-up) and a manual stop end the sleep.
+      if (!opts.sleep) await this.disarm(row);
       if (action === 'start') {
         await this.runStart(row);
       } else if (action === 'stop') {
@@ -1207,6 +1483,10 @@ export class GameService {
       target: id,
       details: { name: row.name, serverId: row.serverId },
     });
+    if (action === 'stop') {
+      this.pendingOnline.delete(id);
+      if (!opts.sleep) this.announce(id, 'offline');
+    } else this.pendingOnline.add(id);
     return this.summary(id) as GameSummary;
   }
 
@@ -1220,6 +1500,26 @@ export class GameService {
       { timeoutMs: UP_TIMEOUT_MS },
     );
     this.setRunState(row.id, 'running');
+  }
+
+  /** One agent call for the game (M12 mods): 409 agent_offline when not connected. */
+  async callAgent<A extends RpcAction>(
+    row: GameServerRow,
+    action: A,
+    params: RpcParamsInput<A>,
+    timeoutMs: number,
+  ): Promise<unknown> {
+    if (!this.deps.hub.isConnected(row.serverId)) throw new HttpError(409, 'agent_offline');
+    return this.deps.hub.call(row.serverId, action, params, { timeoutMs });
+  }
+
+  /** M12: mods/plugins changed since the last start ("Neustart nötig"). */
+  setModsRestartNeeded(id: string, needed: boolean): void {
+    this.deps.db
+      .update(gameServers)
+      .set({ modsRestartNeeded: needed })
+      .where(eq(gameServers.id, id))
+      .run();
   }
 
   /** compose down in the game folder on its server (the stop path of action()). */
@@ -1334,12 +1634,13 @@ export class GameService {
         statusAt: null,
         emptySince: null,
         updatedAt: this.deps.now(),
+        ...(phase === 'running' ? { sleeping: false, modsRestartNeeded: false } : {}),
       })
       .where(eq(gameServers.id, id))
       .run();
   }
 
-  private async runBackup(row: GameServerRow): Promise<BackupOutcome> {
+  private async runBackup(row: GameServerRow, keepFiles = BACKUP_KEEP): Promise<BackupOutcome> {
     const secrets = this.secretsOf(row);
     const fail = (reason: string, code: string): BackupOutcome => {
       this.event(row.id, 'error', `Backup fehlgeschlagen: ${reason}`);
@@ -1356,7 +1657,7 @@ export class GameService {
       stream = this.deps.hub.stream(
         row.serverId,
         'game.backup',
-        { gameDir: gameDirOf(row.name), keep: BACKUP_KEEP },
+        { gameDir: gameDirOf(row.name), keep: keepFiles },
         { timeoutMs: BACKUP_TIMEOUT_MS },
       );
     } catch (err) {
@@ -1531,9 +1832,12 @@ export class GameService {
     if (req.autoStopMinutes !== undefined) {
       set.autoStopMinutes = req.autoStopMinutes;
     }
+    if (req.wakeOnConnect !== undefined) set.wakeOnConnect = req.wakeOnConnect;
     if (req.values === undefined) {
       if (this.busy.has(id)) throw new HttpError(409, 'busy');
       this.deps.db.update(gameServers).set(set).where(eq(gameServers.id, id)).run();
+      // Wake-on-connect switched off while asleep: stop listening, it just stays off.
+      if (req.wakeOnConnect === false && row.sleeping) await this.disarm(row);
       this.emit(id);
       return this.summary(id) as GameSummary;
     }
@@ -1660,7 +1964,7 @@ export class GameService {
         local: p.local ?? false,
       })),
       changed,
-      forwardingHint: forwardingHint(changed),
+      forwardingHint: forwardingHint(changed, this.networkOf(row.serverId)),
     });
     if (changed.length === 0) return result(this.summary(id) as GameSummary);
 
@@ -1711,6 +2015,9 @@ export class GameService {
       release();
       this.unlock(id);
     }
+    // Asleep: the listeners move to the new ports (re-arming replaces the old ones).
+    const fresh = this.row(id);
+    if (fresh?.sleeping) await this.arm(fresh);
     return result(this.summary(id) as GameSummary);
   }
 
@@ -1780,7 +2087,6 @@ export class GameService {
    * folder /opt/homelab/games/<name>/ there (it would be overwritten).
    */
   folderTakenOn(row: GameServerRow, serverId: string): boolean {
-    const dir = gameDirOf(row.name);
     const game = this.deps.db
       .select({ id: gameServers.id })
       .from(gameServers)
@@ -1789,12 +2095,7 @@ export class GameService {
     const foreign = this.deps.db
       .select({ id: containers.id })
       .from(containers)
-      .where(
-        and(
-          eq(containers.serverId, serverId),
-          or(eq(containers.composeDir, dir), eq(containers.name, `game-${row.name}`)),
-        ),
-      )
+      .where(gameContainerWhere(serverId, row.name, true))
       .get();
     return game !== undefined || foreign !== undefined;
   }
@@ -1818,6 +2119,7 @@ export class GameService {
     const l = this.templates.get(row.templateId);
     if (!l) throw new HttpError(409, 'conflict');
     const t = l.template;
+    this.checkArch(t.id, serverId);
     const names = new Set(t.ports.map((p) => p.name));
     for (const k of Object.keys(requested ?? {})) {
       if (!names.has(k)) throw new HttpError(400, 'invalid_input');
@@ -1865,7 +2167,12 @@ export class GameService {
           : suggestRconPort(t, all);
       if (rconPort === null) throw new HttpError(409, 'conflict');
     }
-    return { ports, rconPort, changed, forwardingHint: targetForwardingHint(ports) };
+    return {
+      ports,
+      rconPort,
+      changed,
+      forwardingHint: targetForwardingHint(ports, this.networkOf(serverId)),
+    };
   }
 
   /** compose.yml and .env of the game with other host ports (secrets from the DB). */
@@ -1902,6 +2209,8 @@ export class GameService {
   moveTo(id: string, serverId: string, ports: HostPort[], rconPort: number | null): void {
     const prev = this.lastSummary.get(id);
     const before = this.row(id);
+    // Asleep on the old server: its listeners go (the game lives on the target now).
+    if (before?.sleeping) this.track(this.disarm(before, before.serverId));
     this.deps.db
       .update(gameServers)
       .set({
@@ -1942,6 +2251,7 @@ export class GameService {
         const offline = backup.code === 'offline' || backup.code === 'disconnected';
         throw new HttpError(offline ? 409 : 502, offline ? 'agent_offline' : 'agent_error');
       }
+      await this.disarm(row);
       for (const c of this.containerIds(row)) this.deps.setIntent(c, 'stop');
       try {
         await this.deps.hub.call(
@@ -1976,6 +2286,150 @@ export class GameService {
     this.deps.alerts.resolveAllWithPrefix(`game:${id}:`);
     this.emit(id, true);
     return row;
+  }
+
+  // ---- M12: restore a backup ------------------------------------------------------------
+
+  /**
+   * Restores a backup of this game (route: step-up). The name must match; the
+   * backup must be one of the game's own files below /opt/homelab/backups/<name>/
+   * (the agent builds the path from gameId + fileName). Runs in the background
+   * under the busy lock: fresh backup, stop (or disarm while asleep),
+   * game.restore, start again if it ran (or arm again if it slept). Progress on
+   * topic game:<id>.
+   */
+  restore(id: string, backupId: string, confirmName: string): GameSummary {
+    const row = this.requireRow(id);
+    if (confirmName !== row.name) throw new HttpError(400, 'confirm_mismatch');
+    const b = this.deps.db
+      .select()
+      .from(gameBackups)
+      .where(and(eq(gameBackups.id, backupId), eq(gameBackups.gameId, id)))
+      .get();
+    if (!b) throw new HttpError(404, 'not_found');
+    const fileName = basename(b.path);
+    if (
+      b.path !== `${BACKUPS_ROOT}${row.name}/${fileName}` ||
+      !backupFileNameSchema.safeParse(fileName).success
+    ) {
+      throw new HttpError(409, 'conflict');
+    }
+    const wasRunning = this.containerOf(row)?.state === 'running';
+    this.lock(row, 'Wiederherstellung läuft');
+    this.track(
+      this.runRestore(row, fileName, wasRunning).finally(() => {
+        this.unlock(id);
+      }),
+    );
+    return this.summary(id) as GameSummary;
+  }
+
+  private async runRestore(
+    row: GameServerRow,
+    fileName: string,
+    wasRunning: boolean,
+  ): Promise<void> {
+    const secrets = this.secretsOf(row);
+    const wasSleeping = row.sleeping;
+    let stopped = false;
+    const fail = async (reason: string): Promise<void> => {
+      this.event(row.id, 'error', `Wiederherstellung fehlgeschlagen: ${reason}`);
+      writeAudit(this.deps.db, this.deps.now(), {
+        actor: 'system',
+        action: 'game.restore_failed',
+        target: row.id,
+        details: { name: row.name, file: fileName, reason },
+      });
+      // The agent keeps the old data on any error: bring the game back as it was.
+      if (stopped && wasRunning) await this.restartAfterRestore(row);
+      if (wasSleeping) {
+        const fresh = this.row(row.id);
+        if (fresh) await this.arm({ ...fresh, sleeping: true });
+      }
+    };
+    this.setBusyText(row.id, 'Wiederherstellung: frisches Backup');
+    // keep + 1: the fresh backup must not push the restored file out of the folder.
+    const backup = await this.runBackup(row, BACKUP_KEEP + 1);
+    if (!backup.ok && backup.code !== 'not_found') return fail(backup.reason);
+    try {
+      if (wasSleeping) await this.disarm(row);
+      if (wasRunning) {
+        this.setBusyText(row.id, 'Wiederherstellung: wird gestoppt');
+        await this.runStop(row);
+        stopped = true;
+      }
+    } catch (err) {
+      return fail(rpcReason(err, 'Stoppen', secrets));
+    }
+    this.setBusyText(row.id, 'Wiederherstellung läuft');
+    this.event(row.id, 'progress', `Wiederherstellung von ${fileName}`);
+    let stream: RpcStream;
+    try {
+      stream = this.deps.hub.stream(
+        row.serverId,
+        'game.restore',
+        { gameId: row.name, fileName },
+        { timeoutMs: RESTORE_TIMEOUT_MS },
+      );
+    } catch (err) {
+      return fail(rpcReason(err, 'Wiederherstellung', secrets));
+    }
+    let result: unknown = null;
+    let partial = '';
+    const onLine = (line: string): void => {
+      if (line.startsWith('result ')) {
+        try {
+          result = JSON.parse(line.slice('result '.length));
+        } catch {
+          result = null;
+        }
+        return;
+      }
+      this.event(row.id, 'progress', translateProgress(scrub(line, secrets)));
+    };
+    stream.on('data', (c: StreamChunk) => {
+      if (c.channel !== 'progress') return;
+      const lines = (partial + c.chunk).split('\n');
+      partial = (lines.pop() ?? '').slice(-4096);
+      for (const line of lines) if (line !== '') onLine(line);
+    });
+    const end = await stream.done;
+    stream.removeAllListeners('data');
+    if (partial !== '') onLine(partial);
+    if (end.code !== 0) {
+      const code = end.error ?? 'failed';
+      return fail(
+        rpcReason(new RpcError(code as RpcFailure, end.detail ?? ''), 'Wiederherstellung', secrets),
+      );
+    }
+    const done = gameRestoreDoneDataSchema.safeParse(result);
+    if (!done.success) return fail('keine gültige Antwort vom Agent');
+    this.event(row.id, 'progress', `Wiederhergestellt: ${fileName}`);
+    writeAudit(this.deps.db, this.deps.now(), {
+      actor: 'system',
+      action: 'game.restored',
+      target: row.id,
+      details: { name: row.name, file: fileName, entries: done.data.entries },
+    });
+    if (wasRunning) await this.restartAfterRestore(row);
+    else if (wasSleeping) {
+      const fresh = this.row(row.id);
+      if (fresh) await this.arm({ ...fresh, sleeping: true });
+    }
+  }
+
+  private async restartAfterRestore(row: GameServerRow): Promise<void> {
+    this.setBusyText(row.id, 'Startet');
+    try {
+      await this.startLocked(row.id);
+      this.pendingOnline.add(row.id);
+    } catch (err) {
+      this.event(
+        row.id,
+        'error',
+        `Start nach der Wiederherstellung fehlgeschlagen: ${rpcReason(err, 'Start')}`,
+      );
+    }
   }
 
   // ---- backups of deleted games (decision 2026-11-26) -------------------------------------
@@ -2067,28 +2521,80 @@ const portRange = (port: number, count: number): string =>
   count > 1 ? `${port}–${port + count - 1}` : String(port);
 
 /**
+ * M12: where the ports have to be opened, from the server's network. home: the
+ * router; cloud: provider firewall (Security List) and iptables; vps: provider
+ * firewall; null / other: the generic text of M6/M11.
+ */
+function hintPrefix(network: ServerNetwork | null, what: 'change' | 'open'): string {
+  switch (network) {
+    case 'home':
+      return what === 'change'
+        ? 'Router: Portweiterleitung anpassen'
+        : 'Router: Portweiterleitung am Ziel einrichten';
+    case 'cloud':
+      return what === 'change'
+        ? 'Firewall des Anbieters (z. B. Security List) und iptables auf dem Server anpassen'
+        : 'Firewall des Anbieters (z. B. Security List) und iptables auf dem Server öffnen';
+    case 'vps':
+      return what === 'change'
+        ? 'Firewall des Anbieters anpassen'
+        : 'Firewall des Anbieters öffnen';
+    default:
+      return what === 'change'
+        ? 'Portweiterleitung anpassen'
+        : 'Portweiterleitung am Ziel einrichten';
+  }
+}
+
+/**
  * M11: "Portweiterleitung am Ziel einrichten: game 25570 (TCP)" for every public
  * port on the new server (the router must forward to the new machine even if
- * the number stayed); null without public ports.
+ * the number stayed); null without public ports. M12: the prefix follows the
+ * target's network.
  */
-export function targetForwardingHint(ports: readonly HostPort[]): string | null {
+export function targetForwardingHint(
+  ports: readonly HostPort[],
+  network: ServerNetwork | null = null,
+): string | null {
   const pub = ports.filter((p) => !p.local);
   if (pub.length === 0) return null;
   const parts = pub.map(
     (p) => `${p.name} ${portRange(p.port, p.count)} (${PROTO_LABEL[p.protocol]})`,
   );
-  return `Portweiterleitung am Ziel einrichten: ${parts.join(', ')}`;
+  return `${hintPrefix(network, 'open')}: ${parts.join(', ')}`;
 }
 
 /** "Portweiterleitung anpassen: game 25565 → 25570 (TCP)"; null if no public port changed. */
-export function forwardingHint(changed: GamePortsUpdateResponse['changed']): string | null {
+export function forwardingHint(
+  changed: GamePortsUpdateResponse['changed'],
+  network: ServerNetwork | null = null,
+): string | null {
   const pub = changed.filter((c) => !c.local);
   if (pub.length === 0) return null;
   const parts = pub.map(
     (c) =>
       `${c.name} ${portRange(c.from, c.count)} → ${portRange(c.to, c.count)} (${PROTO_LABEL[c.protocol]})`,
   );
-  return `Portweiterleitung anpassen: ${parts.join(', ')}`;
+  return `${hintPrefix(network, 'change')}: ${parts.join(', ')}`;
+}
+
+/**
+ * Containers of game <name> on a server: label homelab.game = name, or (without
+ * any label) compose dir /opt/homelab/games/<name> or container name game-<name>.
+ * `anyOwner`: also containers in that folder or with that name that carry
+ * another game's label (a folder that is taken either way).
+ */
+function gameContainerWhere(serverId: string, name: string, anyOwner = false): SQL | undefined {
+  const byPlace = or(
+    eq(containers.composeDir, gameDirOf(name)),
+    eq(containers.name, `game-${name}`),
+  );
+  return and(
+    eq(containers.serverId, serverId),
+    anyOwner
+      ? or(eq(containers.gameLabel, name), byPlace)
+      : or(eq(containers.gameLabel, name), and(isNull(containers.gameLabel), byPlace)),
+  );
 }
 
 function mergeUsed(a: UsedPorts, b: UsedPorts): UsedPorts {

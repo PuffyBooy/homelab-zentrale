@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { request, type Fetch } from './api.js';
+import { download, request, type Fetch } from './api.js';
 import { isOutputResponse, isShareStatus } from './logic.js';
 
 const TOKEN = 'T'.repeat(43);
@@ -88,5 +88,50 @@ describe('share API client', () => {
         r.fetch,
       ),
     ).toEqual({ ok: false, failure: { status: 200, error: 'bad_response' } });
+  });
+});
+
+describe('world download', () => {
+  it('sends the token only in headers and returns the file with progress', async () => {
+    const bytes = new Uint8Array(1000).fill(7);
+    const r = recorder(
+      new Response(bytes, {
+        status: 200,
+        headers: {
+          'Content-Type': 'application/zstd',
+          'Content-Length': '1000',
+          'Content-Disposition': 'attachment; filename="survival-welt.tar.zst"',
+        },
+      }),
+    );
+    const seen: [number, number | null][] = [];
+    const res = await download(
+      { token: TOKEN, pin: '0420' },
+      '/s/api/world',
+      (loaded, total) => seen.push([loaded, total]),
+      r.fetch,
+    );
+    const call = r.calls[0];
+    expect(call?.url).toBe('/s/api/world');
+    expect(call?.url).not.toContain(TOKEN);
+    const headers = call?.init.headers as Record<string, string>;
+    expect(headers.Authorization).toBe(`Share ${TOKEN}`);
+    expect(headers['X-Share-Pin']).toBe('0420');
+    expect(call?.init.credentials).toBe('omit');
+    expect(call?.init.redirect).toBe('error');
+    expect(res.ok && res.data.blob.size).toBe(1000);
+    expect(res.ok && res.data.disposition).toContain('survival-welt.tar.zst');
+    expect(seen[seen.length - 1]).toEqual([1000, 1000]);
+  });
+
+  it('maps the hourly limit and refuses other paths', async () => {
+    const r = recorder(json(429, { ok: false, error: 'rate_limited', retryAfter: 600 }));
+    expect(await download({ token: TOKEN, pin: null }, '/s/api/world', () => {}, r.fetch)).toEqual({
+      ok: false,
+      failure: { status: 429, error: 'rate_limited', retryAfter: 600, triesLeft: undefined },
+    });
+    await expect(
+      download({ token: TOKEN, pin: null }, '/api/games/x/backups', () => {}, r.fetch),
+    ).rejects.toThrow();
   });
 });

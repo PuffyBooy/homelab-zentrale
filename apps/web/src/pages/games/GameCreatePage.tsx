@@ -2,11 +2,12 @@ import type { GameSummary, ServerSummary } from '@hz/shared';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactElement } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router';
-import { Alert, Button, GameTemplates, Tile } from '@hz/ui';
+import { Alert, Button, GameTemplates, Tile, Toggle } from '@hz/ui';
 import { Field } from '../../components/Field.js';
 import { FormError } from '../../components/FormError.js';
 import { SelectField } from '../../components/SelectField.js';
 import { useGames, useServers, useTemplates } from '../../lib/data.js';
+import { archMismatch } from '../../lib/gameFeatures.js';
 import { errorText } from '../../lib/errors.js';
 import { formatBytes, plural } from '../../lib/format.js';
 import {
@@ -117,10 +118,11 @@ function CreateForm({
   const navigate = useNavigate();
   const [params] = useSearchParams();
   const games = useGames();
-  const online = servers.filter((s) => s.connected);
+  const online = servers.filter((s) => s.connected && archMismatch(tpl, s) === null);
   const wanted = params.get('server');
   const initialServer =
-    servers.find((s) => s.id === wanted)?.id ?? (online.length === 1 ? (online[0]?.id ?? '') : '');
+    servers.find((s) => s.id === wanted && archMismatch(tpl, s) === null)?.id ??
+    (online.length === 1 ? (online[0]?.id ?? '') : '');
 
   const [draft, setDraft] = useState<CreateDraft>(() => emptyCreateDraft(tpl, initialServer));
   const [errors, setErrors] = useState<CreateErrors>({});
@@ -183,8 +185,12 @@ function CreateForm({
   function submit(e: FormEvent): void {
     e.preventDefault();
     const res = validateCreate(tpl, draft, taken);
-    if (!res.ok) {
-      setErrors(res.errors);
+    const misfit = archMismatch(
+      tpl,
+      servers.find((s) => s.id === draft.serverId),
+    );
+    if (!res.ok || misfit) {
+      setErrors({ ...(res.ok ? {} : res.errors), ...(misfit ? { serverId: `${misfit}.` } : {}) });
       // Focus the first field with an error (after React painted the messages).
       requestAnimationFrame(() =>
         formRef.current?.querySelector<HTMLElement>('[aria-invalid="true"]')?.focus(),
@@ -253,7 +259,14 @@ function CreateForm({
               onChange={(e) => set('serverId', e.target.value)}
               options={[
                 ...(draft.serverId ? [] : [{ value: '', label: 'Server auswählen' }]),
-                ...servers.map((s) => ({ value: s.id, label: serverLabel(s) })),
+                ...servers.map((s) => {
+                  const misfit = archMismatch(tpl, s);
+                  return {
+                    value: s.id,
+                    label: misfit ? `${serverLabel(s)} · ${misfit}` : serverLabel(s),
+                    disabled: misfit !== null,
+                  };
+                }),
               ]}
               hint={ramHint}
               error={errors.serverId}
@@ -316,12 +329,12 @@ function CreateForm({
 
           <div className="app-form-row">
             <Field
-              label="Auto-Stopp (Minuten ohne Spieler)"
+              label="Schlafen nach … Min ohne Spieler"
               mono
               inputMode="numeric"
               value={draft.autoStopMinutes}
               onChange={(e) => set('autoStopMinutes', e.target.value)}
-              hint="0 = nie automatisch stoppen"
+              hint="0 = nie. Spart RAM, solange niemand spielt."
               error={errors.autoStopMinutes}
               autoComplete="off"
             />
@@ -339,6 +352,15 @@ function CreateForm({
               spellCheck={false}
             />
           </div>
+
+          {tpl.wake ? (
+            <Toggle
+              label="Beim Verbinden aufwecken"
+              hint="Im Schlaf lauscht der Agent auf den Ports. Der erste Login startet den Server."
+              checked={draft.wakeOnConnect}
+              onChange={(on) => setDraft((d) => ({ ...d, wakeOnConnect: on }))}
+            />
+          ) : null}
 
           {errorCount ? (
             <FormError

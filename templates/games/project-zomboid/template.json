@@ -1,0 +1,77 @@
+{
+  "$schema": "../template.schema.json",
+  "id": "project-zomboid",
+  "name": "Project Zomboid",
+  "image": "danixu86/project-zomboid-dedicated-server:42.20.4-release-2",
+  "ram": {
+    "min": "4G",
+    "recommended": "8G"
+  },
+  "ports": [
+    {
+      "name": "game",
+      "container": 16261,
+      "protocol": "udp",
+      "default": 16261,
+      "count": 1
+    },
+    {
+      "name": "direct",
+      "container": 16262,
+      "protocol": "udp",
+      "default": 16262,
+      "count": 1
+    }
+  ],
+  "query": {
+    "method": "gamedig",
+    "port": "game",
+    "type": "projectzomboid"
+  },
+  "rcon": {
+    "supported": true,
+    "port": 27015
+  },
+  "wake": "raw",
+  "arch": [
+    "amd64"
+  ],
+  "dataDir": "./data",
+  "worldPaths": ["Saves"],
+  "fields": [
+    {
+      "key": "DISPLAYNAME",
+      "label": "Servername",
+      "type": "text",
+      "default": "Homelab",
+      "pattern": "[A-Za-z0-9 ._-]{1,40}"
+    },
+    {
+      "key": "PASSWORD",
+      "label": "Server-Passwort (leer oder mind. 8 Zeichen)",
+      "type": "text",
+      "default": "",
+      "optional": true,
+      "pattern": "[^\\s'\"$\\\\]{8,64}",
+      "secret": true
+    },
+    {
+      "key": "PUBLIC",
+      "label": "In der Serverliste zeigen",
+      "type": "boolean",
+      "default": false
+    },
+    {
+      "key": "MEMORY",
+      "label": "RAM",
+      "type": "select",
+      "options": [
+        "4G",
+        "8G",
+        "12G",
+        "16G"
+      ],
+      "default": "8G"
+    }
+  ]
+}

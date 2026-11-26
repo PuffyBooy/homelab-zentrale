@@ -1,7 +1,13 @@
 import net from 'node:net';
 import { GameDig, type QueryOptions } from 'gamedig';
 import { status as javaStatus, statusBedrock } from 'minecraft-server-util';
-import type { GameStatusData, RpcParams } from '@hz/shared';
+import {
+  GAMEDIG_TYPES as SHARED_GAMEDIG_TYPES,
+  type GameStatusData,
+  type RpcParams,
+} from '@hz/shared';
+
+type GamedigType = (typeof SHARED_GAMEDIG_TYPES)[number];
 import {
   cleanName,
   cleanOutput,
@@ -28,15 +34,17 @@ export const RCON_TIMEOUT_MS = 10_000;
 const MAX_NAMES = 200;
 
 /**
- * GameDig types the agent queries. Anything else is refused (gamedig knows hundreds
- * of protocols; we only need the ones of our templates). `password`: the query needs
- * the admin password (Palworld REST API, user `admin`), taken from RCON_PASSWORD.
+ * GameDig types the agent queries (GAMEDIG_TYPES in packages/shared). Anything else
+ * is refused (gamedig knows hundreds of protocols; we only need the ones of our
+ * templates). `password`: the query needs the admin password (Palworld REST API,
+ * user `admin`), taken from RCON_PASSWORD.
  */
-export const GAMEDIG_TYPES: ReadonlyMap<string, { password: boolean }> = new Map([
-  ['valheim', { password: false }],
-  ['counterstrike2', { password: false }],
-  ['palworld', { password: true }],
-]);
+export const GAMEDIG_TYPES: ReadonlyMap<GamedigType, { password: boolean }> = new Map(
+  SHARED_GAMEDIG_TYPES.map((t): [GamedigType, { password: boolean }] => [
+    t,
+    { password: t === 'palworld' },
+  ]),
+);
 
 /** Parses Paper's `tps` answer ("TPS from last 1m, 5m, 15m: *20.0, 19.9, 19.8"): the 1m value. */
 export function parseTps(output: string): number | null {
@@ -151,7 +159,7 @@ async function query(params: RpcParams<'game.status'>, rcon: RconConfig | null):
       };
     }
     case 'gamedig': {
-      const type = params.gamedigType as string;
+      const type = params.gamedigType as GamedigType;
       const spec = GAMEDIG_TYPES.get(type);
       const opts: QueryOptions = {
         type,
@@ -187,7 +195,7 @@ async function query(params: RpcParams<'game.status'>, rcon: RconConfig | null):
 /** Throws invalid_params unless the gamedig type is on the allowlist (and only used with gamedig). */
 export function checkGamedigType(params: RpcParams<'game.status'>): void {
   if (params.method === 'gamedig') {
-    if (!params.gamedigType || !GAMEDIG_TYPES.has(params.gamedigType)) {
+    if (!params.gamedigType || !GAMEDIG_TYPES.has(params.gamedigType as GamedigType)) {
       throw new ActionError('invalid_params', 'gamedigType not allowed');
     }
   } else if (params.gamedigType !== undefined) {
@@ -218,7 +226,7 @@ export async function gameStatusWith(
   const game = await resolveGameDir(params.gameDir, ctx.homelabRoot);
   const needsRcon =
     params.tpsCommand !== undefined ||
-    (params.method === 'gamedig' && GAMEDIG_TYPES.get(params.gamedigType ?? '')?.password);
+    (params.method === 'gamedig' && GAMEDIG_TYPES.get(params.gamedigType as GamedigType)?.password);
   const rcon = needsRcon ? await rconConfig(game.dir, ctx) : null;
 
   const cacheKey = `${game.dir}:${params.port}`;

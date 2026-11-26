@@ -3,7 +3,7 @@ import type { ReactElement } from 'react';
 import { Link, useNavigate } from 'react-router';
 import { Tile } from '@hz/ui';
 import { sortGames } from '../../lib/games.js';
-import { plural } from '../../lib/format.js';
+import { stoppedText } from '../../lib/gameFeatures.js';
 import { GameTile } from './GameTile.js';
 
 const MAX_TILES = 2;
@@ -39,11 +39,7 @@ export function GamesTile({
           </Link>
         }
       >
-        <p className="app-empty">
-          {games.length
-            ? `${games.length === 1 ? 'Der Gameserver ist' : `Alle ${plural(games.length, 'Gameserver', 'Gameserver')} sind`} gestoppt.`
-            : 'Noch keine Gameserver.'}
-        </p>
+        <p className="app-empty">{stoppedText(games)}</p>
       </Tile>
     );
   }

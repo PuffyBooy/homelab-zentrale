@@ -197,7 +197,8 @@ describe('create form', () => {
           ENABLE_WHITELIST: true,
         },
         ports: { game: 25565 },
-        autoStopMinutes: 0,
+        autoStopMinutes: 15,
+        wakeOnConnect: true,
         externalAddress: 'mc.example.org',
       },
     });
@@ -262,6 +263,7 @@ describe('create form', () => {
     expect(externalAddressError('https://mc.example.org')).not.toBeNull();
     const s = validateSettings(tpl, {
       autoStopMinutes: '30',
+      wakeOnConnect: true,
       externalAddress: '',
       fields: fieldDefaults(tpl.fields),
     });
@@ -272,7 +274,12 @@ describe('create form', () => {
       'mc.example.org',
     );
     expect(
-      validateSettings(tpl, { autoStopMinutes: '1441', externalAddress: '', fields: {} }).ok,
+      validateSettings(tpl, {
+        autoStopMinutes: '1441',
+        wakeOnConnect: false,
+        externalAddress: '',
+        fields: {},
+      }).ok,
     ).toBe(false);
   });
 
@@ -289,9 +296,10 @@ describe('create form', () => {
       { key: 'MOTD', label: 'MOTD', type: 'text' as const, default: '', optional: true },
     ];
     const s = validateSettings(
-      { fields },
+      { fields, wake: false },
       {
         autoStopMinutes: '0',
+        wakeOnConnect: true,
         externalAddress: '',
         fields: { SERVER_PASS: '', MOTD: '' },
       },

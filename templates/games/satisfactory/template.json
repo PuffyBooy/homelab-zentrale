@@ -1,0 +1,76 @@
+{
+  "$schema": "../template.schema.json",
+  "id": "satisfactory",
+  "name": "Satisfactory",
+  "image": "wolveix/satisfactory-server:v1.10.0",
+  "ram": {
+    "min": "8G",
+    "recommended": "12G"
+  },
+  "ports": [
+    {
+      "name": "game",
+      "container": 7777,
+      "protocol": "tcp+udp",
+      "default": 7777,
+      "count": 1
+    },
+    {
+      "name": "messaging",
+      "container": 8888,
+      "protocol": "tcp",
+      "default": 8888,
+      "count": 1
+    }
+  ],
+  "query": {
+    "method": "gamedig",
+    "port": "game",
+    "type": "satisfactory"
+  },
+  "rcon": {
+    "supported": false
+  },
+  "wake": "raw",
+  "arch": [
+    "amd64"
+  ],
+  "dataDir": "./data",
+  "fields": [
+    {
+      "key": "SERVERNAME",
+      "label": "Servername",
+      "type": "text",
+      "default": "Homelab",
+      "pattern": "[A-Za-z0-9 ._-]{1,40}"
+    },
+    {
+      "key": "SERVERPASSWORD",
+      "label": "Server-Passwort (leer oder mind. 8 Zeichen)",
+      "type": "text",
+      "default": "",
+      "optional": true,
+      "pattern": "[^\\s'\"$\\\\]{8,64}",
+      "secret": true
+    },
+    {
+      "key": "MAXPLAYERS",
+      "label": "Max. Spieler",
+      "type": "number",
+      "default": 4,
+      "min": 1,
+      "max": 16
+    },
+    {
+      "key": "MEMORY",
+      "label": "RAM",
+      "type": "select",
+      "options": [
+        "8G",
+        "12G",
+        "16G"
+      ],
+      "default": "12G"
+    }
+  ]
+}

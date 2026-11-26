@@ -179,8 +179,12 @@ export class ThrottleService {
     return this.deps.db.select().from(gameServers).where(eq(gameServers.serverId, serverId)).all();
   }
 
-  /** The game a container belongs to: compose dir /opt/homelab/games/<name> or name game-<name>. */
+  /**
+   * The game a container belongs to: its label homelab.game (M12) first; without
+   * a label the compose dir /opt/homelab/games/<name> or the name game-<name>.
+   */
   private gameFor(row: ContainerRow, games: readonly GameServerRow[]): GameServerRow | null {
+    if (row.gameLabel !== null) return games.find((g) => g.name === row.gameLabel) ?? null;
     return (
       games.find(
         (g) => row.composeDir === `${GAMES_ROOT}${g.name}` || row.name === `game-${g.name}`,

@@ -79,6 +79,8 @@ describe('template loader', () => {
     const map = loadTemplates(REPO_TEMPLATES, log);
     expect(log.lines.filter((l) => l.level === 'warn')).toEqual([]);
     expect(map.has('minecraft-java')).toBe(true);
+    // M12: 13 templates, all with ${TZ} as a system value.
+    expect(map.size).toBe(13);
     for (const l of map.values()) expect(gameTemplateSchema.parse(l.template)).toBeTruthy();
   });
 });

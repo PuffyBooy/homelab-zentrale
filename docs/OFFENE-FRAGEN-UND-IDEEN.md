@@ -52,6 +52,7 @@ Alles hier braucht deine Zugänge oder ist nicht rückgängig zu machen. Bis dah
 ## Offene Fragen
 
 - **Prioritäten (M10):** „prepped“ kommt im Repo nicht vor; Annahme: eine eigene App, die als Container läuft. Du markierst sie selbst als `wichtig`, Gameserver als `niedrig`. Standard-Schwelle CPU oder RAM über 90 % für 2 Min, Drosseln auf 1 Kern, Stoppen erst nach weiteren 5 Min und nur mit „darf gestoppt werden“, nie mit Spielern online (außer ausdrücklich erlaubt). Passt das?
+- **Schlafmodus (M12):** Neue Gameserver schlafen standardmäßig nach 15 Min ohne Spieler und wachen beim Verbinden auf. Bestehende Server bleiben, wie sie sind (Aufwecken aus), bis du es in den Einstellungen einschaltest. Passt das?
 - **Wandmodus-Zeitzone:** Die Wandseite zeigt die Zeit in der Zone des Tablets (sie hat keine Admin-Session). Soll der Core die Zeitzone mitschicken?
 
 - **NAS (M13):** Hast du ein UGREEN NASync (welches Modell, wie viele Platten, welches RAID)? Davon hängt ab, ob die Erkennung „UGREEN-NAS“ greift (DMI-Hersteller `UGREEN`). Soll das NAS auch Gameserver-Backups bekommen (M13b, nach dem Gameserver-Meilenstein)? Und sollen Gameserver selbst auf dem NAS laufen dürfen? Dann sollte `/opt/homelab` auf dem Datenvolume liegen (das Systemvolume von UGOS ist klein), z. B. per Bind-Mount von `/volume1/homelab`.
@@ -98,16 +99,8 @@ Sortiert nach Bereich. Nichts davon ist in den Meilensteinen, alles wäre ein ei
 - Release-Notes automatisch aus Commits beim Deploy.
 
 ### Gameserver
-- Mod-/Plugin-Verwaltung für Paper und Fabric (Modrinth-API).
-- Welt-Downloads für Freunde als Link (zeitlich begrenzt).
-- Geplante Neustarts und Backups pro Gameserver, Discord-Webhook „Server ist online“.
-- Spielerstatistik (Spielzeit pro Freund, Spitzenzeiten).
-- Mehr Vorlagen: Satisfactory, Factorio, Enshrouded, Project Zomboid, ARK, Rust, V Rising.
-- Auto-Start beim ersten Verbindungsversuch (Proxy, der den Server weckt).
-- Whitelist-Anfragen: Freund trägt seinen Namen ein, der Admin bestätigt per Push.
-- Feld „Netz: zuhause/Oracle/VPS“ am Server, damit der Hinweis zur Portweiterleitung nicht aus dem Namen geraten wird.
-- Gameserver in der Befehlspalette; Ports nachträglich ändern; Wiederherstellen eines Backups per Knopf.
-- Docker-Labels im Inventar, damit Gameserver-Container über `homelab.game` statt über Ordner/Name erkannt werden.
+- Umgesetzt in M12: Schlafmodus mit Aufwecken beim Verbinden, Zeitpläne (Neustart/Backup), Discord-Webhook, Spielerstatistik, Mods/Plugins über Modrinth, Welt-Download und Whitelist-Anfragen über Benutzerlinks, Backup wiederherstellen, 7 neue Vorlagen, Netz-Feld am Server, Erkennung über das Label `homelab.game`. Befehlspalette und Ports ändern gab es schon.
+- Noch offen: Mods für Forge/NeoForge und CurseForge (braucht API-Key), Modpacks (`.mrpack`), Bedrock-Addons.
 
 ### Websites und Meldungen
 - ntfy als zweiter Push-Kanal (selbst gehostet), E-Mail als dritter.

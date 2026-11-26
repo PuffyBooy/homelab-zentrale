@@ -1,0 +1,27 @@
+# Rendered by the core (see templates/games/README.md).
+# - The image generates its RCON password into data/config/rconpw itself; the agent
+#   cannot know it, so the template has no RCON and RCON (27015) is not published.
+# - Factorio has no query protocol the agent speaks: status comes from the container.
+# - Saves, config and mods are in ./data (backed up). amd64 and arm64 (native).
+services:
+  server:
+    image: factoriotools/factorio:2.1.25
+    container_name: game-${GAME_NAME}
+    restart: unless-stopped
+    mem_limit: ${MEMORY}
+    stop_grace_period: 60s
+    env_file:
+      - .env
+    environment:
+      PUID: '1000'
+      PGID: '1000'
+      PORT: ${PORT_GAME}
+      DLC_SPACE_AGE: ${DLC_SPACE_AGE}
+      TZ: ${TZ}
+    ports:
+      - '${PORT_GAME}:${PORT_GAME}/udp'
+    volumes:
+      - ./data:/factorio
+    labels:
+      homelab.game: ${GAME_NAME}
+      homelab.template: factorio
