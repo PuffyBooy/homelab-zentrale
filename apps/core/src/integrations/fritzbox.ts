@@ -83,11 +83,15 @@ function assertPlainXml(xml: string): void {
   if (/<!DOCTYPE|<!ENTITY/i.test(xml)) throw new IntegrationError('Unerwartete Antwort');
 }
 
-/** Text of the first `<tag>` (optionally namespaced), decoded; null if missing. */
+/**
+ * Text of the first `<tag>` (optionally namespaced), decoded; null if missing.
+ * Every repetition is bounded or stops at the next "<", so a hostile body
+ * (e.g. many unterminated start tags) costs linear time.
+ */
 export function xmlValue(xml: string, tag: string): string | null {
   const name = tag.replace(/[^A-Za-z0-9_-]/g, '');
   const re = new RegExp(
-    `<(?:[A-Za-z0-9_]+:)?${name}(?:\\s[^>]*)?>([^<]*)</(?:[A-Za-z0-9_]+:)?${name}>`,
+    `<(?:[A-Za-z0-9_]{1,40}:)?${name}(?:\\s[^<>]{0,200})?>([^<]*)</(?:[A-Za-z0-9_]{1,40}:)?${name}>`,
   );
   const m = re.exec(xml);
   return m?.[1] === undefined ? null : decodeXml(m[1]).trim();
@@ -107,9 +111,15 @@ function nonNegInt(v: string | null): number | null {
 export function parseHostList(xml: string): FritzDevice[] {
   assertPlainXml(xml);
   const out: FritzDevice[] = [];
-  for (const m of xml.matchAll(/<Item>([\s\S]*?)<\/Item>/g)) {
-    if (out.length >= MAX_DEVICES) break;
-    const item = m[1] ?? '';
+  // indexOf scan instead of a lazy regex: an unterminated <Item> ends the scan (linear).
+  let pos = 0;
+  while (out.length < MAX_DEVICES) {
+    const open = xml.indexOf('<Item>', pos);
+    if (open < 0) break;
+    const close = xml.indexOf('</Item>', open + 6);
+    if (close < 0) break;
+    const item = xml.slice(open + 6, close);
+    pos = close + 7;
     const type = xmlValue(item, 'InterfaceType') ?? '';
     const ip = clip(xmlValue(item, 'IPAddress'), 45);
     const name = (xmlValue(item, 'HostName') ?? '').slice(0, 120);
@@ -133,6 +143,8 @@ export type FritzData = Omit<FritzStatus, 'fetchedAt' | 'error'>;
 export class FritzService extends IntegrationService<FritzData> {
   private challenge: DigestChallenge | null = null;
   private nc = 0;
+  /** SOAP calls run one after another: poll and reboot share challenge and nc. */
+  private queue: Promise<unknown> = Promise.resolve();
 
   constructor(deps: IntegrationDeps) {
     super(deps, 'fritzbox', 'FRITZ!Box', FRITZ_POLL_MS, FRITZ_CACHE_MS);
@@ -161,8 +173,15 @@ export class FritzService extends IntegrationService<FritzData> {
     };
   }
 
+  /** One SOAP call, queued behind any running one, so a nonce count is never reused. */
+  private soap(cfg: ReadyConfig, name: ActionName): Promise<string> {
+    const run = this.queue.then(() => this.soapNow(cfg, name));
+    this.queue = run.catch(() => undefined);
+    return run;
+  }
+
   /** One SOAP call; answers the digest challenge once. */
-  private async soap(cfg: ReadyConfig, name: ActionName): Promise<string> {
+  private async soapNow(cfg: ReadyConfig, name: ActionName): Promise<string> {
     const a = ACTIONS[name];
     const uri = requestUrl({ base: cfg.url, path: a.path }).pathname;
     const gen = this.generation;

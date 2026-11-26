@@ -104,6 +104,7 @@ export const INTEGRATION_ERRORS = [
   'Antwort zu groß',
   'Unerwartete Antwort',
   'Zugangsdaten nicht lesbar, bitte neu eintragen',
+  'Zu viele Anmeldungen am Pi-hole',
 ] as const;
 
 // GET /api/<integration>/settings

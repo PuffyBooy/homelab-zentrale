@@ -235,6 +235,59 @@ describe('settings changes', () => {
     );
   });
 
+  it('a secret stored before any URL is dropped when the URL comes without it', async () => {
+    const pve = await fake((_q, r) => json(r, 200, { data: [] }));
+    s = await withIntegrations();
+    const early = await s.configure('proxmox', { username: PVE_TOKEN_ID, secret: SENTINEL });
+    expect(integrationSettingsSchema.parse(early.json())).toMatchObject({
+      url: null,
+      secretSet: true,
+      status: 'off',
+    });
+    const later = await s.configure('proxmox', { url: pve.url });
+    expect(integrationSettingsSchema.parse(later.json())).toMatchObject({
+      url: pve.url,
+      secretSet: false,
+      status: 'off',
+    });
+    await s.req('POST', '/api/proxmox/test', {});
+    s.t.clock.advance(60_000);
+    await tickIntegrations(s.t);
+    expect(pve.requests).toHaveLength(0);
+    const audit = s.t.db.db
+      .select()
+      .from(auditLog)
+      .all()
+      .filter((r) => r.action === 'proxmox.settings')
+      .map((r) => JSON.parse(r.detailsJson ?? '{}') as Record<string, unknown>);
+    expect(audit.at(-1)).toMatchObject({ urlChanged: true, secretDropped: true });
+
+    // URL and secret in the same request: kept and used.
+    const both = await s.configure('proxmox', { url: `${pve.url}/`, secret: OTHER_SECRET });
+    expect(integrationSettingsSchema.parse(both.json())).toMatchObject({
+      secretSet: true,
+      status: 'ok',
+    });
+    expect(pve.requests.at(-1)?.headers.authorization).toBe(
+      `PVEAPIToken=${PVE_TOKEN_ID}=${OTHER_SECRET}`,
+    );
+    // First URL: only together with a secret, even after a clear.
+    await s.stepUp();
+    expect((await s.req('DELETE', '/api/proxmox/settings')).statusCode).toBe(200);
+    const fresh = await s.configure('proxmox', {
+      url: pve.url,
+      username: PVE_TOKEN_ID,
+      secret: SENTINEL,
+    });
+    expect(integrationSettingsSchema.parse(fresh.json())).toMatchObject({
+      secretSet: true,
+      status: 'ok',
+    });
+    expect(pve.requests.map((r) => r.headers.authorization)).toEqual(
+      expect.arrayContaining([`PVEAPIToken=${PVE_TOKEN_ID}=${SENTINEL}`]),
+    );
+  });
+
   it('an undecryptable secret shows an error and is never sent', async () => {
     const pve = await fake((_q, r) => json(r, 200, { data: [] }));
     s = await withIntegrations();
@@ -350,6 +403,38 @@ describe('secrets never leave the core', () => {
       status: 'error',
       error: 'Antwort zu groß',
     });
+  });
+});
+
+describe('rate limits', () => {
+  it('POST /test: 5 per minute per integration (429 rate_limited), session required', async () => {
+    s = await withIntegrations();
+    const anon = await s.t.app.inject({
+      method: 'POST',
+      url: '/api/proxmox/test',
+      headers: { host: HOST },
+    });
+    expect(anon.statusCode).toBe(401);
+    for (let i = 0; i < 5; i++) {
+      expect((await s.req('POST', '/api/proxmox/test', {})).statusCode, String(i)).toBe(200);
+    }
+    const limited = await s.req('POST', '/api/proxmox/test', {});
+    expect(limited.statusCode).toBe(429);
+    expect(limited.json()).toMatchObject({ ok: false, error: 'rate_limited' });
+    expect(Number(limited.headers['retry-after'])).toBeGreaterThan(0);
+    // Per integration: the others still have their own budget.
+    expect((await s.req('POST', '/api/fritzbox/test', {})).statusCode).toBe(200);
+    s.t.clock.advance(60_000);
+    expect((await s.req('POST', '/api/proxmox/test', {})).statusCode).toBe(200);
+  });
+
+  it('FRITZ!Box reboot: 2 per 10 minutes, also when it fails', async () => {
+    s = await withIntegrations();
+    await s.stepUp();
+    for (let i = 0; i < 2; i++) {
+      expect((await s.req('POST', '/api/fritzbox/reboot', { confirm: true })).statusCode).toBe(409);
+    }
+    expect((await s.req('POST', '/api/fritzbox/reboot', { confirm: true })).statusCode).toBe(429);
   });
 });
 

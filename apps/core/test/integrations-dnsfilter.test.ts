@@ -24,10 +24,29 @@ class FakePihole {
   blocking: 'enabled' | 'disabled' = 'enabled';
   timer: number | null = null;
   auths = 0;
+  /** Session ids given back with DELETE /api/auth. */
+  logouts: string[] = [];
+  /** All API seats taken: auth answers 429. */
+  seatsFull = false;
 
   constructor() {
     fakes.push(this.server);
     this.server.handler = (q, r) => {
+      if (q.method === 'DELETE' && q.url === '/api/auth') {
+        const sid = String(q.headers['x-ftl-sid'] ?? '');
+        this.logouts.push(sid);
+        if (!this.sids.delete(sid)) {
+          json(r, 401, { error: { key: 'unauthorized' } });
+          return;
+        }
+        r.statusCode = 204;
+        r.end();
+        return;
+      }
+      if (q.method === 'POST' && q.url === '/api/auth' && this.seatsFull) {
+        json(r, 429, { error: { key: 'api_seats_exceeded', message: 'API seats exceeded' } });
+        return;
+      }
       if (q.method === 'POST' && q.url === '/api/auth') {
         const body = JSON.parse(q.body) as { password?: string };
         if (body.password !== SENTINEL) {
@@ -167,6 +186,76 @@ describe('Pi-hole v6', () => {
     ]);
   });
 
+  it('sessions are given back: after a 401, on a settings change and when the module goes off', async () => {
+    const pi = new FakePihole();
+    await pi.server.start();
+    const other = new FakePihole();
+    await other.server.start();
+    s = await withIntegrations();
+    await s.configure('dnsfilter', { url: pi.server.url, secret: SENTINEL });
+    expect(pi.auths).toBe(1);
+    expect(pi.logouts).toEqual([]);
+
+    // Expired on the Pi-hole: the old sid is deleted before the new login.
+    pi.sids.clear();
+    expect((await s.req('POST', '/api/dnsfilter/blocking', { enabled: true })).statusCode).toBe(
+      200,
+    );
+    expect(pi.logouts).toEqual(['sid-1-abcdefghijkl']);
+    const order = pi.server.requests.map((r) => `${r.method} ${r.url}`);
+    const del = order.lastIndexOf('DELETE /api/auth');
+    expect(order.slice(del, del + 2)).toEqual(['DELETE /api/auth', 'POST /api/auth']);
+    expect(pi.sids).toEqual(new Set(['sid-2-abcdefghijkl']));
+
+    // Settings change (new host): the session on the old host is deleted there.
+    await s.configure('dnsfilter', { url: other.server.url, secret: SENTINEL });
+    await s.t.app.hzCore.integrations.idle();
+    expect(pi.logouts).toEqual(['sid-1-abcdefghijkl', 'sid-2-abcdefghijkl']);
+    expect(pi.sids.size).toBe(0);
+    // The old sid never goes to the new host.
+    expect(other.server.requests.map((r) => r.headers['x-ftl-sid'])).not.toContain(
+      'sid-2-abcdefghijkl',
+    );
+    expect(other.sids.size).toBe(1);
+
+    // Module off: logged out as well.
+    expect((await s.req('PUT', '/api/settings/modules', { dnsfilter: false })).statusCode).toBe(
+      200,
+    );
+    await s.t.app.hzCore.integrations.idle();
+    expect(other.logouts).toEqual(['sid-1-abcdefghijkl']);
+    expect(other.sids.size).toBe(0);
+  });
+
+  it('a failing logout is ignored', async () => {
+    const pi = new FakePihole();
+    await pi.server.start();
+    s = await withIntegrations();
+    await s.configure('dnsfilter', { url: pi.server.url, secret: SENTINEL });
+    await pi.server.stop();
+    expect((await s.req('PUT', '/api/settings/modules', { dnsfilter: false })).statusCode).toBe(
+      200,
+    );
+    await s.t.app.hzCore.integrations.idle();
+    expect(s.t.app.hzCore.integrations.dnsfilter.isEnabled()).toBe(false);
+  });
+
+  it('all API seats taken (429): a fixed, clear error text', async () => {
+    const pi = new FakePihole();
+    pi.seatsFull = true;
+    await pi.server.start();
+    s = await withIntegrations();
+    const put = await s.configure('dnsfilter', { url: pi.server.url, secret: SENTINEL });
+    expect(integrationSettingsSchema.parse(put.json())).toMatchObject({
+      status: 'error',
+      error: 'Zu viele Anmeldungen am Pi-hole',
+    });
+    const res = await s.req('POST', '/api/dnsfilter/blocking', { enabled: false, minutes: 5 });
+    expect(res.statusCode).toBe(502);
+    expect(res.json()).toMatchObject({ message: 'DNS-Filter: Zu viele Anmeldungen am Pi-hole' });
+    expect(JSON.stringify(res.json())).not.toContain('seats');
+  });
+
   it('wrong password: status error', async () => {
     const pi = new FakePihole();
     await pi.server.start();
@@ -252,5 +341,30 @@ describe('DNS filter input', () => {
     ).toBe(false);
     const ok = await s.req('POST', '/api/dnsfilter/blocking', { enabled: false, minutes: 60 });
     expect(ok.statusCode).toBe(200);
+  });
+
+  it('blocking changes are limited to 10 per minute (429 rate_limited)', async () => {
+    const pi = new FakePihole();
+    await pi.server.start();
+    s = await withIntegrations();
+    await s.configure('dnsfilter', { url: pi.server.url, secret: SENTINEL });
+    // Invalid input is refused before it counts.
+    expect((await s.req('POST', '/api/dnsfilter/blocking', {})).statusCode).toBe(400);
+    for (let i = 0; i < 10; i++) {
+      const body = i % 2 === 0 ? { enabled: true } : { enabled: false, minutes: 5 };
+      const res = await s.req('POST', '/api/dnsfilter/blocking', body);
+      expect(res.statusCode, String(i)).toBe(200);
+    }
+    const posts = () =>
+      pi.server.requests.filter((r) => r.method === 'POST' && r.url === '/api/dns/blocking');
+    expect(posts()).toHaveLength(10);
+    const limited = await s.req('POST', '/api/dnsfilter/blocking', { enabled: true });
+    expect(limited.statusCode).toBe(429);
+    expect(limited.json()).toMatchObject({ ok: false, error: 'rate_limited' });
+    expect(posts()).toHaveLength(10);
+    s.t.clock.advance(60_000);
+    expect((await s.req('POST', '/api/dnsfilter/blocking', { enabled: true })).statusCode).toBe(
+      200,
+    );
   });
 });

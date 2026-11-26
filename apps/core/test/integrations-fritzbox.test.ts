@@ -183,6 +183,31 @@ describe('digest and XML helpers', () => {
     const many = `<List>${'<Item><HostName>x</HostName></Item>'.repeat(1200)}</List>`;
     expect(parseHostList(many)).toHaveLength(1000);
   });
+
+  it('hostile XML parses in linear time (unterminated items and start tags)', () => {
+    const size = 4 * 1024 * 1024;
+    const items = '<Item>'.repeat(Math.ceil(size / 6)).slice(0, size);
+    const tags = '<NewModelName '.repeat(Math.ceil(size / 14)).slice(0, size);
+    const mixed = `<List>${'<Item><HostName>a'.repeat(Math.ceil(size / 17))}`.slice(0, size);
+    let t = performance.now();
+    expect(parseHostList(items)).toEqual([]);
+    expect(performance.now() - t).toBeLessThan(500);
+    t = performance.now();
+    expect(xmlValue(tags, 'NewModelName')).toBeNull();
+    expect(parseHostList(tags)).toEqual([]);
+    expect(performance.now() - t).toBeLessThan(500);
+    t = performance.now();
+    expect(parseHostList(mixed)).toEqual([]);
+    expect(xmlValue(mixed, 'HostName')).toBeNull();
+    expect(performance.now() - t).toBeLessThan(500);
+    // Attributes are still accepted, within bounds.
+    expect(xmlValue('<NewModelName a="1">FRITZ!Box</NewModelName>', 'NewModelName')).toBe(
+      'FRITZ!Box',
+    );
+    expect(
+      xmlValue(`<NewModelName a="${'x'.repeat(300)}">FRITZ!Box</NewModelName>`, 'NewModelName'),
+    ).toBeNull();
+  });
 });
 
 describe('FRITZ!Box', () => {
@@ -333,5 +358,53 @@ describe('FRITZ!Box', () => {
       error: 'Unerwartete Antwort',
     });
     expect(other.requests).toHaveLength(0);
+  });
+
+  it('poll and reboot run one after another: a nonce count is never reused', async () => {
+    const { s, box } = await setup();
+    const seen: string[] = [];
+    const handler = box.server.handler;
+    box.server.handler = (q, r) => {
+      const h = q.headers.authorization;
+      if (typeof h === 'string') {
+        const a = parseAuth(h);
+        const key = `${a.nonce}/${a.nc}`;
+        // A real box refuses a replayed nonce count.
+        if (a.nonce === box.nonce && seen.includes(key)) {
+          r.statusCode = 401;
+          r.end();
+          return;
+        }
+        if (a.nonce === box.nonce) seen.push(key);
+      }
+      handler(q, r);
+    };
+    // A new nonce: every queued call would answer the challenge and start nc at 1 again.
+    box.nonce = 'fresh-nonce-3';
+    s.t.clock.advance(60_000);
+    const [test, reboot] = await Promise.all([
+      s.req('POST', '/api/fritzbox/test', {}),
+      s.req('POST', '/api/fritzbox/reboot', { confirm: true }),
+    ]);
+    expect(reboot.statusCode).toBe(200);
+    expect(integrationSettingsSchema.parse(test.json())).toMatchObject({ status: 'ok' });
+    expect(box.rebooted).toBe(1);
+    expect(new Set(seen).size).toBe(seen.length);
+    expect(seen.length).toBeGreaterThan(1);
+  });
+
+  it('reboot is limited to 2 per 10 minutes (429 rate_limited)', async () => {
+    const { s, box } = await setup();
+    for (let i = 0; i < 2; i++) {
+      expect((await s.req('POST', '/api/fritzbox/reboot', { confirm: true })).statusCode).toBe(200);
+    }
+    const third = await s.req('POST', '/api/fritzbox/reboot', { confirm: true });
+    expect(third.statusCode).toBe(429);
+    expect(third.json()).toMatchObject({ ok: false, error: 'rate_limited' });
+    expect(box.rebooted).toBe(2);
+    s.t.clock.advance(10 * 60_000);
+    await s.stepUp();
+    expect((await s.req('POST', '/api/fritzbox/reboot', { confirm: true })).statusCode).toBe(200);
+    expect(box.rebooted).toBe(3);
   });
 });

@@ -1,7 +1,8 @@
-import { lookup as dnsLookup, type LookupAddress, type LookupOptions } from 'node:dns';
+import dns, { type LookupAddress, type LookupOptions } from 'node:dns';
 import http from 'node:http';
 import https from 'node:https';
 import type { LookupFunction } from 'node:net';
+import { isLinkLocalAddress } from '../integrations/http.js';
 
 /** Hard limit for one outgoing message (connect + send + status line). */
 export const NOTIFY_TIMEOUT_MS = 8_000;
@@ -34,37 +35,41 @@ export interface NotifyTransport {
   post(req: NotifyRequest): Promise<NotifyResponse>;
 }
 
-function isLinkLocal(address: string, family: number): boolean {
-  const a = address.toLowerCase();
-  if (family === 4) return a.startsWith('169.254.');
-  return (
-    /^fe[89ab][0-9a-f]:/.test(a) || a.startsWith('::ffff:169.254.') || a.startsWith('::ffff:a9fe:')
-  );
-}
+/** Resolves a host name to all its addresses (injectable for tests). */
+export type NotifyLookup = (hostname: string, options: LookupOptions) => Promise<LookupAddress[]>;
+
+const systemLookup: NotifyLookup = (hostname, options) =>
+  dns.promises.lookup(hostname, { ...options, all: true });
 
 /**
  * DNS lookup that refuses link-local answers (cloud metadata), so a host name
- * that resolves to 169.254.169.254 is treated like the literal address.
+ * that resolves to 169.254.169.254 is treated like the literal address. Uses
+ * the same check as the integrations (all IPv6 and IPv4-mapped notations).
  */
-export const guardedLookup: LookupFunction = (hostname, options, callback) => {
-  dnsLookup(hostname, { ...(options as LookupOptions), all: true }, (err, addresses) => {
-    if (err) {
-      callback(err, '', 0);
-      return;
-    }
-    const list = addresses as LookupAddress[];
-    if (list.length === 0 || list.some((x) => isLinkLocal(x.address, x.family))) {
-      callback(new NotifyTransportError('blocked'), '', 0);
-      return;
-    }
-    if ((options as LookupOptions).all === true) {
-      (callback as unknown as (e: null, a: LookupAddress[]) => void)(null, list);
-      return;
-    }
-    const first = list[0] as LookupAddress;
-    callback(null, first.address, first.family);
-  });
-};
+export function createGuardedLookup(resolve: NotifyLookup = systemLookup): LookupFunction {
+  return (hostname, options, callback) => {
+    const opts = options as LookupOptions;
+    resolve(hostname, opts).then(
+      (list) => {
+        if (list.length === 0 || list.some((x) => isLinkLocalAddress(x.address))) {
+          callback(new NotifyTransportError('blocked'), '', 0);
+          return;
+        }
+        if (opts.all === true) {
+          (callback as unknown as (e: null, a: LookupAddress[]) => void)(null, list);
+          return;
+        }
+        const first = list[0] as LookupAddress;
+        callback(null, first.address, first.family);
+      },
+      (err: unknown) => {
+        callback(err as NodeJS.ErrnoException, '', 0);
+      },
+    );
+  };
+}
+
+export const guardedLookup: LookupFunction = createGuardedLookup();
 
 const TLS_CODES = new Set([
   'CERT_HAS_EXPIRED',
@@ -90,55 +95,60 @@ function failureOf(err: unknown): NotifyTransportFailure {
  * up to 64 KiB and ignored; error details never leave this function (only the
  * failure kind).
  */
-export const httpNotifyTransport: NotifyTransport = {
-  post(req) {
-    return new Promise<NotifyResponse>((resolve, reject) => {
-      let url: URL;
-      try {
-        url = new URL(req.url);
-      } catch {
-        reject(new NotifyTransportError('blocked'));
-        return;
-      }
-      if (url.protocol !== 'https:' && url.protocol !== 'http:') {
-        reject(new NotifyTransportError('blocked'));
-        return;
-      }
-      const body = Buffer.from(req.body, 'utf8');
-      const mod = url.protocol === 'https:' ? https : http;
-      let settled = false;
-      const done = (fn: () => void): void => {
-        if (settled) return;
-        settled = true;
-        clearTimeout(timer);
-        fn();
-      };
-      const request = mod.request(
-        url,
-        {
-          method: 'POST',
-          headers: { ...req.headers, 'content-length': String(body.length) },
-          lookup: guardedLookup,
-          agent: false,
-        },
-        (res) => {
-          const status = res.statusCode ?? 0;
-          let read = 0;
-          res.on('data', (chunk: Buffer) => {
-            read += chunk.length;
-            if (read > MAX_RESPONSE_BYTES) res.destroy();
-          });
-          res.on('error', () => undefined);
-          res.on('close', () => done(() => resolve({ status })));
-          res.on('end', () => done(() => resolve({ status })));
-        },
-      );
-      const timer = setTimeout(() => {
-        done(() => reject(new NotifyTransportError('timeout')));
-        request.destroy();
-      }, NOTIFY_TIMEOUT_MS);
-      request.on('error', (err) => done(() => reject(new NotifyTransportError(failureOf(err)))));
-      request.end(body);
-    });
-  },
-};
+export function createHttpNotifyTransport(opts: { lookup?: NotifyLookup } = {}): NotifyTransport {
+  const lookup = opts.lookup === undefined ? guardedLookup : createGuardedLookup(opts.lookup);
+  return {
+    post(req) {
+      return new Promise<NotifyResponse>((resolve, reject) => {
+        let url: URL;
+        try {
+          url = new URL(req.url);
+        } catch {
+          reject(new NotifyTransportError('blocked'));
+          return;
+        }
+        if (url.protocol !== 'https:' && url.protocol !== 'http:') {
+          reject(new NotifyTransportError('blocked'));
+          return;
+        }
+        const body = Buffer.from(req.body, 'utf8');
+        const mod = url.protocol === 'https:' ? https : http;
+        let settled = false;
+        const done = (fn: () => void): void => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timer);
+          fn();
+        };
+        const request = mod.request(
+          url,
+          {
+            method: 'POST',
+            headers: { ...req.headers, 'content-length': String(body.length) },
+            lookup,
+            agent: false,
+          },
+          (res) => {
+            const status = res.statusCode ?? 0;
+            let read = 0;
+            res.on('data', (chunk: Buffer) => {
+              read += chunk.length;
+              if (read > MAX_RESPONSE_BYTES) res.destroy();
+            });
+            res.on('error', () => undefined);
+            res.on('close', () => done(() => resolve({ status })));
+            res.on('end', () => done(() => resolve({ status })));
+          },
+        );
+        const timer = setTimeout(() => {
+          done(() => reject(new NotifyTransportError('timeout')));
+          request.destroy();
+        }, NOTIFY_TIMEOUT_MS);
+        request.on('error', (err) => done(() => reject(new NotifyTransportError(failureOf(err)))));
+        request.end(body);
+      });
+    },
+  };
+}
+
+export const httpNotifyTransport: NotifyTransport = createHttpNotifyTransport();

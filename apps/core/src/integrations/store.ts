@@ -45,7 +45,10 @@ export interface UpdateResult {
   urlChanged: boolean;
   usernameChanged: boolean;
   secretChanged: boolean;
-  /** The URL origin changed without a new secret: the old one is gone. */
+  /**
+   * The URL was set for the first time or its origin changed without a new
+   * secret in the same request: the stored one is gone.
+   */
   secretDropped: boolean;
   caChanged: boolean;
   variantChanged: boolean;
@@ -140,8 +143,9 @@ export class IntegrationStore {
     const now = this.now();
     writeSetting(this.db, this.settingsKey, next, now);
     this.cache = null;
+    // First URL or a new origin: a stored secret was not entered for this host.
     const originChanged =
-      prev.url !== null && next.url !== null && urlOrigin(prev.url) !== urlOrigin(next.url);
+      next.url !== null && (prev.url === null || urlOrigin(prev.url) !== urlOrigin(next.url));
     let secretDropped = false;
     if (body.secret !== undefined) {
       writeSetting(this.db, this.secretKey, this.box.encrypt(body.secret, this.secretAad), now);

@@ -11,7 +11,7 @@ import { integrationUrlSchema, type INTEGRATION_ERRORS } from '@hz/shared';
  *   path stays on its origin;
  * - the host name is resolved here and refused if any address is link-local
  *   (DNS rebinding to cloud metadata); the socket connects to the checked
- *   address only;
+ *   addresses only, one after another (IPv4 first) while a connect fails;
  * - redirects are never followed (a 3xx is an error);
  * - hard total timeout and response cap;
  * - a pasted CA is passed as `ca`, verification is never switched off.
@@ -54,7 +54,7 @@ export interface IntegrationRequest {
   path: string;
   /** Resolve `path` against the origin instead of the base path (FRITZ!Box host list). */
   fromOrigin?: boolean;
-  method?: 'GET' | 'POST' | 'PUT';
+  method?: 'GET' | 'POST' | 'PUT' | 'DELETE';
   headers?: Record<string, string>;
   body?: string;
   /** PEM of a CA or the self-signed server certificate. */
@@ -146,6 +146,15 @@ export function requestUrl(req: Pick<IntegrationRequest, 'base' | 'path' | 'from
   return url;
 }
 
+/** Socket errors before anything was sent: the next address may work. */
+const CONNECT_CODES = new Set([
+  'ECONNREFUSED',
+  'EHOSTUNREACH',
+  'ENETUNREACH',
+  'EADDRNOTAVAIL',
+  'EAFNOSUPPORT',
+]);
+
 function codedError(code: string): Error & { code: string } {
   return Object.assign(new Error(code), { code });
 }
@@ -161,8 +170,11 @@ export class IntegrationHttp {
     this.lookup = opts.lookup ?? defaultLookup;
   }
 
-  /** Checked address to connect to (literal IPs pass through after the check). */
-  private async resolve(hostname: string): Promise<LookupAddress> {
+  /**
+   * Checked addresses to connect to, IPv4 first (literal IPs pass through after
+   * the check). One link-local answer refuses the whole name.
+   */
+  private async resolve(hostname: string): Promise<LookupAddress[]> {
     const host = hostname.replace(/^\[|\]$/g, '');
     const family = net.isIP(host);
     let addrs: LookupAddress[];
@@ -175,11 +187,11 @@ export class IntegrationHttp {
         throw new IntegrationError('Nicht erreichbar');
       }
     }
-    const first = addrs[0];
-    if (!first || addrs.some((a) => isLinkLocalAddress(a.address))) {
+    if (addrs.length === 0 || addrs.some((a) => isLinkLocalAddress(a.address))) {
       throw new IntegrationError('Nicht erreichbar');
     }
-    return first;
+    // Stable sort: IPv4 before IPv6, otherwise the resolver's order.
+    return [...addrs].sort((a, b) => (a.family === 4 ? 0 : 1) - (b.family === 4 ? 0 : 1));
   }
 
   /**
@@ -189,9 +201,9 @@ export class IntegrationHttp {
   async request(req: IntegrationRequest): Promise<IntegrationResponse> {
     const url = requestUrl(req);
     const deadline = AbortSignal.timeout(this.timeoutMs);
-    let target: LookupAddress;
+    let targets: LookupAddress[];
     try {
-      target = await Promise.race([
+      targets = await Promise.race([
         this.resolve(url.hostname),
         new Promise<never>((_r, reject) =>
           deadline.addEventListener('abort', () => reject(codedError('HZ_TIMEOUT')), {
@@ -202,11 +214,17 @@ export class IntegrationHttp {
     } catch (err) {
       throw new IntegrationError(errorTextFor(err));
     }
-    try {
-      return await this.send(url, target, req, deadline);
-    } catch (err) {
-      throw new IntegrationError(errorTextFor(err));
+    let last: unknown = codedError('HZ_FAILED');
+    for (const target of targets) {
+      try {
+        return await this.send(url, target, req, deadline);
+      } catch (err) {
+        last = err;
+        // Only a failed connect moves on (nothing was sent); still only checked addresses.
+        if (deadline.aborted || !CONNECT_CODES.has(errorCode(err))) break;
+      }
     }
+    throw new IntegrationError(errorTextFor(last));
   }
 
   private send(

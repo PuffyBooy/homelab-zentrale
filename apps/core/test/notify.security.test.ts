@@ -5,7 +5,12 @@ import type { NotifyChannel } from '@hz/shared';
 import { auditLog, settings } from '../src/db/schema.js';
 import { writeSetting } from '../src/db/settings.js';
 import { channelKey, secretAad, storedChannelSchema } from '../src/notify/channels.js';
-import { httpNotifyTransport } from '../src/notify/transport.js';
+import {
+  createHttpNotifyTransport,
+  httpNotifyTransport,
+  NotifyTransportError,
+  type NotifyLookup,
+} from '../src/notify/transport.js';
 import { authHeaders, SAME_ORIGIN } from './helpers.js';
 import {
   BOT_TOKEN,
@@ -481,5 +486,60 @@ describe('notify channels: targets', () => {
       headers: authHeaders(p.cookie),
     });
     expect(again.statusCode).toBe(200);
+  });
+});
+
+describe('notify transport: DNS answers', () => {
+  async function kindOf(p: Promise<unknown>): Promise<string> {
+    try {
+      await p;
+    } catch (err) {
+      if (err instanceof NotifyTransportError) return err.kind;
+      throw err;
+    }
+    return 'sent';
+  }
+
+  it('a host name that resolves to link-local (also IPv4-mapped) is refused before connecting', async () => {
+    let hits = 0;
+    const base = await listen((req, res) => {
+      hits++;
+      req.resume();
+      res.end();
+    });
+    const port = new URL(base).port;
+    const asked: string[] = [];
+    const via = (address: string, family: number): NotifyLookup => {
+      return async (hostname) => {
+        asked.push(hostname);
+        return [
+          { address: '127.0.0.1', family: 4 },
+          { address, family },
+        ];
+      };
+    };
+    for (const [address, family] of [
+      ['169.254.169.254', 4],
+      ['::ffff:169.254.169.254', 6],
+      ['0:0:0:0:0:ffff:a9fe:a9fe', 6],
+      ['fe80::1', 6],
+    ] as const) {
+      const t = createHttpNotifyTransport({ lookup: via(address, family) });
+      const kind = await kindOf(
+        t.post({ url: `http://ntfy.example.test:${port}/topic`, headers: {}, body: 'x' }),
+      );
+      expect(kind, address).toBe('blocked');
+    }
+    expect(asked.every((h) => h === 'ntfy.example.test')).toBe(true);
+    expect(asked).toHaveLength(4);
+    expect(hits).toBe(0);
+    // The same name with a normal answer goes through.
+    const ok = createHttpNotifyTransport({
+      lookup: async () => [{ address: '127.0.0.1', family: 4 }],
+    });
+    expect(
+      await ok.post({ url: `http://ntfy.example.test:${port}/topic`, headers: {}, body: 'x' }),
+    ).toEqual({ status: 200 });
+    expect(hits).toBe(1);
   });
 });

@@ -72,8 +72,10 @@ const agFilteringSchema = z.object({
  * has an end, the filter turns blocking on again by itself.
  */
 export class DnsFilterService extends IntegrationService<DnsData> {
-  /** Pi-hole session id (memory only, never logged). */
-  private sid: string | null = null;
+  /** Pi-hole session id (memory only, never logged) and the host it belongs to. */
+  private sid: { sid: string; url: string; caCert: string | null } | null = null;
+  /** Running best-effort logouts (awaited by idle()). */
+  private readonly logouts = new Set<Promise<void>>();
 
   constructor(deps: IntegrationDeps) {
     super(deps, 'dnsfilter', 'DNS-Filter', DNS_POLL_MS, DNS_CACHE_MS);
@@ -88,10 +90,37 @@ export class DnsFilterService extends IntegrationService<DnsData> {
   }
 
   protected override onReset(): void {
+    const old = this.sid;
     this.sid = null;
+    // Settings changed or module off: free the seat on the Pi-hole (it has only a few).
+    if (old !== null) void this.piLogout(old);
+  }
+
+  override async idle(): Promise<void> {
+    await super.idle();
+    while (this.logouts.size > 0) await Promise.allSettled([...this.logouts]);
   }
 
   // ---- Pi-hole ---------------------------------------------------------------------
+
+  /** Best-effort `DELETE /api/auth` on the host the session came from; errors are ignored. */
+  private piLogout(old: { sid: string; url: string; caCert: string | null }): Promise<void> {
+    const p = this.deps.http
+      .request({
+        base: old.url,
+        path: '/api/auth',
+        method: 'DELETE',
+        headers: { accept: 'application/json', 'x-ftl-sid': old.sid },
+        ca: old.caCert,
+      })
+      .then(
+        () => undefined,
+        () => undefined,
+      )
+      .finally(() => this.logouts.delete(p));
+    this.logouts.add(p);
+    return p;
+  }
 
   private async piAuth(cfg: ReadyConfig): Promise<string | null> {
     const res = await this.deps.http.request({
@@ -102,9 +131,24 @@ export class DnsFilterService extends IntegrationService<DnsData> {
       body: JSON.stringify({ password: cfg.secret }),
       ca: cfg.caCert,
     });
+    // Pi-hole answers 429 when all API seats are taken (or too many attempts).
+    if (res.status === 429) throw new IntegrationError('Zu viele Anmeldungen am Pi-hole');
     const auth = parse(piAuthSchema, res);
     if (!auth.session.valid) throw new IntegrationError('Zugangsdaten ungültig');
     return auth.session.sid ?? null;
+  }
+
+  /** Authenticates and keeps the sid, unless the settings changed meanwhile. */
+  private async piLogin(cfg: ReadyConfig, gen: number): Promise<string | null> {
+    const sid = await this.piAuth(cfg);
+    if (sid === null) return null;
+    if (gen === this.generation && this.sid === null) {
+      this.sid = { sid, url: cfg.url, caCert: cfg.caCert };
+      return sid;
+    }
+    // Obtained for an old configuration, or a parallel call logged in first: give it back.
+    void this.piLogout({ sid, url: cfg.url, caCert: cfg.caCert });
+    return gen === this.generation && this.sid !== null ? this.sid.sid : sid;
   }
 
   /** Request with the session id; on 401 authenticate again once. */
@@ -124,15 +168,14 @@ export class DnsFilterService extends IntegrationService<DnsData> {
         },
       });
     const gen = this.generation;
-    if (this.sid === null) {
-      const sid = await this.piAuth(cfg);
-      if (gen === this.generation) this.sid = sid;
-    }
-    let res = await send(this.sid);
+    const sid = this.sid?.sid ?? (await this.piLogin(cfg, gen));
+    let res = await send(sid);
     if (res.status === 401) {
-      const sid = await this.piAuth(cfg);
-      if (gen === this.generation) this.sid = sid;
-      res = await send(sid);
+      if (sid !== null) {
+        if (this.sid?.sid === sid) this.sid = null;
+        await this.piLogout({ sid, url: cfg.url, caCert: cfg.caCert });
+      }
+      res = await send(await this.piLogin(cfg, gen));
     }
     return res;
   }

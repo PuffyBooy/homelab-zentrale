@@ -113,6 +113,50 @@ describe('IntegrationHttp', () => {
     expect(f.requests[0]?.headers.host).toBe(`pve.test:${f.port}`);
   });
 
+  it('tries the checked addresses in order (IPv4 first) when a connect fails', async () => {
+    const f = await fake((_q, r) => r.end('ok'));
+    const client = new IntegrationHttp({
+      lookup: async () => [
+        { address: '::1', family: 6 },
+        // Loopback, but nothing listens there: ECONNREFUSED.
+        { address: '127.0.0.3', family: 4 },
+        { address: '127.0.0.1', family: 4 },
+      ],
+    });
+    const res = await client.request({
+      base: `http://pve.test:${f.port}`,
+      path: '/x',
+      method: 'POST',
+      body: 'once',
+    });
+    expect(res).toMatchObject({ status: 200, body: 'ok' });
+    expect(f.requests).toHaveLength(1);
+    expect(f.requests[0]?.body).toBe('once');
+
+    // All refused: a fixed text; a link-local entry anywhere still refuses the whole name.
+    const port = f.port;
+    const refused = new IntegrationHttp({
+      lookup: async () => [
+        { address: '127.0.0.3', family: 4 },
+        { address: '127.0.0.4', family: 4 },
+      ],
+    });
+    expect(await failure(refused.request({ base: `http://pve.test:${port}`, path: '/' }))).toBe(
+      'Nicht erreichbar',
+    );
+    const mixed = new IntegrationHttp({
+      lookup: async () => [
+        { address: '127.0.0.3', family: 4 },
+        { address: '127.0.0.1', family: 4 },
+        { address: 'fe80::1', family: 6 },
+      ],
+    });
+    expect(await failure(mixed.request({ base: `http://pve.test:${port}`, path: '/' }))).toBe(
+      'Nicht erreichbar',
+    );
+    expect(f.requests).toHaveLength(1);
+  });
+
   it('never follows redirects', async () => {
     const target = await fake((_q, r) => r.end('ok'));
     const f = await fake((_q, r) => {

@@ -25,8 +25,16 @@ import type { Clock } from '../clock.js';
 import { writeAudit } from '../db/audit.js';
 import type { Db } from '../db/index.js';
 import { HttpError } from '../http/errors.js';
+import { WindowLimiter } from '../share/limits.js';
 import type { Integrations } from './index.js';
 import { ProxmoxService } from './proxmox.js';
+
+/** POST /api/<integration>/test per integration and minute. */
+export const INTEGRATION_TESTS_PER_MIN = 5;
+/** POST /api/dnsfilter/blocking per minute. */
+export const DNS_BLOCKING_PER_MIN = 10;
+/** POST /api/fritzbox/reboot per 10 minutes. */
+export const FRITZ_REBOOTS_PER_10_MIN = 2;
 
 export interface IntegrationRoutesOptions {
   db: Db;
@@ -53,11 +61,20 @@ function checkSettingsBody(id: IntegrationId, body: IntegrationSettingsRequest):
  * /api/proxmox, /api/dnsfilter, /api/fritzbox, /api/uptimekuma (SPEC 16).
  * Admin session everywhere (global guard), module gate before (404
  * module_disabled). Step-up: changing credentials/URL/CA/variant, deleting the
- * settings, Proxmox shutdown/stop/reboot, FRITZ!Box reboot. Every response goes
+ * settings, Proxmox shutdown/stop/reboot, FRITZ!Box reboot. Rate limits (429
+ * rate_limited): test 5/min per integration, DNS blocking 10/min, FRITZ!Box
+ * reboot 2 per 10 min. Every response goes
  * through the shared schema, so no secret can slip out.
  */
 export const integrationRoutes: FastifyPluginAsync<IntegrationRoutesOptions> = async (app, o) => {
   const stepUp = requireStepUp(o.now);
+  const testLimiter = new WindowLimiter(INTEGRATION_TESTS_PER_MIN, 60_000, o.now);
+  const blockingLimiter = new WindowLimiter(DNS_BLOCKING_PER_MIN, 60_000, o.now);
+  const rebootLimiter = new WindowLimiter(FRITZ_REBOOTS_PER_10_MIN, 10 * 60_000, o.now);
+  const limit = (limiter: WindowLimiter, key: string): void => {
+    const wait = limiter.hit(key);
+    if (wait !== null) throw new HttpError(429, 'rate_limited', wait);
+  };
   const audit = (action: string, target: string | null, details?: Record<string, unknown>): void =>
     writeAudit(o.db, o.now(), { actor: 'admin', action, target, ...(details ? { details } : {}) });
 
@@ -84,7 +101,10 @@ export const integrationRoutes: FastifyPluginAsync<IntegrationRoutesOptions> = a
       return okResponseSchema.parse({ ok: true });
     });
 
-    app.post(`/${id}/test`, async () => integrationSettingsSchema.parse(await svc.test()));
+    app.post(`/${id}/test`, async () => {
+      limit(testLimiter, id);
+      return integrationSettingsSchema.parse(await svc.test());
+    });
   }
 
   // ---- Proxmox ------------------------------------------------------------------------
@@ -118,6 +138,7 @@ export const integrationRoutes: FastifyPluginAsync<IntegrationRoutesOptions> = a
 
   app.post('/dnsfilter/blocking', async (request) => {
     const body = dnsFilterBlockingRequestSchema.parse(request.body);
+    limit(blockingLimiter, 'blocking');
     const status = await dns.setBlocking(body);
     audit(
       'dnsfilter.blocking',
@@ -134,6 +155,7 @@ export const integrationRoutes: FastifyPluginAsync<IntegrationRoutesOptions> = a
 
   app.post('/fritzbox/reboot', { preHandler: stepUp }, async (request) => {
     fritzRebootRequestSchema.parse(request.body);
+    limit(rebootLimiter, 'reboot');
     await fritz.reboot();
     audit('fritzbox.reboot', null);
     return okResponseSchema.parse({ ok: true });

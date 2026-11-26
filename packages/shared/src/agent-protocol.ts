@@ -569,10 +569,6 @@ export const repoUrlSchema = z
 
 const ptySize = { cols: z.number().int().min(10).max(500), rows: z.number().int().min(5).max(200) };
 
-/**
- * The allowlist. Each entry maps an action to its params schema.
- * Anything not listed here is rejected by the agent and logged.
- */
 /** M14 Wake-on-LAN: normalised MAC (upper case, ":"), unicast (I/G bit clear), not all zero. */
 export const wolMacSchema = z
   .string()
@@ -592,6 +588,10 @@ export function isAllowedWolBroadcast(ip: string): boolean {
   return a === 10 || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168);
 }
 
+/**
+ * The allowlist. Each entry maps an action to its params schema.
+ * Anything not listed here is rejected by the agent and logged.
+ */
 export const rpcParamsByAction = {
   'container.start': containerIdParams,
   'container.stop': containerIdParams,
