@@ -33,8 +33,8 @@ import { MODULES_SETTING } from '../src/modules/service.js';
 import { emptyDir, KEY, SETUP_TOKEN, T0, type TestApp } from './helpers.js';
 
 /** Fake secrets are assembled at runtime so secret scanners do not flag them. */
-export const CF_TOKEN = ['cf', 'test', 'token', 'A1b2C3d4E5f6G7h8I9j0'].join('_');
-export const CF_TOKEN_2 = ['cf', 'test', 'token', 'Z9y8X7w6V5u4T3s2R1q0'].join('_');
+export const CF_TOKEN = ['cf', 'test', 'token', 'A1b2C3d4E5', 'f6G7h8I9j0'].join('_');
+export const CF_TOKEN_2 = ['cf', 'test', 'token', 'Z9y8X7w6V5', 'u4T3s2R1q0'].join('_');
 export const DUCK_TOKEN = ['0f1e2d3c', '4b5a', '6978', '8796', 'a5b4c3d2e1f0'].join('-');
 export const ACME_DIR = 'https://acme.test/directory';
 
