@@ -31,7 +31,7 @@ export function fetchServer(id: string, signal?: AbortSignal): Promise<ServerDet
 
 export function fetchHistory(
   id: string,
-  range: '24h' = '24h',
+  range: HistoryResponse['range'] = '24h',
   signal?: AbortSignal,
 ): Promise<HistoryResponse> {
   return api(`/api/servers/${encodeURIComponent(id)}/history?range=${range}`, {

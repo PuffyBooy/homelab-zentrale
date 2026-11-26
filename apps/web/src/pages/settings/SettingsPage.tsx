@@ -31,6 +31,7 @@ import { HaEntitiesTile, HaSettingsTile } from './HaTiles.js';
 import { NotifyTile, PushTile } from './PushTiles.js';
 import { ShareGatewayTile } from './ShareGatewayTile.js';
 import { ModulesTile } from './ModulesTile.js';
+import { UpdatesSettingsTile } from './UpdatesSettingsTile.js';
 import { useModules } from '../../lib/useModules.js';
 
 /** Sections of SPEC 13, in that order. Ids are the anchors (`/settings#server`). */
@@ -39,6 +40,7 @@ export const SETTINGS_SECTIONS: readonly { id: string; label: string; module?: M
   { id: 'module', label: 'Module' },
   { id: 'server', label: 'Server' },
   { id: 'agents', label: 'Agents' },
+  { id: 'updates', label: 'Updates' },
   { id: 'github', label: 'GitHub', module: 'github' },
   { id: 'checks', label: 'Checks' },
   { id: 'push', label: 'Push' },
@@ -99,6 +101,9 @@ export function SettingsPage(): ReactElement {
         </Anchor>
         <Anchor id="agents">
           <AgentsSettingsTile />
+        </Anchor>
+        <Anchor id="updates" wide>
+          <UpdatesSettingsTile />
         </Anchor>
         {modules.github ? <GithubTile /> : null}
         <Anchor id="checks">
