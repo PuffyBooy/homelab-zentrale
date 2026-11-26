@@ -1562,6 +1562,16 @@ body,
   margin: 0;
   padding: 0 var(--space-3) var(--space-1);
 }
+/* A throttled row (meta + Aufheben + Stoppen) is wider than one column: wrap
+   inside the column instead of overflowing into the neighbour (which would also
+   swallow clicks on its buttons). */
+.app-consumers-col .hz-row {
+  flex-wrap: wrap;
+  row-gap: var(--space-1);
+}
+.app-consumers-col .hz-row-meta {
+  white-space: normal;
+}
 @media (max-width: 699px) {
   .app-consumers {
     grid-template-columns: minmax(0, 1fr);
