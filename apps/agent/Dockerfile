@@ -41,9 +41,10 @@ FROM node:22-bookworm-slim AS runtime
 # git, openssh-client, ca-certificates: deploy.run (git fetch over https or ssh with a
 #   deploy key; GitHub's host keys are bundled in assets/github_known_hosts)
 # tar, zstd:  game.backup (world folder as .tar.zst; tar is in the base image, zstd is not)
+# smartmontools: smartctl for SMART reads (M13, only with HZ_AGENT_SMART=1)
 RUN apt-get update \
   && apt-get install -y --no-install-recommends util-linux iproute2 iputils-ping \
-     git openssh-client ca-certificates tar zstd \
+     git openssh-client ca-certificates tar zstd smartmontools \
   && rm -rf /var/lib/apt/lists/*
 # The runtime never needs npm, corepack or yarn; removing them drops their dependency CVEs.
 RUN rm -rf /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/corepack \

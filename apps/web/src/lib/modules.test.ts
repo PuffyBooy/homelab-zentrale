@@ -4,7 +4,7 @@ import { pageCommands } from '../shell/CommandPalette.js';
 import { pageMeta } from '../shell/pageMeta.js';
 import { isModuleOn, moduleOfPath, visibleNavItems } from './modules.js';
 
-const off = { github: false, homeassistant: false, games: false };
+const off = { github: false, homeassistant: false, games: false, storage: false };
 
 describe('modules', () => {
   it('maps paths to their module', () => {

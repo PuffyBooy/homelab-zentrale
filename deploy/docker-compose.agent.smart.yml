@@ -1,0 +1,39 @@
+# Override (M13): lets the agent read SMART values of the disks (health, defective sectors,
+# temperature, power-on hours). Meant for a NAS (e.g. UGREEN NASync with UGOS Pro) or any
+# server whose disks you want to watch.
+#   docker compose -f deploy/docker-compose.agent.yml -f deploy/docker-compose.agent.smart.yml up -d
+# install-agent.sh --smart and the one-liner from "Server hinzufügen" (automatic on a
+# UGREEN NAS) write it as /etc/homelab-agent/docker-compose.smart.yml.
+#
+# Why each right is needed:
+# - HZ_AGENT_SMART=1         the agent runs `smartctl --json --info --health --attributes
+#                            --nocheck=standby,0` per disk at most every 10 minutes. With
+#                            --nocheck=standby a sleeping disk is skipped, never woken up.
+# - SYS_RAWIO                ATA pass-through (SG_IO) for SATA disks needs it.
+# - device_cgroup_rules      READ access (r) to the disk block devices only: SCSI/SATA disks
+#                            (majors 8, 65-71, 128-135) and NVMe namespaces (259). No write
+#                            (w) and no mknod (m) right; the agent cannot write to a disk.
+services:
+  agent:
+    environment:
+      HZ_AGENT_SMART: '1'
+    cap_add:
+      - SYS_RAWIO
+    device_cgroup_rules:
+      - 'b 8:* r'
+      - 'b 65:* r'
+      - 'b 66:* r'
+      - 'b 67:* r'
+      - 'b 68:* r'
+      - 'b 69:* r'
+      - 'b 70:* r'
+      - 'b 71:* r'
+      - 'b 128:* r'
+      - 'b 129:* r'
+      - 'b 130:* r'
+      - 'b 131:* r'
+      - 'b 132:* r'
+      - 'b 133:* r'
+      - 'b 134:* r'
+      - 'b 135:* r'
+      - 'b 259:* r'

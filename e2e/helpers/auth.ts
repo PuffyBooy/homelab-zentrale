@@ -166,7 +166,9 @@ export function enrollServer(
   return stepUpCall(page, totp, 'POST', '/api/servers/enroll', { name, location });
 }
 
-export type ModuleSwitches = Partial<Record<'github' | 'homeassistant' | 'games', boolean>>;
+export type ModuleSwitches = Partial<
+  Record<'github' | 'homeassistant' | 'games' | 'storage', boolean>
+>;
 
 /** PUT /api/settings/modules (step-up when GitHub or Home Assistant is switched on). */
 export async function setModules(page: Page, totp: Totp, modules: ModuleSwitches): Promise<void> {

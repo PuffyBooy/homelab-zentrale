@@ -192,6 +192,117 @@ export const systemInfoSchema = z.strictObject({
 });
 export type SystemInfo = z.infer<typeof systemInfoSchema>;
 
+// ---------------------------------------------------------------------------
+// Storage (M13: NAS und Speicher). Generic Linux: md RAID, volumes, physical
+// disks with SMART. Works on any server; on a NAS (e.g. UGREEN NASync with
+// UGOS Pro) this is the main view. Every part fails soft on the agent.
+
+/** Kernel block device name of a physical disk (sda, nvme0n1). */
+export const blockDeviceNameSchema = z.string().regex(/^(?:sd[a-z]{1,3}|nvme\d{1,3}n\d{1,3})$/);
+/** md array name (md0, md127). */
+export const mdNameSchema = z.string().regex(/^md\d{1,4}$/);
+
+export const raidStateSchema = z.enum(['clean', 'degraded', 'syncing', 'inactive']);
+export type RaidState = z.infer<typeof raidStateSchema>;
+
+export const raidArraySchema = z.strictObject({
+  name: mdNameSchema,
+  /** raid0, raid1, raid5, raid6, raid10, linear ... */
+  level: z.string().regex(/^[a-z0-9]{1,16}$/),
+  state: raidStateSchema,
+  /** Member devices the array should have ([n/m] in mdstat: n). */
+  devicesTotal: z.number().int().nonnegative().max(256),
+  /** Members that are up ([n/m]: m). */
+  devicesActive: z.number().int().nonnegative().max(256),
+  /** Member partitions/disks (sda3, nvme0n1p2), failed ones marked. */
+  members: z
+    .array(
+      z.strictObject({
+        device: z.string().regex(/^[a-z0-9]{1,32}$/),
+        /** Physical disk this member lives on, if known. */
+        disk: blockDeviceNameSchema.optional(),
+        failed: z.boolean(),
+        spare: z.boolean(),
+      }),
+    )
+    .max(64),
+  /** Running resync/recovery/check/reshape. */
+  sync: z
+    .strictObject({
+      kind: z.enum(['resync', 'recovery', 'check', 'reshape']),
+      percent,
+      /** Estimated minutes left, if mdstat reports it. */
+      finishMin: nonNeg.optional(),
+    })
+    .optional(),
+  sizeBytes: nonNeg.optional(),
+});
+export type RaidArray = z.infer<typeof raidArraySchema>;
+
+export const storageVolumeSchema = z.strictObject({
+  mount: z.string().max(256),
+  fs: z.string().max(32),
+  usedBytes: nonNeg,
+  totalBytes: nonNeg,
+  /** md arrays and physical disks below this volume (through LVM/dm). */
+  arrays: z.array(mdNameSchema).max(32),
+  disks: z.array(blockDeviceNameSchema).max(64),
+});
+export type StorageVolume = z.infer<typeof storageVolumeSchema>;
+
+export const smartHealthSchema = z.enum(['passed', 'failed', 'unknown']);
+export type SmartHealth = z.infer<typeof smartHealthSchema>;
+
+export const physicalDiskSchema = z.strictObject({
+  name: blockDeviceNameSchema,
+  kind: z.enum(['hdd', 'ssd', 'nvme']),
+  model: z.string().max(80).optional(),
+  serial: z.string().max(64).optional(),
+  sizeBytes: nonNeg,
+  /** °C; null when unknown or the disk sleeps (no SMART read while in standby). */
+  tempC: z.number().finite().min(-40).max(150).nullable(),
+  /** The disk was in standby at the last read; SMART values are from the last awake read. */
+  standby: z.boolean(),
+  /** null when SMART is off or could not be read. */
+  smart: z
+    .strictObject({
+      health: smartHealthSchema,
+      powerOnHours: nonNeg.optional(),
+      /** ATA 5 Reallocated_Sector_Ct. */
+      reallocated: nonNeg.optional(),
+      /** ATA 197 Current_Pending_Sector. */
+      pending: nonNeg.optional(),
+      /** ATA 198 Offline_Uncorrectable. */
+      uncorrectable: nonNeg.optional(),
+      /** NVMe media and data integrity errors. */
+      mediaErrors: nonNeg.optional(),
+      /** NVMe percentage used (wear), may exceed 100. */
+      wearPct: z.number().finite().min(0).max(255).optional(),
+      /** When these values were read (may be older than the inventory while the disk sleeps). */
+      readAt: isoTs,
+    })
+    .nullable(),
+});
+export type PhysicalDisk = z.infer<typeof physicalDiskSchema>;
+
+export const storageInfoSchema = z.strictObject({
+  /** Detected NAS platform; `ugreen` for UGREEN NASync / UGOS. */
+  platform: z.strictObject({
+    kind: z.enum(['ugreen', 'generic']),
+    vendor: z.string().max(64).optional(),
+    model: z.string().max(80).optional(),
+  }),
+  /**
+   * SMART: `on` read with smartctl, `off` (HZ_AGENT_SMART=0, default), `unavailable`
+   * (switched on but smartctl could not open the disks: missing rights).
+   */
+  smart: z.enum(['on', 'off', 'unavailable']),
+  arrays: z.array(raidArraySchema).max(32),
+  volumes: z.array(storageVolumeSchema).max(32),
+  disks: z.array(physicalDiskSchema).max(64),
+});
+export type StorageInfo = z.infer<typeof storageInfoSchema>;
+
 export const inventorySchema = z.strictObject({
   type: z.literal('inventory'),
   ts: isoTs,
@@ -209,6 +320,8 @@ export const inventorySchema = z.strictObject({
   /** null when fail2ban is not installed. */
   fail2banBanned: z.number().int().nonnegative().nullable(),
   listeningPorts: z.array(listeningPortSchema).max(1000),
+  /** M13: md RAID, volumes, disks. Absent from older agents. */
+  storage: storageInfoSchema.optional(),
 });
 export type Inventory = z.infer<typeof inventorySchema>;
 

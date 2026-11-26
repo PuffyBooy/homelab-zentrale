@@ -3,12 +3,16 @@
 #
 #   sudo HZ_AGENT_TOKEN=<token> ./deploy/install-agent.sh \
 #     --url wss://heimserver.<tailnet>.ts.net/agent --name oracle-a1 \
-#     [--image <image> | --build-local] [--allow-terminal]
+#     [--image <image> | --build-local] [--allow-terminal] [--smart]
 #
 # Image: by default the multi-arch image ghcr.io/puffybooy/homelab-agent:latest
 # (amd64 + arm64) is pulled. Pin a build with --image ghcr.io/puffybooy/homelab-agent:sha-<short>
 # or :v<version>. --build-local (or HZ_BUILD_LOCAL=1) builds the image from this checkout
 # instead, as homelab-zentrale/agent:local.
+#
+# --smart lets the agent read SMART values of the disks (NAS, M13): it adds
+# deploy/docker-compose.agent.smart.yml (read access to the disks, CAP_SYS_RAWIO).
+# On a UGREEN NAS (DMI vendor UGREEN) it is switched on automatically.
 #
 # The token is the one-time enrollment token from the core ("Server hinzufügen").
 # Pass it via HZ_AGENT_TOKEN, via --token-stdin, or type it when asked. It is never
@@ -33,6 +37,7 @@ url=""
 name=""
 image=""
 allow_terminal=0
+smart=0
 build_local=0
 if [[ "${HZ_BUILD_LOCAL:-0}" == 1 ]]; then build_local=1; fi
 token_stdin=0
@@ -54,6 +59,7 @@ while [[ $# -gt 0 ]]; do
     --image) image="${2:-}"; shift 2 ;;
     --build-local) build_local=1; shift ;;
     --allow-terminal) allow_terminal=1; shift ;;
+    --smart) smart=1; shift ;;
     --token-stdin) token_stdin=1; shift ;;
     --token|--token=*) die "das Token nie als Argument übergeben, sondern über HZ_AGENT_TOKEN oder --token-stdin" ;;
     -h|--help) usage 0 ;;
@@ -93,6 +99,9 @@ if [[ -n "$token" ]]; then
   [[ "$token" =~ ^[A-Za-z0-9_-]{22,128}$ ]] || die "das Token hat ein ungültiges Format"
 fi
 
+# A UGREEN NAS (NASync, UGOS Pro) gets SMART automatically.
+if grep -qi ugreen /sys/class/dmi/id/sys_vendor 2>/dev/null; then smart=1; fi
+
 # --- docker -------------------------------------------------------------------
 command -v docker >/dev/null 2>&1 || die "Docker fehlt (https://docs.docker.com/engine/install/)"
 docker info >/dev/null 2>&1 || die "der Docker-Dienst läuft nicht"
@@ -122,6 +131,14 @@ unset token HZ_AGENT_TOKEN
 
 [[ -f "$SCRIPT_DIR/docker-compose.agent.yml" ]] || die "deploy/docker-compose.agent.yml nicht gefunden"
 install -m 0644 "$SCRIPT_DIR/docker-compose.agent.yml" "$CONF_DIR/docker-compose.yml"
+compose_files="docker-compose.yml"
+if [[ $smart -eq 1 ]]; then
+  [[ -f "$SCRIPT_DIR/docker-compose.agent.smart.yml" ]] || die "deploy/docker-compose.agent.smart.yml nicht gefunden"
+  install -m 0644 "$SCRIPT_DIR/docker-compose.agent.smart.yml" "$CONF_DIR/docker-compose.smart.yml"
+  compose_files="docker-compose.yml:docker-compose.smart.yml"
+else
+  rm -f "$CONF_DIR/docker-compose.smart.yml"
+fi
 
 if [[ $build_local -eq 1 ]]; then
   [[ -f "$REPO_DIR/apps/agent/Dockerfile" ]] || die "--build-local muss aus einem Checkout des Repos laufen"
@@ -133,7 +150,7 @@ elif [[ -z "$image" ]]; then
 fi
 
 # Interpolation variables for compose (no secrets here).
-printf 'HZ_AGENT_IMAGE=%s\nHZ_AGENT_ENV_FILE=%s\n' "$image" "$CONF_DIR/agent.env" >"$CONF_DIR/.env"
+printf 'HZ_AGENT_IMAGE=%s\nHZ_AGENT_ENV_FILE=%s\nCOMPOSE_FILE=%s\n' "$image" "$CONF_DIR/agent.env" "$compose_files" >"$CONF_DIR/.env"
 chmod 0644 "$CONF_DIR/.env"
 
 cd "$CONF_DIR"
