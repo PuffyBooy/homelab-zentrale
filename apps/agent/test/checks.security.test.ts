@@ -172,6 +172,10 @@ describe('dispatcher with check actions', () => {
       streams: new StreamManager({ send: () => true, bufferedAmount: () => 0 }),
       run,
       dockerSocket: '/var/run/docker.sock',
+      spawn: () => {
+        throw new Error('spawn not expected');
+      },
+      dataDir: '/nonexistent-data',
     } as unknown as Ctx;
     return { d: new Dispatcher(ctx, (e) => events.push(e)), run, events };
   }

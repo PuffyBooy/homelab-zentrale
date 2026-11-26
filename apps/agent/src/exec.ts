@@ -1,4 +1,5 @@
-import { execFile } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
+import path from 'node:path';
 
 /**
  * The only place in the agent that starts programs.
@@ -25,6 +26,8 @@ export const PROGRAMS = new Set([
   'systemctl',
   // Docker CLI in the agent image, only for `docker compose` (actions/compose.ts).
   'docker',
+  // git in the agent image, only for deploy.run (actions/deploy.ts, fixed argument builders).
+  'git',
 ]);
 
 export const CHILD_ENV: Readonly<Record<string, string>> = Object.freeze({
@@ -35,7 +38,20 @@ export const CHILD_ENV: Readonly<Record<string, string>> = Object.freeze({
 });
 
 /** The only variables a caller may add to CHILD_ENV (never the agent token). */
-export const EXTRA_ENV_KEYS = ['DOCKER_HOST', 'DOCKER_CONFIG'] as const;
+export const EXTRA_ENV_KEYS = [
+  'DOCKER_HOST',
+  'DOCKER_CONFIG',
+  // deploy.run (actions/deploy.ts): git without prompts, system/global config or upward
+  // repository discovery, ssh with the deploy key; DEPLOY_SHA/HOME for deploy.sh.
+  'GIT_TERMINAL_PROMPT',
+  'GIT_ASKPASS',
+  'GIT_SSH_COMMAND',
+  'GIT_CONFIG_NOSYSTEM',
+  'GIT_CONFIG_GLOBAL',
+  'GIT_CEILING_DIRECTORIES',
+  'HOME',
+  'DEPLOY_SHA',
+] as const;
 export type ExtraEnv = Partial<Record<(typeof EXTRA_ENV_KEYS)[number], string>>;
 
 export interface RunOptions {
@@ -74,6 +90,27 @@ export class ExecPolicyError extends Error {
     super(message);
     this.name = 'ExecPolicyError';
   }
+}
+
+/**
+ * deploy.run's script method: `/bin/sh <dir>/deploy.sh`. The shell is NOT in PROGRAMS
+ * (runFile('sh', ...) stays refused); the streaming spawner only allows it with exactly
+ * one argument, an absolute normalized path whose file name is deploy.sh (never `-c`).
+ * actions/deploy.ts checks before that the file is a regular file inside the project dir.
+ */
+export const SCRIPT_SHELL = '/bin/sh';
+export const DEPLOY_SCRIPT_NAME = 'deploy.sh';
+
+export function isDeployScriptCall(file: string, args: readonly string[]): boolean {
+  if (file !== SCRIPT_SHELL || args.length !== 1) return false;
+  const script = args[0];
+  return (
+    typeof script === 'string' &&
+    !script.includes('\0') &&
+    path.isAbsolute(script) &&
+    path.normalize(script) === script &&
+    path.basename(script) === DEPLOY_SCRIPT_NAME
+  );
 }
 
 function checkArgs(
@@ -200,4 +237,123 @@ export type HostExec = ReturnType<typeof makeHostExec>;
 /** nsenter reports a missing host binary with exit code 127 (util-linux EX_EXEC_ENOENT). */
 export function isMissingProgram(r: RunResult): boolean {
   return r.error === 'not_found' || r.code === 127;
+}
+
+// ---------------------------------------------------------------------------
+// Streaming variant (deploy.run): output arrives in pieces while the program runs.
+
+export interface SpawnOptions {
+  /** Default 30 s. The child is killed with SIGKILL afterwards. */
+  timeoutMs?: number;
+  /** Max bytes of stdout + stderr together (default 64 MiB); the child is killed above. */
+  maxOutputBytes?: number;
+  /** Additional environment, restricted to EXTRA_ENV_KEYS. */
+  env?: ExtraEnv;
+  /** Working directory (absolute). */
+  cwd?: string;
+}
+
+export interface SpawnCallbacks {
+  onStdout(chunk: Buffer): void;
+  onStderr(chunk: Buffer): void;
+}
+
+export interface SpawnResult {
+  code: number | null;
+  error?: 'not_found' | 'timeout' | 'output_too_large' | 'spawn_failed' | 'killed';
+}
+
+export interface SpawnHandle {
+  readonly done: Promise<SpawnResult>;
+  /** Kills the child (SIGKILL). The result then has error 'killed'. */
+  kill(): void;
+  /** Backpressure: stop / continue reading the child's output. */
+  pause(): void;
+  resume(): void;
+}
+
+export type Spawner = (
+  file: string,
+  args: readonly string[],
+  cb: SpawnCallbacks,
+  opts?: SpawnOptions,
+) => SpawnHandle;
+
+function spawnChecked(
+  programs: ReadonlySet<string>,
+  file: string,
+  args: readonly string[],
+  cb: SpawnCallbacks,
+  opts: SpawnOptions,
+): SpawnHandle {
+  // The deploy script is the only call outside the program allowlist (fixed shape).
+  if (!isDeployScriptCall(file, args)) checkArgs(file, args, programs);
+  if (opts.cwd !== undefined && (!path.isAbsolute(opts.cwd) || opts.cwd.includes('\0'))) {
+    throw new ExecPolicyError('cwd must be absolute');
+  }
+  const env = childEnv(opts.env);
+  const timeout = opts.timeoutMs ?? 30_000;
+  const maxOutput = opts.maxOutputBytes ?? 64 * 1024 * 1024;
+  // The streaming wrapper: allowlisted program, argument array, no shell.
+  // nosemgrep
+  const child = spawn(file, [...args], {
+    shell: false,
+    cwd: opts.cwd,
+    env,
+    windowsHide: true,
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  let reason: SpawnResult['error'];
+  let total = 0;
+  const kill = (why: NonNullable<SpawnResult['error']>) => {
+    reason ??= why;
+    child.kill('SIGKILL');
+  };
+  const timer = setTimeout(() => kill('timeout'), timeout);
+  const count = (chunk: Buffer) => {
+    total += chunk.length;
+    if (total > maxOutput) kill('output_too_large');
+  };
+  child.stdout.on('data', (chunk: Buffer) => {
+    count(chunk);
+    if (reason === undefined) cb.onStdout(chunk);
+  });
+  child.stderr.on('data', (chunk: Buffer) => {
+    count(chunk);
+    if (reason === undefined) cb.onStderr(chunk);
+  });
+  const done = new Promise<SpawnResult>((resolve) => {
+    child.on('error', (err: NodeJS.ErrnoException) => {
+      clearTimeout(timer);
+      resolve({ code: null, error: err.code === 'ENOENT' ? 'not_found' : 'spawn_failed' });
+    });
+    child.on('close', (code) => {
+      clearTimeout(timer);
+      if (reason !== undefined) resolve({ code: null, error: reason });
+      else if (typeof code === 'number') resolve({ code });
+      else resolve({ code: null, error: 'killed' });
+    });
+  });
+  return {
+    done,
+    kill: () => kill('killed'),
+    pause: () => {
+      child.stdout.pause();
+      child.stderr.pause();
+    },
+    resume: () => {
+      child.stdout.resume();
+      child.stderr.resume();
+    },
+  };
+}
+
+/** Starts an allowlisted program (or the deploy script, see isDeployScriptCall) and streams its output. */
+export const spawnFile: Spawner = (file, args, cb, opts = {}) =>
+  spawnChecked(PROGRAMS, file, args, cb, opts);
+
+/** Test-only streaming runner with its own program allowlist (like makeRunner). */
+export function makeSpawner(programs: ReadonlySet<string>): Spawner {
+  const frozen = new Set(programs);
+  return (file, args, cb, opts = {}) => spawnChecked(frozen, file, args, cb, opts);
 }

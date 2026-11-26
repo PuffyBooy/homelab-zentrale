@@ -15,6 +15,8 @@ import { composeDown, composePull, composeUp, composeWrite } from './compose.js'
 import { containerRestart, containerStart, containerStop } from './container.js';
 import { containerUpdate } from './container-update.js';
 import { containerLogs } from './logs.js';
+import { deployRun } from './deploy.js';
+import { deployKey } from './deploy-key.js';
 import { cleanup, cleanupPreview } from './system-cleanup.js';
 import { systemReboot } from './system-reboot.js';
 import {
@@ -47,7 +49,8 @@ export const handlers: ActionHandlers = {
   'compose.write': composeWrite,
   'game.rcon': notImplemented,
   'game.backup': notImplemented,
-  'deploy.run': notImplemented,
+  'deploy.run': deployRun,
+  'deploy.key': deployKey,
   'system.cleanupPreview': cleanupPreview,
   'system.cleanup': cleanup,
   'system.reboot': systemReboot,
@@ -59,6 +62,10 @@ export const handlers: ActionHandlers = {
   'pty.resize': ptyNotImplemented,
   'pty.close': ptyNotImplemented,
 };
+
+export function hasGitSegment(p: unknown): boolean {
+  return typeof p === 'string' && p.split('/').some((seg) => seg.toLowerCase() === '.git');
+}
 
 /** Param fields that carry a file system path below /opt/homelab/. */
 const PATH_FIELDS = ['dir', 'gameDir'] as const;
@@ -121,8 +128,12 @@ export class Dispatcher {
     const params = { ...(req.params as Record<string, unknown>) };
     for (const field of PATH_FIELDS) {
       if (!Object.hasOwn(params, field)) continue;
+      // Never inside a git directory: .git/config and hooks would run code in git (deploy.run).
+      const gitDenied = () => this.deny(env, 'bad_path', `${field}: path inside a .git directory`);
+      if (hasGitSegment(params[field])) return gitDenied();
       const check = await resolveHomelabPath(params[field], this.ctx.homelabRoot);
       if (!check.ok) return this.deny(env, 'bad_path', `${field}: ${check.reason}`);
+      if (hasGitSegment(check.path)) return gitDenied();
       params[field] = check.path;
     }
 

@@ -6,6 +6,7 @@ import {
   logLineSchema,
   logSnapshotSchema,
   liveServerMessageSchema,
+  repoSummarySchema,
   liveTopicSchema,
   serverDetailSchema,
   serverSummarySchema,
@@ -14,6 +15,7 @@ import {
   type ContainerSummary,
   type LiveServerMessage,
   type LogLine,
+  type RepoSummary,
   type ServerDetail,
   type ServerSummary,
 } from '@hz/shared';
@@ -32,6 +34,16 @@ import { alertsAllKey, alertsKey, isActive } from './alerts.js';
 import type { Schema } from './api.js';
 import { checksKey } from './checks.js';
 import { containersKey } from './containers.js';
+import {
+  applyDeployChunks,
+  deployKey,
+  deployLogKey,
+  deploySnapshotToBuffer,
+  emptyDeployLog,
+  parseDeployItem,
+  reposKey,
+  type DeployLogBuffer,
+} from './github.js';
 import { appendLogLines, containerLogsKey, type LogBuffer } from './logs.js';
 import { serverKey, serversKey } from './servers.js';
 
@@ -172,6 +184,32 @@ export function applyLiveMessage(qc: QueryClient, msg: LiveServerMessage): Apply
     return result;
   }
 
+  if (topic === 'github') {
+    if (msg.type === 'snapshot') {
+      const raw = snapshotList(msg.data, 'repos');
+      const { ok, bad } = parseItems(repoSummarySchema, raw ?? []);
+      if (raw) qc.setQueryData<RepoSummary[]>(reposKey, ok);
+      if (!raw || bad) void qc.invalidateQueries({ queryKey: reposKey, exact: true });
+    } else {
+      const { ok, bad } = parseItems(repoSummarySchema, msg.upsert ?? []);
+      qc.setQueryData<RepoSummary[]>(reposKey, (old) =>
+        old ? mergeById(old, ok, msg.remove) : old,
+      );
+      if (bad) void qc.invalidateQueries({ queryKey: reposKey, exact: true });
+      // New commits, a finished deploy or a new LIVE marker: refresh the open lists.
+      void qc.invalidateQueries({ queryKey: ['github', 'commits'] });
+      void qc.invalidateQueries({ queryKey: ['github', 'deploys'] });
+      void qc.invalidateQueries({ queryKey: ['github', 'deploy'] });
+    }
+    return result;
+  }
+
+  const deploy = /^deploy:([A-Za-z0-9_-]{1,64})$/.exec(topic);
+  if (deploy?.[1]) {
+    applyDeployMessage(qc, deploy[1], msg);
+    return result;
+  }
+
   const logs = /^container-logs:([A-Za-z0-9_-]{1,64})$/.exec(topic);
   if (logs?.[1]) {
     applyLogMessage(qc, logs[1], msg);
@@ -242,6 +280,28 @@ function applyLogMessage(
     lines: appendLogLines(old?.lines ?? [], add),
     ended: ended ?? old?.ended ?? false,
   }));
+}
+
+/**
+ * Topic `deploy:<id>`: log chunks. The snapshot replaces the buffer, updates append.
+ * An upsert that carries the deploy itself (status change) refreshes the detail.
+ */
+function applyDeployMessage(
+  qc: QueryClient,
+  id: string,
+  msg: Extract<LiveServerMessage, { type: 'snapshot' | 'update' }>,
+): void {
+  const key = deployLogKey(id);
+  if (msg.type === 'snapshot') {
+    const buf = deploySnapshotToBuffer(msg.data);
+    if (buf) qc.setQueryData<DeployLogBuffer>(key, buf);
+    return;
+  }
+  const items = msg.upsert ?? [];
+  if (items.some((raw) => parseDeployItem(raw) !== null)) {
+    void qc.invalidateQueries({ queryKey: deployKey(id), exact: true });
+  }
+  qc.setQueryData<DeployLogBuffer>(key, (old) => applyDeployChunks(old ?? emptyDeployLog, items));
 }
 
 /** Keeps the summary inside a cached detail in step with the list. */

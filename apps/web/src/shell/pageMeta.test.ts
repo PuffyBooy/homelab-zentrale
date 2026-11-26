@@ -1,11 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { alert, check, container, server } from '../test-fixtures.js';
+import { alert, check, container, repo, server, target } from '../test-fixtures.js';
 import {
   checkDetailId,
   containerLogsId,
   needsChecks,
   needsContainers,
+  needsRepos,
   pageMeta,
+  repoDetailId,
 } from './pageMeta.js';
 
 describe('pageMeta for containers', () => {
@@ -83,5 +85,33 @@ describe('pageMeta for websites and alerts', () => {
     expect(pageMeta('/alerts', { servers: [home], alerts: [] }).title.rest).toBe(
       'Keine offenen Meldungen.',
     );
+  });
+});
+
+describe('pageMeta for github', () => {
+  const home = server({ id: 'srv-home0001', name: 'heimserver' });
+
+  it('puts red CI first on /github and filters by target server', () => {
+    const red = repo({ fullName: 'PuffyBooy/lernplattform', ci: 'crit' });
+    const ok = repo({ fullName: 'PuffyBooy/soundos', targets: [target({ serverId: home.id })] });
+    expect(needsRepos('/github')).toBe(true);
+    expect(needsRepos('/servers')).toBe(false);
+    expect(pageMeta('/github', { servers: [home] }).sub).toBe('lädt …');
+    const meta = pageMeta('/github', { servers: [home], repos: [red, ok], live: 'open' });
+    expect(meta.title).toEqual({ em: 'CI rot bei lernplattform', rest: ' · 2 Repos' });
+    expect(meta.serverSwitch).toBe(true);
+    const one = pageMeta('/github', { servers: [home], repos: [red, ok], filter: home.id });
+    expect(one.title).toEqual({ em: null, rest: 'Alles aktuell · 1 Repo' });
+  });
+
+  it('describes the repo on its detail page', () => {
+    const r = repo({ fullName: 'PuffyBooy/soundos', targets: [target({ behind: 3 })] });
+    const path = `/github/${r.id}`;
+    expect(repoDetailId(path)).toBe(r.id);
+    expect(needsRepos(path)).toBe(true);
+    const meta = pageMeta(path, { servers: [home], repos: [r] });
+    expect(meta.title.rest).toBe('soundos: 3 neu, noch nicht deployt.');
+    expect(meta.sub).toBe('GitHub · PuffyBooy/soundos · 1 Ziel');
+    expect(meta.serverSwitch).toBe(false);
   });
 });

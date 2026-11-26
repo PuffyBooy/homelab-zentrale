@@ -5,7 +5,8 @@
   "description": "Server agent: metrics, allowlisted actions, outbound WebSocket to core",
   "type": "module",
   "files": [
-    "dist"
+    "dist",
+    "assets"
   ],
   "scripts": {
     "dev": "tsx watch --conditions=@hz/source src/index.ts",

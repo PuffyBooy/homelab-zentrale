@@ -46,6 +46,10 @@ function setup(overrides: Partial<ActionContext> = {}) {
       return { code: 0, stdout: '', stderr: '' };
     },
     dockerSocket: '/var/run/docker.sock',
+    spawn: () => {
+      throw new Error('spawn not expected');
+    },
+    dataDir: '/nonexistent-data',
     ...overrides,
   };
   const d = new Dispatcher(ctx, (e) => events.push(e));

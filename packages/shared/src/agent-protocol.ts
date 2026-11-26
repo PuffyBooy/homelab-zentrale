@@ -409,7 +409,14 @@ export const rpcParamsByAction = {
     repoUrl: repoUrlSchema,
     sha: shaSchema,
     method: z.enum(['compose', 'script']),
+    /** Deploy key on the agent (from deploy.key); required for git@github.com URLs. */
+    keyName: fileNameSchema.optional(),
   }),
+  /**
+   * Creates (or returns the existing) ed25519 deploy key `name` in the agent's data
+   * dir. Result: { publicKey }. The private key never leaves the server.
+   */
+  'deploy.key': z.strictObject({ name: fileNameSchema }),
   'system.cleanupPreview': z.strictObject({}),
   'system.cleanup': z.strictObject({}),
   'system.reboot': z.strictObject({ confirmName: agentNameSchema }),

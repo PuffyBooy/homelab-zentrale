@@ -293,4 +293,72 @@ CREATE TABLE push_subscriptions (
 );
 `,
   },
+  {
+    version: 5,
+    name: 'github',
+    // M5: tracked GitHub repos, their branch commit cache (last 30 with CI),
+    // ETag cache for conditional requests, deploy targets and deploys. The
+    // GitHub token lives encrypted in `settings`, never here.
+    sql: `
+CREATE TABLE github_repos (
+  id TEXT PRIMARY KEY,
+  full_name TEXT NOT NULL UNIQUE COLLATE NOCASE,
+  private INTEGER NOT NULL DEFAULT 0,
+  default_branch TEXT NOT NULL,
+  last_commit_sha TEXT,
+  ci_status TEXT NOT NULL DEFAULT 'off',
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER
+);
+
+CREATE TABLE github_branches (
+  repo_id TEXT NOT NULL REFERENCES github_repos(id) ON DELETE CASCADE,
+  branch TEXT NOT NULL,
+  head_sha TEXT,
+  commits_json TEXT NOT NULL DEFAULT '[]',
+  updated_at INTEGER NOT NULL,
+  PRIMARY KEY (repo_id, branch)
+);
+
+CREATE TABLE github_etags (
+  url TEXT PRIMARY KEY,
+  etag TEXT NOT NULL,
+  data_json TEXT NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+
+CREATE TABLE deploy_targets (
+  id TEXT PRIMARY KEY,
+  repo_id TEXT NOT NULL REFERENCES github_repos(id) ON DELETE CASCADE,
+  server_id TEXT NOT NULL REFERENCES servers(id) ON DELETE CASCADE,
+  path TEXT NOT NULL,
+  branch TEXT NOT NULL,
+  method TEXT NOT NULL,
+  auto_deploy INTEGER NOT NULL DEFAULT 0,
+  key_name TEXT,
+  public_key TEXT,
+  live_sha TEXT,
+  auto_sha TEXT,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  UNIQUE (server_id, path)
+);
+CREATE INDEX deploy_targets_repo ON deploy_targets(repo_id);
+
+CREATE TABLE deploys (
+  id TEXT PRIMARY KEY,
+  target_id TEXT NOT NULL REFERENCES deploy_targets(id) ON DELETE CASCADE,
+  sha TEXT NOT NULL,
+  status TEXT NOT NULL,
+  triggered_by TEXT NOT NULL,
+  summary TEXT,
+  log_text TEXT NOT NULL DEFAULT '',
+  started_at INTEGER NOT NULL,
+  finished_at INTEGER
+);
+CREATE INDEX deploys_target_started ON deploys(target_id, started_at);
+CREATE INDEX deploys_started ON deploys(started_at);
+CREATE INDEX deploys_status ON deploys(status);
+`,
+  },
 ];

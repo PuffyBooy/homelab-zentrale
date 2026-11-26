@@ -1,7 +1,8 @@
-import type { Alert, CheckSummary, ContainerSummary, ServerSummary } from '@hz/shared';
+import type { Alert, CheckSummary, ContainerSummary, RepoSummary, ServerSummary } from '@hz/shared';
 import { checkMatchesServer, checkSentence, checksSentence, KIND_LABEL } from '../lib/checks.js';
 import { containerSentence, containerStateText } from '../lib/containers.js';
 import { formatTime, plural } from '../lib/format.js';
+import { githubSentence, repoOnServer, repoSentence } from '../lib/github.js';
 import type { LiveState } from '../lib/live.js';
 import {
   ALL_SERVERS,
@@ -26,6 +27,8 @@ export interface PageData {
   containers?: ContainerSummary[] | undefined;
   /** Only read on the websites pages. */
   checks?: CheckSummary[] | undefined;
+  /** Only read on the GitHub pages. */
+  repos?: RepoSummary[] | undefined;
   /** Server filter from the ServerSwitch, or the id of the detail page. */
   filter?: string | undefined;
   live?: LiveState | undefined;
@@ -62,6 +65,16 @@ export function containerLogsId(pathname: string): string | null {
 export function checkDetailId(pathname: string): string | null {
   const m = /^\/websites\/([A-Za-z0-9_-]{8,64})\/?$/.exec(pathname);
   return m?.[1] ?? null;
+}
+
+export function repoDetailId(pathname: string): string | null {
+  const m = /^\/github\/([A-Za-z0-9_-]{8,64})\/?$/.exec(pathname);
+  return m?.[1] ?? null;
+}
+
+/** Pages that read the repo list in the shell header. */
+export function needsRepos(pathname: string): boolean {
+  return pathname === '/github' || repoDetailId(pathname) !== null;
 }
 
 /** Pages that read the check list in the shell header. */
@@ -154,8 +167,35 @@ export function pageMeta(pathname: string, data: PageData = {}): PageMeta {
     };
   }
 
+  if (pathname === '/github') {
+    if (data.repos === undefined) {
+      return { title: plain('GitHub'), sub: 'lädt …', serverSwitch: true };
+    }
+    const list = filtered ? data.repos.filter((r) => repoOnServer(r, filtered.id)) : data.repos;
+    return {
+      title: githubSentence(list),
+      sub: liveSub('GitHub', data, plural(list.length, 'Repo', 'Repos')),
+      serverSwitch: true,
+    };
+  }
+
+  const repoId = repoDetailId(pathname);
+  if (repoId) {
+    const r = data.repos?.find((x) => x.id === repoId);
+    if (!r) return { title: plain('Repo'), sub: 'lädt …', serverSwitch: false };
+    return {
+      title: repoSentence(r),
+      sub: `GitHub · ${r.fullName} · ${plural(r.targets.length, 'Ziel', 'Ziele')}`,
+      serverSwitch: false,
+    };
+  }
+
   if (pathname === settingsItem.href) {
-    return { title: plain('Einstellungen'), sub: 'Konto, Sitzungen und Push', serverSwitch: false };
+    return {
+      title: plain('Einstellungen'),
+      sub: 'Konto, Sitzungen, Push und GitHub',
+      serverSwitch: false,
+    };
   }
   if (pathname === '/alerts') {
     const open = (data.alerts ?? []).filter(

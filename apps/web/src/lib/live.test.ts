@@ -2,12 +2,14 @@ import type {
   Alert,
   CheckSummary,
   ContainerSummary,
+  RepoSummary,
   ServerDetail,
   ServerSummary,
 } from '@hz/shared';
 import { QueryClient } from '@tanstack/react-query';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { alert, check, container, detail, server } from '../test-fixtures.js';
+import { alert, check, container, deploy, detail, repo, server, target } from '../test-fixtures.js';
+import { deployLogKey, reposKey, type DeployLogBuffer } from './github.js';
 import { checksKey } from './checks.js';
 import { alertsKey } from './alerts.js';
 import { containersKey } from './containers.js';
@@ -212,8 +214,46 @@ describe('applyLiveMessage', () => {
   });
 
   it('ignores unknown topics', () => {
-    applyLiveMessage(qc, { type: 'snapshot', topic: 'github', data: [] });
+    applyLiveMessage(qc, { type: 'snapshot', topic: 'ha', data: [] });
     expect(qc.getQueryCache().getAll()).toHaveLength(0);
+  });
+
+  it('writes the github snapshot, merges updates and drops invalid repos', () => {
+    const a = repo({ fullName: 'PuffyBooy/soundos' });
+    const b = repo({ fullName: 'PuffyBooy/lernplattform' });
+    applyLiveMessage(qc, { type: 'snapshot', topic: 'github', data: { repos: [a, b, { id: 1 }] } });
+    expect(qc.getQueryData<RepoSummary[]>(reposKey)?.map((r) => r.fullName)).toEqual([
+      'PuffyBooy/soundos',
+      'PuffyBooy/lernplattform',
+    ]);
+    const a2 = { ...a, targets: [target({ repoId: a.id, behind: 1 })] };
+    applyLiveMessage(qc, { type: 'update', topic: 'github', upsert: [a2], remove: [b.id] });
+    const list = qc.getQueryData<RepoSummary[]>(reposKey);
+    expect(list).toHaveLength(1);
+    expect(list?.[0]?.targets[0]?.behind).toBe(1);
+  });
+
+  it('appends deploy log chunks and refreshes the deploy on a status item', () => {
+    const topic = 'deploy:dep-000001';
+    const key = deployLogKey('dep-000001');
+    applyLiveMessage(qc, {
+      type: 'snapshot',
+      topic,
+      data: [{ id: 'c1', channel: 'stdout', text: 'git fetch\ngit checkout a3f9c21' }],
+    });
+    expect(qc.getQueryData<DeployLogBuffer>(key)?.lines).toHaveLength(2);
+    applyLiveMessage(qc, {
+      type: 'update',
+      topic,
+      upsert: [
+        { id: 'c1', channel: 'stdout', text: 'git fetch' },
+        { id: 'c2', channel: 'stderr', text: 'compose up failed' },
+        deploy({ id: 'dep-000001', status: 'failed' }),
+      ],
+    });
+    const lines = qc.getQueryData<DeployLogBuffer>(key)?.lines;
+    expect(lines).toHaveLength(3);
+    expect(lines?.[2]).toEqual({ text: 'compose up failed', kind: 'err' });
   });
 });
 

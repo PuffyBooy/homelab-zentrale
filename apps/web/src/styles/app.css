@@ -976,3 +976,69 @@ body,
     margin-left: auto;
   }
 }
+
+/* M5 GitHub */
+.app-target + .app-target {
+  border-top: 1px solid var(--line);
+}
+.app-target > .app-pad {
+  padding-top: 0;
+}
+.app-howto {
+  margin: 0;
+  padding-left: var(--space-5);
+  color: var(--ink-muted);
+  font-size: 13px;
+  line-height: 20px;
+}
+.app-howto a,
+.app-text a {
+  color: var(--ink);
+}
+.app-main .hz-row > .hz-status.app-status-auto,
+.app-kv .hz-status.app-status-auto {
+  width: auto;
+}
+.app-pick-list {
+  display: grid;
+  max-height: min(48vh, 420px);
+  overflow-y: auto;
+}
+.app-inline-field {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.app-inline-field .hz-input {
+  height: 28px;
+  padding-top: 0;
+  padding-bottom: 0;
+}
+.app-anchor {
+  scroll-margin-top: var(--space-4);
+  min-width: 0;
+}
+/* Phones: repo, commit, target and deploy rows keep the name on the first line. */
+@media (max-width: 699px) {
+  .app-main .hz-repo,
+  .app-main .hz-commit,
+  .app-main .app-wrap-row {
+    flex-wrap: wrap;
+    row-gap: var(--space-1);
+  }
+  .app-main .hz-repo > .hz-row-main {
+    flex: 1 1 calc(100% - 14px - var(--space-3));
+  }
+  .app-main .hz-repo > .hz-status {
+    margin-left: calc(14px + var(--space-3));
+  }
+  .app-main .hz-commit > .hz-row-main,
+  .app-main .app-wrap-row > .hz-row-main {
+    flex: 1 1 calc(100% - 80px);
+  }
+  .app-main .hz-commit > .hz-status,
+  .app-main .app-wrap-row > .hz-status,
+  .app-main .app-wrap-row > .hz-badge:first-of-type {
+    margin-left: auto;
+  }
+}

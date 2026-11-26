@@ -42,6 +42,7 @@ describe('agent protocol allowlist', () => {
         'container.stop',
         'container.update',
         'deploy.run',
+        'deploy.key',
         'game.backup',
         'game.rcon',
         'pty.close',

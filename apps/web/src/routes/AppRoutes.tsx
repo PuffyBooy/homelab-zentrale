@@ -5,6 +5,8 @@ import { AlertsPage } from '../pages/alerts/AlertsPage.js';
 import { ContainerLogsPage } from '../pages/containers/ContainerLogsPage.js';
 import { ContainersPage } from '../pages/containers/ContainersPage.js';
 import { EmptyPage, NotFoundPage } from '../pages/empty/EmptyPage.js';
+import { GithubPage } from '../pages/github/GithubPage.js';
+import { RepoDetailPage } from '../pages/github/RepoDetailPage.js';
 import { LoginPage } from '../pages/login/LoginPage.js';
 import { OverviewPage } from '../pages/overview/OverviewPage.js';
 import { ServerDetailPage } from '../pages/servers/ServerDetailPage.js';
@@ -22,7 +24,7 @@ const DevUiPage = import.meta.env.DEV
   : null;
 
 /** Nav targets with their own page; the rest shows the empty placeholder. */
-const BUILT = new Set(['/', '/servers', '/containers', '/websites', '/alerts']);
+const BUILT = new Set(['/', '/servers', '/containers', '/github', '/websites', '/alerts']);
 
 export function AppRoutes(): ReactElement {
   return (
@@ -65,6 +67,8 @@ export function AppRoutes(): ReactElement {
         <Route path="servers/:id" element={<ServerDetailPage />} />
         <Route path="containers" element={<ContainersPage />} />
         <Route path="containers/:id/logs" element={<ContainerLogsPage />} />
+        <Route path="github" element={<GithubPage />} />
+        <Route path="github/:id" element={<RepoDetailPage />} />
         <Route path="websites" element={<WebsitesPage />} />
         <Route path="websites/:id" element={<CheckDetailPage />} />
         <Route path="alerts" element={<AlertsPage />} />

@@ -27,8 +27,11 @@ FROM node:22-bookworm-slim AS runtime
 # util-linux: nsenter (host commands in the namespaces of host PID 1)
 # iproute2:   ss (listening ports)
 # iputils-ping: check.ping
+# git, openssh-client, ca-certificates: deploy.run (git fetch over https or ssh with a
+#   deploy key; GitHub's host keys are bundled in assets/github_known_hosts)
 RUN apt-get update \
   && apt-get install -y --no-install-recommends util-linux iproute2 iputils-ping \
+     git openssh-client ca-certificates \
   && rm -rf /var/lib/apt/lists/*
 # The runtime never needs npm, corepack or yarn; removing them drops their dependency CVEs.
 RUN rm -rf /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/corepack \

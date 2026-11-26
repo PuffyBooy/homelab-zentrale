@@ -26,6 +26,9 @@ import { ContainerService } from './containers/service.js';
 import { createSecretBox } from './crypto.js';
 import { openDatabase, type DbHandle } from './db/index.js';
 import { seedDemo } from './demo/seed.js';
+import { githubRoutes } from './github/routes.js';
+import { GithubService } from './github/service.js';
+import type { FetchLike as GithubFetch } from './github/client.js';
 import { errorHandler, sendError } from './http/errors.js';
 import { LiveHub, type LiveOptions } from './live/hub.js';
 import { liveRoutes } from './live/routes.js';
@@ -61,6 +64,9 @@ export interface AppDeps {
   pushTransport?: PushTransport;
   /** RDAP transport (tests: no network). */
   rdapFetch?: FetchLike;
+  /** GitHub API transport and base URL (tests: a fake GitHub). */
+  githubFetch?: GithubFetch;
+  githubBaseUrl?: string;
 }
 
 /** Core services, decorated on the app as `hzCore` (routes, tests). */
@@ -77,6 +83,7 @@ export interface CoreServices {
   checks: CheckService;
   push: PushService;
   notifier: Notifier;
+  github: GithubService;
   db: DbHandle;
 }
 
@@ -291,6 +298,35 @@ export async function buildApp(config: Config, deps: AppDeps = {}): Promise<Fast
     log: app.log.child({ mod: 'notify' }),
   });
 
+  // ---- M5: GitHub and deploy --------------------------------------------------
+  const github = new GithubService({
+    db: db.db,
+    box,
+    now,
+    scheduler,
+    alerts,
+    hub,
+    log: app.log.child({ mod: 'github' }),
+    ...(deps.githubFetch ? { fetch: deps.githubFetch } : {}),
+    ...(deps.githubBaseUrl ? { baseUrl: deps.githubBaseUrl } : {}),
+  });
+  live.addProvider({
+    matches: (topic) => topic === 'github',
+    snapshot: () => github.list(),
+    item: (_topic, id) => github.summary(id),
+  });
+  live.addProvider({
+    matches: (topic) => github.deployer.matches(topic),
+    has: (topic) => github.deployer.has(topic),
+    snapshot: (topic) => github.deployer.snapshot(topic),
+  });
+  github.deployer.setPublisher(live);
+  github.onChange((id, deleted) => live.mark('github', id, deleted ? 'remove' : 'upsert'));
+  // Targets of a deleted server are gone (cascade); the repo summaries change.
+  servers.onChange((_id, deleted) => {
+    if (deleted) github.emitAll();
+  });
+
   app.decorate('hzCore', {
     scheduler,
     tokens,
@@ -304,6 +340,7 @@ export async function buildApp(config: Config, deps: AppDeps = {}): Promise<Fast
     checks,
     push,
     notifier,
+    github,
     db,
   });
 
@@ -315,6 +352,7 @@ export async function buildApp(config: Config, deps: AppDeps = {}): Promise<Fast
   scheduler.every('metrics.prune', HOUR, () => void metrics.prune());
   scheduler.every('alerts.prune', HOUR, () => void alerts.prune());
   checks.start();
+  github.start();
   scheduler.every('push.warnBundle', 60_000, () => notifier.flush());
   scheduler.at('report.weekly', nextWeeklyReport, () => {
     if (!readNotifySettings(db.db).weeklyReport) return;
@@ -324,6 +362,7 @@ export async function buildApp(config: Config, deps: AppDeps = {}): Promise<Fast
       checks: checks.uptimes(7 * DAY),
       serversOffline: list.filter((s) => s.reasons.some((r) => r.code === 'offline')).length,
       serversTotal: list.length,
+      deploys: github.deployStats(7 * DAY),
     });
     alerts.log('report:weekly', 'info', title, body, null, 'system');
   });
@@ -342,9 +381,10 @@ export async function buildApp(config: Config, deps: AppDeps = {}): Promise<Fast
     scheduler.stop();
     // Let running checks and pushes finish before the database closes (bounded).
     await Promise.race([
-      Promise.all([checks.idle(), push.idle()]),
+      Promise.all([checks.idle(), push.idle(), github.idle()]),
       new Promise((r) => setTimeout(r, 3_000).unref()),
     ]);
+    github.deployer.shutdown();
     hub.shutdown();
     live.closeAll();
     logs.closeAll();
@@ -370,6 +410,7 @@ export async function buildApp(config: Config, deps: AppDeps = {}): Promise<Fast
   await app.register(containerRoutes, { prefix: '/api', db: db.db, now, containers, servers, hub });
   await app.register(checkRoutes, { prefix: '/api', db: db.db, now, checks });
   await app.register(pushRoutes, { prefix: '/api', db: db.db, now, push });
+  await app.register(githubRoutes, { prefix: '/api', db: db.db, now, github });
 
   const webDir = resolve(config.webDir ?? defaultWebDir);
   const hasWeb = existsSync(resolve(webDir, 'index.html'));

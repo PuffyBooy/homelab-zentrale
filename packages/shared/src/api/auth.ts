@@ -130,6 +130,12 @@ export const errorCodeSchema = z.enum([
   'agent_timeout',
   /** confirmName does not match the server name (400). */
   'confirm_mismatch',
+  /** A deploy for this target is already running (409, lock per target). */
+  'busy',
+  /** The CI of the commit is not green, deploy refused (409). */
+  'ci_not_green',
+  /** GitHub could not be reached or refused the request (502); details in /api/github/settings. */
+  'github_error',
 ]);
 export type ErrorCode = z.infer<typeof errorCodeSchema>;
 export const errorResponseSchema = z.strictObject({

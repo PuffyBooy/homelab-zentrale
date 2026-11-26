@@ -1,10 +1,18 @@
-import type { Alert, CheckSummary, ContainerSummary, ServerSummary } from '@hz/shared';
+import type {
+  Alert,
+  CheckSummary,
+  ContainerSummary,
+  GithubSettings,
+  RepoSummary,
+  ServerSummary,
+} from '@hz/shared';
 import { useQuery, type UseQueryResult } from '@tanstack/react-query';
 import { useCallback } from 'react';
 import { useSearchParams } from 'react-router';
 import { alertsKey, fetchAlerts } from './alerts.js';
 import { checksKey, fetchChecks } from './checks.js';
 import { containersKey, fetchContainers } from './containers.js';
+import { fetchGithubSettings, fetchRepos, githubSettingsKey, reposKey } from './github.js';
 import { useLiveState } from './live.js';
 import { ALL_SERVERS, fetchServers, serversKey } from './servers.js';
 
@@ -43,6 +51,29 @@ export function useChecks(enabled = true): UseQueryResult<CheckSummary[]> {
     enabled,
     staleTime: live === 'open' ? Infinity : 15_000,
     refetchInterval: live === 'open' ? false : 30_000,
+  });
+}
+
+/** Tracked repos. Callers subscribe to the live topic `github`. */
+export function useRepos(enabled = true): UseQueryResult<RepoSummary[]> {
+  const live = useLiveState();
+  return useQuery({
+    queryKey: reposKey,
+    queryFn: ({ signal }) => fetchRepos(signal),
+    enabled,
+    staleTime: live === 'open' ? Infinity : 30_000,
+    refetchInterval: live === 'open' ? false : 60_000,
+  });
+}
+
+/** Token state, last poll and rate limit (no live topic, refetched every minute). */
+export function useGithubSettings(enabled = true): UseQueryResult<GithubSettings> {
+  return useQuery({
+    queryKey: githubSettingsKey,
+    queryFn: ({ signal }) => fetchGithubSettings(signal),
+    enabled,
+    staleTime: 30_000,
+    refetchInterval: 60_000,
   });
 }
 

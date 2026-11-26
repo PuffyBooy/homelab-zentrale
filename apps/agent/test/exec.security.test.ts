@@ -53,7 +53,11 @@ describe('exec wrapper', () => {
     const src = await readFile(new URL('../src/exec.ts', import.meta.url), 'utf8');
     expect(src).toMatch(/shell: false/);
     expect(src).not.toMatch(/shell:\s*true/);
-    expect(src).not.toMatch(/\bexec\(|execSync|spawnSync|\bspawn\(/);
+    expect(src).not.toMatch(/\bexec\(|execSync|spawnSync|execFileSync/);
+    // Exactly one execFile and one spawn call (the two wrappers), both with shell: false.
+    expect(src.match(/\bexecFile\(/g)).toHaveLength(1);
+    expect(src.match(/\bspawn\(/g)).toHaveLength(1);
+    expect(src.match(/shell: false/g)).toHaveLength(2);
   });
 
   it('is the only module that imports child_process', async () => {
