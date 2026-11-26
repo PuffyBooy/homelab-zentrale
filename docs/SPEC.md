@@ -103,6 +103,7 @@ Für Server mit Festplatten, vor allem ein NAS wie das UGREEN NASync (UGOS Pro i
 - **Schlafende Platten** werden nie geweckt: SMART wird mit `--nocheck=standby` gelesen und höchstens alle 10 Min; während die Platte schläft, bleiben die letzten Werte stehen, die Temperatur zeigt „schläft“.
 - Nur lesend: Die Zentrale ändert nichts am RAID und an den Platten.
 - Modul „NAS und Speicher“ (Standard an), unter Einstellungen → Module abschaltbar.
+- **NAS als Backup-Ziel (M13b), auch ohne Agent auf dem NAS** (z. B. UGREEN DH2300 ohne Docker): Ein Server bindet eine Freigabe des NAS unter `/opt/homelab/backup-target` ein. Jede Nacht zur eingestellten Uhrzeit (Standard 05:00) und per „Jetzt kopieren“ kopiert der Agent dort die Gameserver-Backups seiner Spiele hin, und die Zentrale schickt einen Schnappschuss ihrer Datenbank (Secrets bleiben verschlüsselt). Jede Kopie wird zurückgelesen und per SHA-256 geprüft, die neuesten N (Standard 14) bleiben. Ist die Freigabe nicht eingebunden oder schreibgeschützt, wird nichts geschrieben und es kommt eine `warn`-Meldung; ebenso bei vollem NAS oder abgebrochener Kopie, mit OK-Meldung danach. Einstellungen → Backup → „NAS als Backup-Ziel“, Änderung mit Step-up. Die Erreichbarkeit des NAS prüfen normale Checks (Weboberfläche per HTTP, SMB per TCP 445).
 
 ## 6. Container und Gameserver
 
