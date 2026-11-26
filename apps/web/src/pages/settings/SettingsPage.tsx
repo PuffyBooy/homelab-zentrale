@@ -32,6 +32,8 @@ import { NotifyTile, PushTile } from './PushTiles.js';
 import { ShareGatewayTile } from './ShareGatewayTile.js';
 import { DnsTile, IngressTile } from './RelayTiles.js';
 import { ModulesTile } from './ModulesTile.js';
+import { DiscordBotTile } from './DiscordBotTile.js';
+import { VoiceTile } from './VoiceTile.js';
 import { enabledIntegrations, IntegrationTiles } from './IntegrationTiles.js';
 import { NotifyChannelsTile } from './NotifyChannelsTile.js';
 import { useModules } from '../../lib/useModules.js';
@@ -53,6 +55,7 @@ export const SETTINGS_SECTIONS: readonly {
   { id: 'push', label: 'Push' },
   { id: 'meldungskanaele', label: 'Meldungskanäle' },
   { id: 'ha', label: 'Home Assistant', module: 'homeassistant' },
+  { id: 'sprachsteuerung', label: 'Sprachsteuerung', module: 'voice' },
   {
     id: 'anbindungen',
     label: 'Anbindungen',
@@ -62,6 +65,7 @@ export const SETTINGS_SECTIONS: readonly {
   { id: 'share-gateway', label: 'Share-Gateway', module: 'games' },
   { id: 'eingaenge', label: 'Eingänge', module: 'games' },
   { id: 'dns', label: 'DNS', module: 'games' },
+  { id: 'discord-bot', label: 'Discord-Bot', module: 'discordbot' },
   { id: 'backup', label: 'Backup' },
 ];
 
@@ -138,6 +142,7 @@ export function SettingsPage(): ReactElement {
             <HaEntitiesTile />
           </>
         ) : null}
+        {modules.voice ? <VoiceTile /> : null}
         {enabledIntegrations(modules).length ? (
           <>
             <div id="anbindungen" className="app-anchor app-settings-wide app-settings-group">
@@ -162,6 +167,7 @@ export function SettingsPage(): ReactElement {
             <DnsTile />
           </>
         ) : null}
+        {modules.discordbot ? <DiscordBotTile /> : null}
         <Anchor id="backup">
           <BackupTile />
         </Anchor>

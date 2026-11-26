@@ -57,6 +57,18 @@ const GameDetailPage = page(
   (m) => m.GameDetailPage,
 );
 
+const LogSearchPage = page(
+  () => import('../pages/logsearch/LogSearchPage.js'),
+  (m) => m.LogSearchPage,
+);
+const SecurityPage = page(
+  () => import('../pages/security/SecurityPage.js'),
+  (m) => m.SecurityPage,
+);
+
+/** Sicherheit shows while either of its modules is on. */
+const SECURITY_MODULES: readonly ModuleId[] = ['vulnscan', 'fail2ban'];
+
 const VmsPage = page(
   () => import('../pages/vms/VmsPage.js'),
   (m) => m.VmsPage,
@@ -83,7 +95,7 @@ function L({ c: C }: { c: ComponentType }): ReactElement {
 }
 
 /** Lazy page of an optional module: "Modul ausgeschaltet" while it is off. */
-function G({ m, c }: { m: ModuleId; c: ComponentType }): ReactElement {
+function G({ m, c }: { m: ModuleId | readonly ModuleId[]; c: ComponentType }): ReactElement {
   return (
     <ModuleGate module={m}>
       <L c={c} />
@@ -109,6 +121,8 @@ const BUILT = new Set([
   '/home',
   '/alerts',
   '/console',
+  '/logs',
+  '/security',
 ]);
 
 export function AppRoutes(): ReactElement {
@@ -181,6 +195,8 @@ export function AppRoutes(): ReactElement {
         />
         <Route path="alerts" element={<AlertsPage />} />
         <Route path="console" element={<L c={ConsolePage} />} />
+        <Route path="logs" element={<G m="logsearch" c={LogSearchPage} />} />
+        <Route path="security" element={<G m={SECURITY_MODULES} c={SecurityPage} />} />
         {navItems
           .filter((it) => it.href && !BUILT.has(it.href))
           .map((it) => (

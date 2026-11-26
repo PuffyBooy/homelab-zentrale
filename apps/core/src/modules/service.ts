@@ -82,19 +82,17 @@ const MODULE_PREFIXES: Record<ModuleId, readonly string[]> = {
   fritzbox: ['/api/fritzbox'],
   uptimekuma: ['/api/uptimekuma'],
   storage: ['/api/storage'],
+  logsearch: ['/api/logsearch'],
+  vulnscan: ['/api/vulnscan'],
+  fail2ban: ['/api/fail2ban'],
+  discordbot: ['/api/discord-bot'],
+  voice: ['/api/voice'],
 };
 
 /** Module routes below another prefix (decoded path or route pattern). */
-const MODULE_PATTERNS: Record<ModuleId, readonly RegExp[]> = {
-  github: [],
-  homeassistant: [],
+const MODULE_PATTERNS: Partial<Record<ModuleId, readonly RegExp[]>> = {
   // M15: PUT /api/servers/:id/ingress
   games: [/^\/api\/servers\/[^/]+\/ingress\/?$/],
-  proxmox: [],
-  dnsfilter: [],
-  fritzbox: [],
-  uptimekuma: [],
-  storage: [],
 };
 
 function under(path: string, prefix: string): boolean {
@@ -105,7 +103,7 @@ function under(path: string, prefix: string): boolean {
 export function moduleOfPath(path: string): ModuleId | null {
   for (const m of MODULES) {
     if (MODULE_PREFIXES[m].some((p) => under(path, p))) return m;
-    if (MODULE_PATTERNS[m].some((re) => re.test(path))) return m;
+    if (MODULE_PATTERNS[m]?.some((re) => re.test(path))) return m;
   }
   return null;
 }

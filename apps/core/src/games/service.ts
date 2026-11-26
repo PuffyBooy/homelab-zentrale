@@ -1454,8 +1454,8 @@ export class GameService {
   async action(
     id: string,
     action: 'start' | 'stop' | 'restart' | 'backup',
-    /** `admin`, `system` or `share:<id>` (a friend's link). */
-    actor: 'admin' | 'system' | `share:${string}` = 'admin',
+    /** `admin`, `system`, `share:<id>` (a friend's link) or `voice:ha` (Alexa via HA). */
+    actor: 'admin' | 'system' | `share:${string}` | `voice:${string}` = 'admin',
     /** `sleep`: stop of the sleep mode (keeps wake listeners possible, no offline message). */
     opts: { sleep?: boolean } = {},
   ): Promise<GameSummary> {
@@ -1627,11 +1627,13 @@ export class GameService {
     serverId: string,
     needed: number | null,
     own: readonly string[],
-    actor: 'admin' | 'system' | `share:${string}`,
+    actor: 'admin' | 'system' | `share:${string}` | `voice:${string}`,
   ): () => void {
     if (!this.control || needed === null || needed <= 0) return () => undefined;
     const r = this.control.ramCheck(serverId, needed, own);
-    const share = actor.startsWith('share:');
+    // Starts from outside the hub (friend links, voice via Home Assistant) never
+    // bypass the reserve.
+    const share = actor.startsWith('share:') || actor.startsWith('voice:');
     if (r.kind === 'unknown' && share) throw new HttpError(409, 'ram_unknown');
     if (r.kind === 'insufficient') {
       const d = r.details;

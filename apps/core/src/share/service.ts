@@ -79,6 +79,11 @@ export const shareTokenHash = (t: string): string => sha256Hex(`share:${t}`);
 export const gatewayTokenHash = (t: string): string => sha256Hex(`gateway:${t}`);
 
 export type ShareVia = 'tailnet' | 'gateway';
+/**
+ * Where a friend action came from. `discord`: the Discord bot acting for the
+ * friend bound to the link (only through contextForLink, never the friend APIs).
+ */
+export type ShareContextVia = ShareVia | 'discord';
 export type ShareErrorCode =
   | 'not_found'
   | 'revoked'
@@ -114,7 +119,7 @@ export interface ShareContext {
   link: ShareLinkRow;
   perms: SharePerm[];
   ip: string | null;
-  via: ShareVia;
+  via: ShareContextVia;
 }
 
 const storedGatewaySchema = z.object({
@@ -451,7 +456,7 @@ export class ShareService {
 
   /** Records a friend action in share_audit and (optionally) audit_log. */
   private record(
-    ctx: { link: ShareLinkRow; ip: string | null; via: ShareVia },
+    ctx: { link: ShareLinkRow; ip: string | null; via: ShareContextVia },
     action: ShareAuditAction,
     detail: string | null,
     auditLog: { action: string; details?: Record<string, unknown> } | null,
@@ -543,6 +548,31 @@ export class ShareService {
       this.db.update(shareLinks).set(set).where(eq(shareLinks.id, fresh.id)).run();
     }
     return { link: { ...fresh, ...set }, perms: parsePerms(fresh.permsJson), ip, via };
+  }
+
+  /**
+   * Context for a link the admin bound to a Discord user (api/ops.ts, discordbot).
+   * By share id, not token, so it skips the PIN: the binding is the admin's own
+   * decision. Revoked, expired, locked or unknown links give null. The friend
+   * APIs never call this (they authenticate with the token).
+   */
+  contextForLink(shareId: string, via: 'discord'): ShareContext | null {
+    const row = this.row(shareId);
+    if (!row) return null;
+    if (this.stateOf(row) !== 'active') return null;
+    if (row.lockedUntil !== null && row.lockedUntil > this.deps.now()) return null;
+    let link = row;
+    if (row.lastUsedAt === null || this.deps.now() - row.lastUsedAt >= TOUCH_MS) {
+      const lastUsedAt = this.deps.now();
+      this.db.update(shareLinks).set({ lastUsedAt }).where(eq(shareLinks.id, row.id)).run();
+      link = { ...row, lastUsedAt };
+    }
+    return { link, perms: parsePerms(row.permsJson), ip: null, via };
+  }
+
+  /** State of a link (active, expired, revoked) without loading the view. */
+  linkState(row: ShareLinkRow): ShareLink['state'] {
+    return this.stateOf(row);
   }
 
   private checkState(link: ShareLinkRow): void {

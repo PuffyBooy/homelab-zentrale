@@ -7,5 +7,12 @@ d9cc83cdcd7febb382e19d26cceaa74d27e06018:apps/agent/test/games.security.test.ts:
 e8b1101f81e57f2b4331f38e31646431de07ea36:apps/web/src/pages/security/ops-pages.test.tsx:discord-client-id:427
 # HA1 of the fake FRITZ!Box in the M14 e2e helper (test value, split in later commits).
 52f127885e4e76cdd50e5d780989004d64a72dc2:e2e/helpers/fake-integrations.ts:generic-api-key:223
+# Fake GitHub token and fake Discord interaction token in M18 tests (split in a later commit).
+e244cfe96c610e61b0d360f9ad8cdfae644de8d0:apps/core/test/ops.security.test.ts:generic-api-key:58
+e244cfe96c610e61b0d360f9ad8cdfae644de8d0:apps/core/test/discord-helpers.ts:generic-api-key:223
+# Fake Discord user id in the M18 web test (replaced in a later commit).
+e8b1101f81e57f2b4331f38e31646431de07ea36:apps/web/src/pages/security/ops-pages.test.tsx:discord-client-id:427
 # Fake temp-link name in the M14 deploy-key race test (split in later commits).
 7fce8449796e5005fa3aa6526fdd945ae4c8dcde:apps/agent/test/deploy-key.security.test.ts:generic-api-key:154
+# Fake Discord user id in the M18 web step-up test (replaced in a later commit).
+6ca5b7677a8e290faaa289998a3333bd3676b585:apps/web/src/lib/ops.test.ts:discord-client-id:223
