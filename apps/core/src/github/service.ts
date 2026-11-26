@@ -1,4 +1,4 @@
-import { and, asc, eq, or, sql } from 'drizzle-orm';
+import { and, asc, eq, lt, or, sql } from 'drizzle-orm';
 import type { FastifyBaseLogger } from 'fastify';
 import { z } from 'zod';
 import {
@@ -103,6 +103,10 @@ export interface GithubServiceDeps {
  * GitHub (SPEC 7): token, tracked repos, polling every 60 s with ETags, CI
  * status, deploy targets with deploy keys, deploys and auto-deploy.
  */
+const ETAG_RETENTION_MS = 7 * 24 * 60 * 60_000;
+/** Deploys per target that keep their log text. */
+export const DEPLOY_LOGS_KEPT = 20;
+
 export class GithubService {
   readonly client: GithubClient;
   readonly deployer: Deployer;
@@ -164,12 +168,35 @@ export class GithubService {
     }
   }
 
+  /**
+   * Retention: ETag rows not refreshed for 7 days are dropped; deploy logs are
+   * kept for the newest DEPLOY_LOGS_KEPT deploys per target (older rows stay,
+   * without log, so rollback history is not lost).
+   */
+  prune(): { etags: number; logs: number } {
+    const db = this.deps.db;
+    const etags = db
+      .delete(githubEtags)
+      .where(lt(githubEtags.updatedAt, this.deps.now() - ETAG_RETENTION_MS))
+      .run().changes;
+    const logs = db.run(sql`
+      UPDATE deploys SET log_text = ''
+      WHERE log_text <> '' AND status NOT IN ('queued', 'running') AND id IN (
+        SELECT id FROM (
+          SELECT id, ROW_NUMBER() OVER (PARTITION BY target_id ORDER BY started_at DESC) AS n
+          FROM deploys
+        ) WHERE n > ${DEPLOY_LOGS_KEPT}
+      )`).changes;
+    return { etags, logs };
+  }
+
   /** Fails deploys that were running before a restart; registers polling and timeouts. */
   start(): void {
     this.deployer.recoverAfterRestart();
     const s = this.deps.scheduler;
     s.every('github.poll', GITHUB_POLL_MS, () => this.poll());
     s.every('github.deployTimeouts', 10_000, () => this.deployer.checkTimeouts());
+    s.every('github.prune', 60 * 60_000, () => void this.prune());
     if (this.token() !== null) this.track(this.poll());
   }
 
@@ -360,6 +387,8 @@ export class GithubService {
       liveSha: t.liveSha,
       behind: behindCount(list, t.liveSha),
       deploying: this.deployer.isBusy(t.id),
+      headSha: list[0]?.sha ?? null,
+      headCi: list[0]?.ci ?? 'off',
     };
   }
 

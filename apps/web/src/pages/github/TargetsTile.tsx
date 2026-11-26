@@ -37,7 +37,9 @@ export function TargetsTile({
 }: TargetsTileProps): ReactElement {
   const [editing, setEditing] = useState<DeployTarget | 'new' | null>(null);
   const [deleting, setDeleting] = useState<DeployTarget | null>(null);
-  const block = repo.targets[0] ? deployBlock(repo, { deploying: false }) : 'ok';
+  const block = repo.targets[0]
+    ? deployBlock(repo, { deploying: false, headSha: null, headCi: repo.ci })
+    : 'ok';
 
   return (
     <Tile

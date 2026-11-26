@@ -12,6 +12,8 @@ import {
   type GithubSetup,
 } from './github-helpers.js';
 import type { TestApp } from './helpers.js';
+import { deploys, githubEtags } from '../src/db/schema.js';
+import { DEPLOY_LOGS_KEPT } from '../src/github/service.js';
 
 let t: TestApp | undefined;
 const clients: WsClient[] = [];
@@ -249,5 +251,32 @@ describe('M5 acceptance', () => {
       title: 'Deploy von alex/blog auf heimserver fehlgeschlagen',
     });
     expect(target(s, repo.id, tg.id).liveSha).toBe(next);
+  });
+});
+
+describe('M5 retention', () => {
+  it('keeps the log of the newest deploys per target and drops stale ETags', async () => {
+    const { s, tg } = await blogSetup();
+    for (let i = 0; i < DEPLOY_LOGS_KEPT + 2; i++) {
+      await deployAndWait(s, tg.id);
+      s.t.clock.advance(1000);
+    }
+    const db = s.t.db.db;
+    db.insert(githubEtags)
+      .values({ url: '/old', etag: '"x"', dataJson: '{}', updatedAt: s.t.clock.t - 8 * 86_400_000 })
+      .run();
+    const r = s.t.app.hzCore.github.prune();
+    expect(r.logs).toBe(2);
+    expect(r.etags).toBeGreaterThanOrEqual(1);
+    const rows = db.select().from(deploys).all();
+    expect(rows).toHaveLength(DEPLOY_LOGS_KEPT + 2);
+    expect(rows.filter((d) => d.logText !== '')).toHaveLength(DEPLOY_LOGS_KEPT);
+    expect(
+      db
+        .select()
+        .from(githubEtags)
+        .all()
+        .some((e) => e.url === '/old'),
+    ).toBe(false);
   });
 });

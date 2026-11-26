@@ -90,6 +90,9 @@ export const deployTargetSchema = z.strictObject({
   /** Number of commits on `branch` after liveSha (max 30, "30+" in the UI). */
   behind: z.number().int().nonnegative(),
   deploying: z.boolean(),
+  /** Head commit of `branch` and its CI (the deploy button follows this, not the default branch). */
+  headSha: shaSchema.nullable(),
+  headCi: ciStatusSchema,
 });
 export type DeployTarget = z.infer<typeof deployTargetSchema>;
 

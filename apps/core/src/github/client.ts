@@ -16,6 +16,30 @@ export type FetchLike = (url: string, init: RequestInit) => Promise<Response>;
 export const GITHUB_API = 'https://api.github.com';
 const TIMEOUT_MS = 15_000;
 const MAX_BODY_CHARS = 5 * 1024 * 1024;
+
+/** Reads the body as text and aborts once it exceeds `max` bytes (checked before reading). */
+async function readCapped(res: Response, max: number): Promise<string> {
+  const declared = Number(res.headers.get('content-length') ?? '0');
+  if (declared > max) {
+    await res.body?.cancel().catch(() => undefined);
+    throw new Error('too large');
+  }
+  if (!res.body) return '';
+  const reader = res.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    size += value.byteLength;
+    if (size > max) {
+      await reader.cancel().catch(() => undefined);
+      throw new Error('too large');
+    }
+    chunks.push(value);
+  }
+  return Buffer.concat(chunks).toString('utf8');
+}
 const MAX_REPO_PAGES = 10;
 /** Without a reset header, wait this long after a rate-limit answer. */
 const DEFAULT_BACKOFF_MS = 60_000;
@@ -267,7 +291,8 @@ export class GithubClient {
     const runs = await this.get(
       `${repoPath(fullName)}/actions/runs?head_sha=${encodeURIComponent(sha)}&per_page=100`,
       reduceRuns,
-      { etag: true },
+      // One URL per sha: an ETag row per deploy would only grow the table.
+      { etag: false },
     );
     return ciOf(runs.filter((r) => r.headSha === sha));
   }
@@ -315,8 +340,7 @@ export class GithubClient {
     }
     let json: unknown;
     try {
-      const text = await res.text();
-      if (text.length > MAX_BODY_CHARS) throw new Error('too large');
+      const text = await readCapped(res, MAX_BODY_CHARS);
       json = JSON.parse(text);
     } catch {
       throw new GithubError('invalid', 'Unerwartete Antwort von GitHub');

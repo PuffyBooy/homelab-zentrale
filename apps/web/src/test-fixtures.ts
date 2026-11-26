@@ -183,6 +183,8 @@ export function target(over: Partial<DeployTarget> = {}): DeployTarget {
     liveSha: sha(9999),
     behind: 0,
     deploying: false,
+    headSha: null,
+    headCi: 'off',
     ...over,
   };
 }

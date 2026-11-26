@@ -223,12 +223,14 @@ export type DeployBlock = 'ok' | 'no_commit' | 'ci_crit' | 'ci_busy' | 'deployin
  */
 export function deployBlock(
   r: Pick<RepoSummary, 'ci' | 'lastCommit'>,
-  t: Pick<DeployTarget, 'deploying'>,
+  t: Pick<DeployTarget, 'deploying' | 'headSha' | 'headCi'>,
 ): DeployBlock {
   if (t.deploying) return 'deploying';
-  if (!r.lastCommit) return 'no_commit';
-  if (r.ci === 'crit') return 'ci_crit';
-  if (r.ci === 'busy') return 'ci_busy';
+  // The target's own branch decides (it may differ from the default branch).
+  if (!t.headSha && !r.lastCommit) return 'no_commit';
+  const ci = t.headSha ? t.headCi : r.ci;
+  if (ci === 'crit') return 'ci_crit';
+  if (ci === 'busy') return 'ci_busy';
   return 'ok';
 }
 

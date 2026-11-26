@@ -279,6 +279,9 @@ export type Spawner = (
   opts?: SpawnOptions,
 ) => SpawnHandle;
 
+/** How long the pipes may stay open after the child exited. */
+const PIPE_DRAIN_MS = 2000;
+
 function spawnChecked(
   programs: ReadonlySet<string>,
   file: string,
@@ -302,13 +305,30 @@ function spawnChecked(
     env,
     windowsHide: true,
     stdio: ['ignore', 'pipe', 'pipe'],
+    // Own process group, so a timeout or cancel also kills grandchildren
+    // (deploy.sh -> sleep/compose, git -> ssh/git-remote-https).
+    detached: true,
   });
   let reason: SpawnResult['error'];
   let total = 0;
   const kill = (why: NonNullable<SpawnResult['error']>) => {
     reason ??= why;
-    child.kill('SIGKILL');
+    try {
+      if (child.pid !== undefined) process.kill(-child.pid, 'SIGKILL');
+      else child.kill('SIGKILL');
+    } catch {
+      child.kill('SIGKILL');
+    }
   };
+  // A grandchild that survives may keep stdout/stderr open; 'close' would then never
+  // come and the dir lock would stay. After the child exited, give the pipes a short
+  // moment to drain, then close them.
+  child.on('exit', () => {
+    setTimeout(() => {
+      child.stdout.destroy();
+      child.stderr.destroy();
+    }, PIPE_DRAIN_MS).unref();
+  });
   const timer = setTimeout(() => kill('timeout'), timeout);
   const count = (chunk: Buffer) => {
     total += chunk.length;

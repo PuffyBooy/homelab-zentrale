@@ -547,7 +547,7 @@ export class Deployer {
       `deploy:${target.id}:failed`,
       'crit',
       `Deploy von ${repo.fullName} auf ${serverName} fehlgeschlagen`,
-      `${reason} (${shortSha(sha)}, ${clockTime(this.deps.now())}). Log unter GitHub ansehen; der vorige Stand läuft weiter.`,
+      `${reason} (${shortSha(sha)}, ${clockTime(this.deps.now())}). Log unter GitHub ansehen. Als LIVE gilt weiter ${target.liveSha ? shortSha(target.liveSha) : 'nichts'}; der Ordner kann schon den neuen Stand haben, ein Rollback stellt den alten sicher her.`,
       target.serverId,
       'github',
     );

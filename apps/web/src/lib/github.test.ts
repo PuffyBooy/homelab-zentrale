@@ -74,7 +74,8 @@ describe('repo labels', () => {
 });
 
 describe('deploy button rule', () => {
-  const behind = (): ReturnType<typeof target> => target({ behind: 2 });
+  const behind = (over: Parameters<typeof target>[0] = {}): ReturnType<typeof target> =>
+    target({ behind: 2, ...over });
 
   it('offers deploy with green CI and a target that is behind', () => {
     const r = repo({ ci: 'ok', targets: [behind(), target({ behind: 0 })] });
@@ -98,6 +99,20 @@ describe('deploy button rule', () => {
       expect(showDeployButton(r)).toBe(false);
       expect(deployBlock(r, r.targets[0] ?? target())).toBe(`ci_${ci}`);
     }
+  });
+
+  it("follows the CI of the target's own branch, not the default branch", () => {
+    const head = 'b'.repeat(40);
+    const red = repo({
+      ci: 'ok',
+      targets: [behind({ branch: 'prod', headSha: head, headCi: 'crit' })],
+    });
+    expect(showDeployButton(red)).toBe(false);
+    const green = repo({
+      ci: 'crit',
+      targets: [behind({ branch: 'prod', headSha: head, headCi: 'ok' })],
+    });
+    expect(showDeployButton(green)).toBe(true);
   });
 
   it('never offers deploy while a deploy runs or without target or commit', () => {
