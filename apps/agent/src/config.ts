@@ -66,6 +66,8 @@ export const configSchema = z.object({
     .pipe(agentTokenSchema.optional()),
   HZ_AGENT_NAME: agentNameSchema.optional(),
   HZ_AGENT_ALLOW_TERMINAL: boolFlag,
+  /** M15: game relay ingress (relay.set). Only on servers marked as ingress. */
+  HZ_AGENT_ALLOW_RELAY: boolFlag,
   /** M13: read SMART with smartctl (needs deploy/docker-compose.agent.smart.yml). */
   HZ_AGENT_SMART: boolFlag,
   HZ_AGENT_DATA: z.string().min(1).default('/data'),
@@ -89,6 +91,7 @@ export interface AgentConfig {
   token: string | undefined;
   name: string;
   allowTerminal: boolean;
+  allowRelay: boolean;
   smart: boolean;
   dataDir: string;
   hostExec: 'nsenter' | 'direct' | 'none';
@@ -146,6 +149,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AgentConfig {
     token: c.HZ_AGENT_TOKEN,
     name,
     allowTerminal: c.HZ_AGENT_ALLOW_TERMINAL,
+    allowRelay: c.HZ_AGENT_ALLOW_RELAY,
     smart: c.HZ_AGENT_SMART,
     dataDir: c.HZ_AGENT_DATA,
     hostExec: c.HZ_AGENT_HOST_EXEC,

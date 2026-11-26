@@ -7,7 +7,9 @@ import type {
   CheckDef,
   CheckSummary,
   ContainerSummary,
+  GameRelay,
   GameSummary,
+  Ingress,
   Migration,
   ServerDetail,
   ServerSummary,
@@ -254,6 +256,7 @@ export function game(over: Partial<GameSummary> = {}): GameSummary {
     autoStopMinutes: 0,
     wakeOnConnect: false,
     sleeping: false,
+    relay: null,
     modsKind: 'plugins',
     externalAddress: '',
     values: { TYPE: 'PAPER', MAX_PLAYERS: 20 },
@@ -318,6 +321,35 @@ export function migration(over: Partial<Migration> = {}): Migration {
     startedAt: '2026-11-26T22:00:00.000Z',
     updatedAt: '2026-11-26T22:03:00.000Z',
     finishedAt: null,
+    ...over,
+  };
+}
+
+export function ingress(over: Partial<Ingress> = {}): Ingress {
+  return {
+    serverId: 'srv-oracle1',
+    serverName: 'oracle-a1',
+    enabled: true,
+    publicIp: '203.0.113.7',
+    portFrom: 25565,
+    portTo: 25600,
+    capable: true,
+    connected: true,
+    games: [],
+    firewallHint: 'Firewall des Anbieters: 25565–25600 TCP und UDP öffnen',
+    ...over,
+  };
+}
+
+export function gameRelay(over: Partial<GameRelay> = {}): GameRelay {
+  return {
+    ingressServerId: 'srv-oracle1',
+    ingressName: 'oracle-a1',
+    dnsName: 'mc.example.org',
+    address: 'mc.example.org:25565',
+    state: 'ok',
+    error: null,
+    dnsOk: true,
     ...over,
   };
 }

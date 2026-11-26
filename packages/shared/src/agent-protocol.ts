@@ -115,6 +115,8 @@ export const helloSchema = z.strictObject({
     /** HZ_AGENT_ALLOW_TERMINAL=1 on this server. */
     terminal: z.boolean(),
     docker: z.boolean(),
+    /** M15: HZ_AGENT_ALLOW_RELAY=1 on this server (game relay ingress). Missing on old agents. */
+    relay: z.boolean().optional(),
   }),
 });
 export type Hello = z.infer<typeof helloSchema>;
@@ -754,6 +756,47 @@ export const backupFileNameSchema = z
   .string()
   .regex(/^[a-z0-9](?:[a-z0-9-]{0,30}[a-z0-9])-\d{8}-\d{6}\.tar\.zst$/);
 
+// ---------------------------------------------------------------------------
+// M15: game relay
+
+/**
+ * A Tailscale address (100.64.0.0/10 or fd7a:115c:a1e0::/48). Relay targets
+ * must be one: the relay only ever forwards into the tailnet.
+ */
+const OCTET = '(25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]?\\d)';
+const IPV4_RE = new RegExp(`^${OCTET}\\.${OCTET}\\.${OCTET}\\.${OCTET}$`);
+export const tailnetIpSchema = z
+  .string()
+  .max(64)
+  .refine(
+    (ip) => {
+      const v4 = IPV4_RE.exec(ip);
+      if (v4) {
+        const second = Number(v4[2]);
+        return v4[1] === '100' && second >= 64 && second <= 127;
+      }
+      return /^fd7a:115c:a1e0:[0-9a-f:]{2,30}$/i.test(ip) && !ip.includes(':::');
+    },
+    { message: 'not a tailnet address' },
+  );
+
+export const relayRouteSchema = z.strictObject({
+  /** Core id of the route (game id + port name). */
+  id: z.string().regex(/^[A-Za-z0-9_:-]{3,100}$/),
+  protocol: z.enum(['tcp', 'udp']),
+  /** Public port on the ingress; with count > 1 a consecutive range. */
+  listenPort: z.number().int().min(1024).max(65535),
+  count: z.number().int().min(1).max(10),
+  target: z.strictObject({
+    host: tailnetIpSchema,
+    /** First target port; listenPort + i goes to port + i. */
+    port: z.number().int().min(1024).max(65535),
+  }),
+});
+export type RelayRoute = z.infer<typeof relayRouteSchema>;
+/** Max routes on one ingress. */
+export const RELAY_MAX_ROUTES = 64;
+
 const ptySize = { cols: z.number().int().min(10).max(500), rows: z.number().int().min(5).max(200) };
 
 /** M14 Wake-on-LAN: normalised MAC (upper case, ":"), unicast (I/G bit clear), not all zero. */
@@ -959,6 +1002,20 @@ export const rpcParamsByAction = {
     gameId: gameFolderNameSchema,
     fileName: backupFileNameSchema,
   }),
+  /**
+   * M15 game relay. Replaces all relay routes of this agent (empty list stops
+   * all). Only with HZ_AGENT_ALLOW_RELAY=1 (`not_allowed` otherwise). Each route
+   * listens on 0.0.0.0:<listenPort..+count-1> and forwards byte for byte to
+   * target.host:<port..> in the tailnet: TCP as a pipe (max 256 connections per
+   * route, 10 min idle timeout), UDP with one upstream socket per client address
+   * (max 256 per route, 2 min idle). The agent refuses ports below 1024, ports
+   * used by its own wake listeners or other processes (route `failed`), targets
+   * outside the tailnet, and overlapping routes. Unchanged routes keep their
+   * connections. Result: relaySetDataSchema.
+   */
+  'relay.set': z.strictObject({
+    routes: z.array(relayRouteSchema).max(RELAY_MAX_ROUTES),
+  }),
   /** Stream. */
   'deploy.run': z.strictObject({
     dir: homelabPathSchema,
@@ -1155,6 +1212,21 @@ export const gameRestoreDoneDataSchema = z.strictObject({
   entries: z.number().int().nonnegative().max(ARCHIVE_MAX_ENTRIES),
 });
 export type GameRestoreDoneData = z.infer<typeof gameRestoreDoneDataSchema>;
+
+/** Result of relay.set: per route whether it listens now. */
+export const relaySetDataSchema = z.strictObject({
+  routes: z
+    .array(
+      z.strictObject({
+        id: z.string().max(100),
+        ok: z.boolean(),
+        /** German short reason when not ok, e.g. "Port 25565 ist belegt". */
+        error: z.string().max(200).nullable(),
+      }),
+    )
+    .max(RELAY_MAX_ROUTES),
+});
+export type RelaySetData = z.infer<typeof relaySetDataSchema>;
 export const gameStatusDataSchema = z.strictObject({
   online: z.boolean(),
   players: z

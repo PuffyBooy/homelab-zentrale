@@ -1,17 +1,30 @@
-import type { ServerSummary } from '@hz/shared';
+import type { GameRelay, ServerSummary } from '@hz/shared';
 import type { ReactElement } from 'react';
+import { Alert } from '@hz/ui';
 import { forwardPlace, forwardRules, type Protocol } from '../../lib/games.js';
 
 export interface ForwardHintProps {
   ports: readonly { name: string; port: number; protocol: Protocol; count?: number | undefined }[];
   server: ServerSummary | undefined;
+  /** M15: the game goes through an ingress, so nothing has to be forwarded at home. */
+  relay?: Pick<GameRelay, 'ingressName'> | null | undefined;
 }
 
 /**
  * SPEC 6.2 step 4: which ports to open so friends reach the game from outside. Text
  * only, the Zentrale never changes the router or the cloud firewall.
  */
-export function ForwardHint({ ports, server }: ForwardHintProps): ReactElement {
+export function ForwardHint({ ports, server, relay }: ForwardHintProps): ReactElement {
+  if (relay) {
+    return (
+      <div className="app-forward">
+        <Alert tone="ok" title="Kein Router-Portforwarding nötig.">
+          Freunde verbinden sich über den Eingang {relay.ingressName}. Dort muss die Firewall des
+          Anbieters den Portbereich des Eingangs offen haben (Einstellungen → Eingänge).
+        </Alert>
+      </div>
+    );
+  }
   const rules = forwardRules(ports);
   const place = forwardPlace(server);
   const list = (

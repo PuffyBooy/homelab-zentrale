@@ -732,8 +732,15 @@ export class ShareService {
         statusText: friendStatusText(s.status, s.statusText, row.phase),
         // Only what the admin entered for friends; never the Tailscale IP or server name.
         // An external address that is itself a tailnet address is not shown either.
+        // M15: a relayed game is reached through its ingress (public IPv4 or DNS name).
         address:
-          ext === '' || hasTailnetAddress(ext) ? null : port === undefined ? ext : `${ext}:${port}`,
+          s.relay?.address && !hasTailnetAddress(s.relay.address)
+            ? s.relay.address
+            : ext === '' || hasTailnetAddress(ext)
+              ? null
+              : port === undefined
+                ? ext
+                : `${ext}:${port}`,
         players: s.players && { ...s.players, names: s.players.names.map(maskTailnet) },
         whitelist: this.whitelistSupported(ctx.link.gameId),
         sleeping: s.sleeping,

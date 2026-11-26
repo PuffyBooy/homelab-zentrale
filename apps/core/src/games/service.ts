@@ -15,6 +15,7 @@ import {
   type ModKind,
   type ServerNetwork,
   type ContainerState,
+  type GameRelay,
   type GameStatusData,
   type GameSummary,
   type GameTemplate,
@@ -292,6 +293,23 @@ export interface GamePortAudit {
   releaseGame(serverId: string, gameName: string): void;
 }
 
+/**
+ * M15 relay hooks (apps/core/src/relay/service.ts): the relay of a game for its
+ * summary, ports relays listen on (a server that is an ingress), the port check
+ * for a relayed game and the forwarding hint when the game is relayed.
+ */
+export interface GameRelayHooks {
+  relayOf(gameId: string): GameRelay | null;
+  /** Public ports relays listen on, on `serverId` as ingress (except the relay of one game). */
+  listenPortsOn(serverId: string, exceptGameId?: string): HostPort[];
+  /** 409 conflict if the game cannot run there with its relay; no-op without relay. */
+  checkPorts(gameId: string, hostServerId: string, ports: readonly HostPort[]): void;
+  /** German hint for a relayed game (address stays, no router forwarding), null without relay. */
+  hint(gameId: string): string | null;
+  /** Ingress server of the game's relay, null without. */
+  ingressOf(gameId: string): string | null;
+}
+
 /** Public host ports of a game, one entry per (proto, port); local ones are skipped. */
 export function publicGamePorts(
   ports: readonly HostPort[],
@@ -376,6 +394,7 @@ export class GameService {
   private cloudHost: GameCloudHost | null = null;
   /** Games whose start waits for their cloud VM (busy text CLOUD_GAME_TEXT.starting). */
   private readonly cloudWaiting = new Set<string>();
+  private relay: GameRelayHooks | null = null;
   private readonly lifecycle = new Set<GameLifecycleListener>();
   private readonly statusListeners = new Set<GameStatusListener>();
   /** Games that announce `online` when they are next seen ok (after a start). */
@@ -412,6 +431,22 @@ export class GameService {
 
   setCloudHost(h: GameCloudHost | null): void {
     this.cloudHost = h;
+  }
+
+  setRelay(r: GameRelayHooks): void {
+    this.relay = r;
+  }
+
+  /** Re-emits the summary of a game (M15: its relay state changed). */
+  touch(id: string): void {
+    if (this.row(id)) this.emit(id);
+  }
+
+  /** Public (not 127.0.0.1-only) host ports of a game; template `local` as fallback. */
+  publicPortsOf(row: GameServerRow): HostPort[] {
+    const tpl = this.templates.get(row.templateId)?.template;
+    const tplPorts = new Map((tpl?.ports ?? []).map((p) => [p.name, p]));
+    return storedOf(row).ports.filter((p) => !(p.local ?? tplPorts.get(p.name)?.local ?? false));
   }
 
   /** Allowed-list bookkeeping must never break a game action. */
@@ -663,7 +698,7 @@ export class GameService {
 
   toSummary(row: GameServerRow, server: ServerRow | undefined): GameSummary {
     const tpl = this.templates.get(row.templateId)?.template;
-    const { ports, values } = storedOf(row);
+    const { values } = storedOf(row);
     const c = this.containerOf(row);
     const status = parse<GameStatusData>(row.statusJson);
     const state = gameState({
@@ -681,10 +716,10 @@ export class GameService {
     });
     const host = row.externalAddress || server?.tailscaleIp || server?.name || row.serverId;
     // Local ports (127.0.0.1 only) are neither in the address nor in the forwarding hint.
-    const tplPorts = new Map((tpl?.ports ?? []).map((p) => [p.name, p]));
-    const isLocal = (p: HostPort): boolean => p.local ?? tplPorts.get(p.name)?.local ?? false;
-    const publicPorts = ports.filter((p) => !isLocal(p));
+    const publicPorts = this.publicPortsOf(row);
     const main = publicPorts[0];
+    // M15: a relayed game is reached through its ingress (same port numbers).
+    const relay = this.relay?.relayOf(row.id) ?? null;
     const mem = values.MEMORY;
     const memMatch = typeof mem === 'string' ? /^(\d{1,3})([GM])$/.exec(mem) : null;
     const lastBackup = this.lastBackupAt(row.id);
@@ -703,7 +738,7 @@ export class GameService {
       version: status?.version ?? null,
       serverId: row.serverId,
       serverName: server?.name ?? row.serverId,
-      address: main ? `${host}:${main.port}` : host,
+      address: relay?.address ?? (main ? `${host}:${main.port}` : host),
       ports: publicPorts.map((p) => ({ name: p.name, port: p.port, protocol: p.protocol })),
       status: state.status,
       statusText,
@@ -717,6 +752,7 @@ export class GameService {
       autoStopMinutes: row.autoStopMinutes,
       wakeOnConnect: row.wakeOnConnect && tpl !== undefined && tpl.wake !== 'none',
       sleeping,
+      relay,
       modsKind: modsKindOf(tpl, values),
       externalAddress: row.externalAddress,
       values,
@@ -860,6 +896,9 @@ export class GameService {
       .all()
       .filter((g) => g.id !== exceptGameId)
       .map((g) => ({ ports: storedOf(g).ports, rconPort: g.rconPort }));
+    // M15: ports the relays on this server (as ingress) listen on are taken too.
+    const relayed = this.relay?.listenPortsOn(serverId, exceptGameId) ?? [];
+    if (relayed.length > 0) games.push({ ports: relayed, rconPort: null });
     return collectUsed({
       listening: parse<ListeningPort[]>(st?.listening ?? null) ?? [],
       containerPorts,
@@ -2100,9 +2139,14 @@ export class GameService {
         local: p.local ?? false,
       })),
       changed,
-      forwardingHint: forwardingHint(changed, this.networkOf(row.serverId)),
+      forwardingHint:
+        changed.some((c) => !c.local) && this.relay?.relayOf(id)
+          ? this.relay.hint(id)
+          : forwardingHint(changed, this.networkOf(row.serverId)),
     });
     if (changed.length === 0) return result(this.summary(id) as GameSummary);
+    // M15: a relayed game's new ports must fit its ingress (range, no overlap).
+    this.relay?.checkPorts(id, row.serverId, next);
 
     const values = { values: stored.values, secrets: this.secretValues(row) };
     const files = this.render(l, {
@@ -2307,8 +2351,28 @@ export class GameService {
       ports,
       rconPort,
       changed,
-      forwardingHint: targetForwardingHint(ports, this.networkOf(serverId)),
+      // M15: relayed, friends keep the ingress address; no router forwarding on the target.
+      forwardingHint:
+        this.relay?.hint(row.id) ?? targetForwardingHint(ports, this.networkOf(serverId)),
     };
+  }
+
+  /**
+   * M15: a relayed game cannot move onto its own ingress (the relay holds the
+   * ports there; remove the relay first), and its ports on the target must fit
+   * the ingress (409 conflict with a German hint).
+   */
+  checkRelayTarget(id: string, serverId: string, ports: readonly HostPort[] | null): void {
+    if (!this.relay) return;
+    if (this.relay.ingressOf(id) === serverId) {
+      throw new HttpError(
+        409,
+        'conflict',
+        undefined,
+        'Das Ziel ist der Eingang dieses Gameservers: erst das Relay entfernen',
+      );
+    }
+    if (ports !== null) this.relay.checkPorts(id, serverId, ports);
   }
 
   /** compose.yml and .env of the game with other host ports (secrets from the DB). */

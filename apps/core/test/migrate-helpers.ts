@@ -15,6 +15,7 @@ import {
   type Received,
   type WsClient,
 } from './agent-helpers.js';
+import type { FetchLike } from '../src/checks/rdap.js';
 import { ONLINE, readyGame, withGames, type GameSetup } from './games-helpers.js';
 
 /** How the fake source agent answers game.export. */
@@ -67,12 +68,25 @@ export function installFakeAgent(
   serverId: string,
   imp: ImportBehaviour,
   listening: number[] = [],
+  /** M15: Tailscale address the agent reports (default: inventoryMsg's). */
+  tailscaleIp?: string,
 ): FakeAgent {
   const rpcs: Received[] = [];
   const running = new Map<string, ContainerInfo>();
   const chunks: { seq: number; bytes: number }[] = [];
   const inventory = (ports: number[]) =>
     inventoryMsg({
+      ...(tailscaleIp
+        ? {
+            system: {
+              hostname: 'cloud',
+              os: 'Ubuntu 24.04',
+              kernel: '6.8.0',
+              arch: 'x64',
+              tailscaleIp,
+            },
+          }
+        : {}),
       containers: [...running.values()],
       listeningPorts: [
         { proto: 'tcp', address: '0.0.0.0', port: 22, process: 'sshd' },
@@ -292,13 +306,29 @@ export interface MigrateSetup {
 export async function withTwoServers(
   clients: WsClient[],
   imp: ImportBehaviour = {},
-  opts: { targetRamPct?: number } = {},
+  opts: {
+    targetRamPct?: number;
+    targetListening?: number[];
+    targetTailscaleIp?: string;
+    dnsFetch?: FetchLike;
+    captureLogs?: boolean;
+  } = {},
 ): Promise<MigrateSetup> {
-  const s = await withGames(clients);
+  const s = await withGames(clients, {
+    ...(opts.dnsFetch ? { dnsFetch: opts.dnsFetch } : {}),
+    ...(opts.captureLogs ? { captureLogs: true } : {}),
+  });
   const game = await readyGame(s);
   const e = await enrollAgent(s.t, s.url, s.cookie, 'cloud');
   clients.push(e.agent);
-  const target = installFakeAgent(s, e.agent, e.serverId, imp, [25566]);
+  const target = installFakeAgent(
+    s,
+    e.agent,
+    e.serverId,
+    imp,
+    opts.targetListening ?? [25566],
+    opts.targetTailscaleIp,
+  );
   e.agent.send(metricsMsg({ ramPct: opts.targetRamPct ?? 40 }));
   target.sendInventory();
   await keepAlive(target);

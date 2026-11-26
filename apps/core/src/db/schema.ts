@@ -953,6 +953,48 @@ export const whitelistRequests = sqliteTable(
   ],
 );
 
+// ---- M15: game relay -----------------------------------------------------------
+
+/** A server that relays game ports from its public IPv4 into the tailnet. */
+export const serverIngress = sqliteTable('server_ingress', {
+  serverId: text('server_id')
+    .primaryKey()
+    .references(() => servers.id, { onDelete: 'cascade' }),
+  enabled: integer('enabled', { mode: 'boolean' }).notNull().default(false),
+  /** Public IPv4 friends connect to; null: the server's public IP from the inventory. */
+  publicIp: text('public_ip'),
+  portFrom: integer('port_from').notNull(),
+  portTo: integer('port_to').notNull(),
+  updatedAt: integer('updated_at').notNull(),
+});
+
+/** The ingress a game is relayed through (at most one per game). */
+export const gameRelays = sqliteTable(
+  'game_relays',
+  {
+    gameId: text('game_id')
+      .primaryKey()
+      .references(() => gameServers.id, { onDelete: 'cascade' }),
+    ingressServerId: text('ingress_server_id')
+      .notNull()
+      .references(() => servers.id, { onDelete: 'cascade' }),
+    /** Optional DNS name (A record on the ingress IP). */
+    dnsName: text('dns_name'),
+    /** IPv4 the provider accepted last for dnsName (dnsOk: equals the ingress IP). */
+    dnsIp: text('dns_ip'),
+    /** [{name, port}]: listen port on the ingress per template port name (fixed at assignment). */
+    listenPortsJson: text('listen_ports_json').notNull().default('[]'),
+    /** ok | pending | error */
+    state: text('state').notNull().default('pending'),
+    /** German, fixed texts or the agent's short reason. */
+    error: text('error'),
+    updatedAt: integer('updated_at').notNull(),
+  },
+  (t) => [index('game_relays_ingress').on(t.ingressServerId, t.updatedAt)],
+);
+
+export type ServerIngressRow = typeof serverIngress.$inferSelect;
+export type GameRelayRow = typeof gameRelays.$inferSelect;
 export type GameScheduleRow = typeof gameSchedules.$inferSelect;
 export type GameNotifyRow = typeof gameNotify.$inferSelect;
 export type WhitelistRequestRow = typeof whitelistRequests.$inferSelect;

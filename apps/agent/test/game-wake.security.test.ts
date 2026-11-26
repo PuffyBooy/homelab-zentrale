@@ -4,7 +4,7 @@ import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { status as javaStatus, statusBedrock } from 'minecraft-server-util';
-import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { gameWakeArmDataSchema, type AgentEvent, type RpcEnvelope } from '@hz/shared';
 import { Dispatcher } from '../src/actions/index.js';
 import {
@@ -63,7 +63,13 @@ async function makeGame(ports: string[]): Promise<string> {
   return id;
 }
 
-function setup(opts: { docker?: HostContext['docker']; timeoutMs?: number } = {}) {
+function setup(
+  opts: {
+    docker?: HostContext['docker'];
+    timeoutMs?: number;
+    relayHolds?: (port: number, protocol: 'tcp' | 'udp') => boolean;
+  } = {},
+) {
   const events: GameWakeEvent[] = [];
   const { ctx, rec } = makeCtx(root);
   const wake = new WakeManager({
@@ -71,6 +77,7 @@ function setup(opts: { docker?: HostContext['docker']; timeoutMs?: number } = {}
     log: ctx.log,
     host: HOST,
     ...(opts.timeoutMs ? { connectionTimeoutMs: opts.timeoutMs } : {}),
+    ...(opts.relayHolds ? { relayHolds: opts.relayHolds } : {}),
   });
   managers.push(wake);
   ctx.wake = wake;
@@ -322,6 +329,61 @@ describe('game.wake.arm checks', () => {
     running = false;
     const r = await gameWakeArm(params, ctx);
     expect(gameWakeArmDataSchema.parse(r)).toEqual({ listening: [{ port: p, protocol: 'tcp' }] });
+  });
+
+  it('is busy (German reason) when a relay route holds the port', async () => {
+    const p = await closedPort();
+    const id = await makeGame([`${p}:25565/tcp`]);
+    const { ctx, wake } = setup({ relayHolds: (port, proto) => port === p && proto === 'tcp' });
+    const err = await gameWakeArm(
+      { gameId: id, mode: 'raw', ports: [{ port: p, protocol: 'tcp' }], motd: 'x' },
+      ctx,
+    ).then(
+      () => null,
+      (e: unknown) => e,
+    );
+    expect(err).toBeInstanceOf(ActionError);
+    expect((err as ActionError).code).toBe('busy');
+    expect((err as ActionError).message).toBe(`Port ${p}/tcp wird vom Game-Relay genutzt`);
+    expect(wake.armed(id)).toEqual([]);
+    expect(await tcpFree(p)).toBe(true);
+  });
+
+  it('a bedrock ping from port 0 is dropped instead of crashing the agent', async () => {
+    const p = await closedPort();
+    const id = await makeGame([`${p}:19132/udp`]);
+    const created: dgram.Socket[] = [];
+    const orig = dgram.createSocket.bind(dgram);
+    vi.spyOn(dgram, 'createSocket').mockImplementation(((...args: Parameters<typeof orig>) => {
+      const s = orig(...args);
+      created.push(s);
+      return s;
+    }) as typeof dgram.createSocket);
+    try {
+      const { ctx } = setup();
+      await gameWakeArm(
+        { gameId: id, mode: 'minecraft-bedrock', ports: [{ port: p, protocol: 'udp' }], motd: 'm' },
+        ctx,
+      );
+      const ping = Buffer.concat([
+        Buffer.from([0x01]),
+        Buffer.alloc(8),
+        RAKNET_MAGIC,
+        Buffer.alloc(8),
+      ]);
+      const sock = created[0];
+      expect(sock).toBeDefined();
+      for (const port of [0, 70000]) {
+        expect(() =>
+          sock?.emit('message', ping, { address: HOST, port, family: 'IPv4', size: ping.length }),
+        ).not.toThrow();
+      }
+      expect(() =>
+        sock?.emit('message', ping, { address: 'x', port: 4000, family: 'IPv4', size: 1 }),
+      ).not.toThrow();
+    } finally {
+      vi.restoreAllMocks();
+    }
   });
 
   it('is busy when the port is taken', async () => {
