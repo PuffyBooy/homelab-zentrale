@@ -1,0 +1,261 @@
+/*
+ * Share page. Tokens and component styles come from design/ (same as packages/ui);
+ * the Google Fonts import in components.css is stripped at build time (vite.config.ts)
+ * and the fonts are self-hosted from apps/web/public/fonts (OFL). Below only the
+ * proposed Field/Terminal styles (same rules as apps/web/src/styles/app.css) and the
+ * layout of this one page. Only tokens, no colours.
+ */
+@import '../../../../design/tokens.css';
+@import '../../../../design/components.css';
+
+@font-face {
+  font-family: 'Space Grotesk';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 400;
+  src: url('../../../web/public/fonts/space-grotesk-latin-400-normal.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Space Grotesk';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 500;
+  src: url('../../../web/public/fonts/space-grotesk-latin-500-normal.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Space Grotesk';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 600;
+  src: url('../../../web/public/fonts/space-grotesk-latin-600-normal.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'JetBrains Mono';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 400;
+  src: url('../../../web/public/fonts/jetbrains-mono-latin-400-normal.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'JetBrains Mono';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 500;
+  src: url('../../../web/public/fonts/jetbrains-mono-latin-500-normal.woff2') format('woff2');
+}
+
+html,
+body {
+  min-height: 100%;
+}
+
+/* ---------- Page ---------- */
+.sh-page {
+  box-sizing: border-box;
+  max-width: 720px;
+  margin: 0 auto;
+  padding: var(--space-6) var(--space-4) var(--space-7);
+  display: grid;
+  gap: var(--space-4);
+}
+.sh-narrow {
+  max-width: 480px;
+}
+.sh-head {
+  display: grid;
+  gap: var(--space-1);
+}
+.sh-title {
+  margin: 0;
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+.sh-title:focus,
+.sh-title:focus-visible {
+  outline: none;
+  box-shadow: none;
+}
+.sh-sub,
+.sh-text {
+  margin: 0;
+  color: var(--ink-muted);
+  font-size: 13px;
+  line-height: 20px;
+}
+.sh-foot {
+  margin: 0;
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--ink-faint);
+}
+.sh-slot:empty {
+  display: none;
+}
+.sh-busy {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--ink-faint);
+}
+.hz-game .hz-addr {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  text-align: left;
+}
+@media (max-width: 699px) {
+  .sh-page {
+    padding-top: var(--space-4);
+  }
+  .sh-title {
+    font-size: 24px;
+    line-height: 30px;
+  }
+}
+
+/* ---------- Field (proposed, same as apps/web) ---------- */
+.hz-form {
+  display: grid;
+  gap: var(--space-4);
+}
+.hz-field {
+  display: grid;
+  gap: var(--space-1);
+  min-width: 0;
+}
+.hz-field-label {
+  font-size: 13px;
+  line-height: 20px;
+  font-weight: 600;
+  color: var(--ink);
+}
+.hz-input {
+  font: inherit;
+  font-size: 14px;
+  height: 36px;
+  padding: 0 var(--space-3);
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--line-strong);
+  background: var(--bg-200);
+  color: var(--ink);
+}
+.hz-input::placeholder {
+  color: var(--ink-faint);
+}
+.hz-input:focus {
+  outline: none;
+}
+.hz-input:focus-visible {
+  box-shadow: var(--focus-ring);
+}
+.hz-input[aria-invalid='true'] {
+  border-color: var(--crit);
+}
+.hz-input-mono {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+.hz-field-hint {
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--ink-faint);
+}
+.hz-field-error {
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--crit);
+}
+.hz-field-error[hidden] {
+  display: none;
+}
+.hz-form-actions {
+  display: flex;
+  gap: var(--space-2);
+  justify-content: flex-end;
+  flex-wrap: wrap;
+}
+
+/* ---------- Terminal (same as apps/web) ---------- */
+.hz-term {
+  background: var(--terminal-bg);
+  color: var(--terminal-ink);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  min-width: 0;
+}
+.hz-term-head {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--line);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 16px;
+  color: var(--ink-muted);
+}
+.hz-term-host {
+  color: var(--ink-faint);
+}
+.hz-term-body {
+  margin: 0;
+  padding: var(--space-3);
+  overflow: auto;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+  line-height: 20px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.hz-term-body:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+.sh-term-body {
+  height: 280px;
+}
+.hz-term-line {
+  min-height: 20px;
+}
+.hz-term-prompt {
+  color: var(--accent);
+}
+.hz-term-err {
+  color: var(--crit);
+}
+.hz-term-dim {
+  color: var(--ink-faint);
+}
+.sh-console-form {
+  display: grid;
+  gap: var(--space-1);
+}
+.sh-console-line {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.sh-console-line .hz-input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.sh-console-prompt {
+  font-family: var(--font-mono);
+  color: var(--ink-faint);
+}
+.sh-output {
+  font-family: var(--font-mono);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.sh-output:empty {
+  display: none;
+}
+@media (max-width: 699px) {
+  .sh-term-body {
+    height: 220px;
+  }
+}

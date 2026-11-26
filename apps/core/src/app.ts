@@ -46,6 +46,10 @@ import { healthRoutes } from './routes/health.js';
 import { Scheduler } from './scheduler.js';
 import { serverRoutes } from './servers/routes.js';
 import { ServerService } from './servers/service.js';
+import { shareGatewayRoutes, shareTailnetRoutes } from './share/friend-routes.js';
+import { redactShareUrl } from './share/redact.js';
+import { shareRoutes } from './share/routes.js';
+import { ShareService } from './share/service.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 
@@ -54,6 +58,9 @@ export const defaultWebDir = resolve(here, '../../web/dist');
 
 /** templates/games of the repo, seen from apps/core/src or apps/core/dist. */
 export const defaultGameTemplatesDir = resolve(here, '../../../templates/games');
+
+/** apps/share/dist/ui (mini UI of the share page), seen from apps/core/src or apps/core/dist. */
+export const defaultShareUiDir = resolve(here, '../../share/dist/ui');
 
 export interface AppDeps {
   /** Database. Defaults to `${dataDir}/hz.sqlite`. The app closes it on shutdown. */
@@ -91,6 +98,7 @@ export interface CoreServices {
   notifier: Notifier;
   github: GithubService;
   games: GameService;
+  shares: ShareService;
   db: DbHandle;
 }
 
@@ -112,9 +120,13 @@ declare module 'fastify' {
 const REDACT = [
   'req.headers.cookie',
   'req.headers.authorization',
+  'req.headers["x-share-pin"]',
+  'req.headers["x-share-token"]',
   'res.headers["set-cookie"]',
   'headers.cookie',
   'headers.authorization',
+  'headers["x-share-pin"]',
+  'headers["x-share-token"]',
   'headers["set-cookie"]',
   ...[
     'password',
@@ -128,6 +140,7 @@ const REDACT = [
     'privateKey',
     'subscription',
     'keys',
+    'pin',
   ].flatMap((k) => [k, `*.${k}`, `body.${k}`, `req.body.${k}`]),
 ];
 
@@ -135,11 +148,44 @@ function isLoopbackAddress(addr: string): boolean {
   return addr === '::1' || addr.startsWith('127.') || addr.startsWith('::ffff:127.');
 }
 
+interface LoggedRequest {
+  method: string;
+  url: string;
+  host?: string;
+  ip?: string;
+  socket?: { remotePort?: number | undefined };
+}
+
+/**
+ * Like Fastify's request serializer, but share page paths (`/s/<token>`) and
+ * anything that looks like a token in the URL are redacted.
+ */
+const serializers = {
+  req: (req: LoggedRequest) => {
+    const out: {
+      method: string;
+      url: string;
+      host?: string;
+      remoteAddress?: string;
+      remotePort?: number;
+    } = {
+      method: req.method,
+      url: redactShareUrl(req.url),
+    };
+    if (req.host !== undefined) out.host = req.host;
+    if (req.ip !== undefined) out.remoteAddress = req.ip;
+    if (req.socket?.remotePort !== undefined) out.remotePort = req.socket.remotePort;
+    return out;
+  },
+};
+
 function loggerOptions(config: Config, deps: AppDeps): NonNullable<FastifyServerOptions['logger']> {
   const level = config.env === 'development' ? 'debug' : 'info';
-  if (deps.logStream) return { level: 'debug', stream: deps.logStream, redact: REDACT };
+  if (deps.logStream) {
+    return { level: 'debug', stream: deps.logStream, redact: REDACT, serializers };
+  }
   if (config.env === 'test') return false;
-  return { level, redact: REDACT };
+  return { level, redact: REDACT, serializers };
 }
 
 /**
@@ -365,6 +411,15 @@ export async function buildApp(config: Config, deps: AppDeps = {}): Promise<Fast
     else games.queueRefresh();
   });
 
+  // ---- M7: share links ----------------------------------------------------------
+  const shares = new ShareService({
+    db: db.db,
+    now,
+    games,
+    logs,
+    log: app.log.child({ mod: 'share' }),
+  });
+
   app.decorate('hzCore', {
     scheduler,
     tokens,
@@ -380,6 +435,7 @@ export async function buildApp(config: Config, deps: AppDeps = {}): Promise<Fast
     notifier,
     github,
     games,
+    shares,
     db,
   });
 
@@ -389,7 +445,11 @@ export async function buildApp(config: Config, deps: AppDeps = {}): Promise<Fast
   scheduler.every('metrics.rollup5m', 5 * 60_000, () => void metrics.rollup5m(), { align: true });
   scheduler.every('metrics.rollup1h', HOUR, () => void metrics.rollup1h(), { align: true });
   scheduler.every('metrics.prune', HOUR, () => void metrics.prune());
-  scheduler.every('alerts.prune', HOUR, () => void alerts.prune());
+  scheduler.every('alerts.prune', HOUR, () => {
+    alerts.prune();
+    shares.prune();
+  });
+  scheduler.every('logs.leases', 30_000, () => logs.expireLeases());
   checks.start();
   github.start();
   games.start();
@@ -452,6 +512,22 @@ export async function buildApp(config: Config, deps: AppDeps = {}): Promise<Fast
   await app.register(pushRoutes, { prefix: '/api', db: db.db, now, push });
   await app.register(githubRoutes, { prefix: '/api', db: db.db, now, github });
   await app.register(gameRoutes, { prefix: '/api', db: db.db, now, games });
+  await app.register(shareRoutes, {
+    prefix: '/api',
+    db: db.db,
+    now,
+    games,
+    shares,
+    baseUrl: config.baseUrl,
+  });
+  await app.register(shareGatewayRoutes, { prefix: '/api/share-gateway', shares, now });
+  await app.register(shareTailnetRoutes, {
+    prefix: '/s',
+    shares,
+    now,
+    baseUrl: config.baseUrl,
+    uiDir: resolve(config.shareUiDir ?? defaultShareUiDir),
+  });
 
   const webDir = resolve(config.webDir ?? defaultWebDir);
   const hasWeb = existsSync(resolve(webDir, 'index.html'));

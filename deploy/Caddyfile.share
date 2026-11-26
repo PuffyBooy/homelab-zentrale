@@ -1,0 +1,58 @@
+# Caddy for the share gateway on oracle-a1 (example).
+# Copy to /etc/caddy/Caddyfile and replace spiel.example.duckdns.org with your DDNS name.
+# Caddy gets a Let's Encrypt certificate automatically (ports 80 and 443 must be open).
+# Only /s/* reaches the gateway; everything else is a plain 404 from Caddy.
+
+# No trusted_proxies here: Caddy then ignores a client-supplied X-Forwarded-For and
+# sends the real peer address to the gateway (which trusts it only over loopback).
+# The admin API stays on its default localhost:2019 (needed for `systemctl reload caddy`).
+
+spiel.example.duckdns.org {
+	encode zstd gzip
+
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "no-referrer"
+		X-Robots-Tag "noindex, nofollow"
+		X-Frame-Options "DENY"
+		-Server
+		-Via
+	}
+
+	request_body {
+		max_size 8KB
+	}
+
+	@share path /s/*
+	handle @share {
+		reverse_proxy 127.0.0.1:8090 {
+			# Only what the gateway needs; it ignores everything else anyway.
+			header_up -Cookie
+			header_up -X-Share-Token
+			header_up -X-Share-Client-Ip
+			header_down -Server
+		}
+	}
+
+	handle {
+		respond "Nicht gefunden" 404
+	}
+
+	log {
+		output file /var/log/caddy/share.log {
+			roll_size 10MiB
+			roll_keep 5
+		}
+		# Share tokens are in the path /s/<token>; never write the URI or credentials.
+		format filter {
+			wrap json
+			fields {
+				request>uri delete
+				request>headers>Authorization delete
+				request>headers>X-Share-Pin delete
+				request>headers>Cookie delete
+			}
+		}
+	}
+}

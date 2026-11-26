@@ -90,8 +90,8 @@ design/                   Designsystem (nicht von Hand ändern, siehe design/REA
 | `containers` | id, server_id, docker_id (unique je Server), name, image, compose_project, state, health, ports_json, info_json (ganzes `ContainerInfo`), updated_at |
 | `game_servers` | id, server_id, template_id, name, settings_json, ports_json, rcon_secret_enc, external_address, auto_stop_minutes, created_at |
 | `game_backups` | id, game_id, path, size, created_at |
-| `share_links` | id, game_id, person, token_hash, pin_hash, perms_json, expires_at, revoked_at, last_used_at |
-| `share_audit` | id, share_id, action, ts, ip |
+| `share_links` | id, game_id, person, token_hash (SHA-256 von `share:<token>`), pin_hash (argon2id), perms_json, expires_at, revoked_at, last_used_at, pin_failures, locked_until, created_at |
+| `share_audit` | id, share_id (ohne Fremdschlüssel, bleibt nach Löschen des Links), game_id, person, action, detail, ts, ip, via (`tailnet`/`gateway`); 90 Tage |
 | `github_repos` | id, full_name, default_branch, etag, last_commit_sha, ci_status, updated_at |
 | `deploy_targets` | id, repo_id, server_id, path, branch, method, auto_deploy |
 | `deploys` | id, target_id, sha, status, log_text, started_at, finished_at, triggered_by |

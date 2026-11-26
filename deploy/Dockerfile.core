@@ -12,10 +12,13 @@ FROM base AS build
 COPY . .
 RUN --mount=type=cache,id=pnpm,target=/pnpm/store pnpm install --frozen-lockfile
 RUN pnpm --filter @hz/web... --filter @hz/core... build
+# Share page for the tailnet (/s/<token>): the same mini UI as the public gateway.
+RUN pnpm --filter @hz/share run build:ui && test -f apps/share/dist/ui/index.html
 RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
   pnpm --filter @hz/core --prod deploy --legacy /out \
   && mkdir -p /out/web \
   && cp -r apps/web/dist/. /out/web/ \
+  && mkdir -p /out/share-ui && cp -r apps/share/dist/ui/. /out/share-ui/ \
   && mkdir -p /out/templates && cp -r templates/games /out/templates/
 
 # Runtime stage: only the core's production deps, compiled code and the web build.
@@ -26,6 +29,7 @@ ENV NODE_ENV=production \
     HZ_PORT=8080 \
     HZ_DATA_DIR=/data \
     HZ_WEB_DIR=/app/web \
+    HZ_SHARE_UI_DIR=/app/share-ui \
     HZ_GAME_TEMPLATES_DIR=/app/templates/games
 # The runtime never needs npm or corepack; removing them drops their dependency CVEs.
 RUN rm -rf /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/corepack \

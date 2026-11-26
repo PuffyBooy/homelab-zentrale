@@ -399,14 +399,9 @@ describe('tile props', () => {
     expect(ramDetail({ ramBytes: null, ramLimitBytes: null })).toBe('—');
   });
 
-  it('disables share always and start/stop/restart while busy', () => {
-    expect(disabledTileActions(game())).toEqual(['share']);
-    expect(disabledTileActions(game({ status: 'busy' }))).toEqual([
-      'share',
-      'start',
-      'stop',
-      'restart',
-    ]);
+  it('keeps share enabled and disables start/stop/restart while busy', () => {
+    expect(disabledTileActions(game())).toEqual([]);
+    expect(disabledTileActions(game({ status: 'busy' }))).toEqual(['start', 'stop', 'restart']);
   });
 });
 

@@ -25,7 +25,7 @@ export default defineConfig({
         test: {
           name: dir.slice(dir.indexOf('/') + 1),
           root: dir,
-          include: ['{src,test}/**/*.test.{ts,tsx}'],
+          include: ['{src,test,ui}/**/*.test.{ts,tsx}'],
         },
       })),
     ],

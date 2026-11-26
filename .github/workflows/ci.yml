@@ -75,3 +75,60 @@ jobs:
       - name: Stop
         if: always()
         run: docker compose -f deploy/docker-compose.core.yml down -v
+
+  share-image:
+    name: share gateway image (amd64 + arm64) + smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3.7.0
+        with:
+          platforms: arm64
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+      - name: Build linux/amd64 and linux/arm64 (no push)
+        run: >
+          docker buildx build
+          --platform linux/amd64,linux/arm64
+          --file deploy/Dockerfile.share
+          --output type=cacheonly
+          .
+      - name: Build linux/amd64 for the smoke test
+        run: >
+          docker buildx build --load
+          --platform linux/amd64
+          --file deploy/Dockerfile.share
+          --tag homelab-zentrale/share:ci
+          .
+      - name: Start (read-only, no capabilities, loopback only)
+        run: |
+          token="$(openssl rand -base64 32 | tr '+/' '-_' | tr -d '=\n')"
+          docker run -d --name hz-share --network host --read-only --tmpfs /tmp \
+            --cap-drop ALL --security-opt no-new-privileges:true \
+            -e HZ_SHARE_CORE_URL=http://127.0.0.1:9 -e HZ_SHARE_GATEWAY_TOKEN="$token" \
+            homelab-zentrale/share:ci
+          for i in $(seq 1 30); do
+            curl -fsS -o /dev/null "http://127.0.0.1:8090/s/$(printf 'a%.0s' $(seq 1 43))" && break
+            sleep 1
+          done
+      - name: Check routes
+        run: |
+          page="http://127.0.0.1:8090/s/$(printf 'a%.0s' $(seq 1 43))"
+          test "$(curl -s -o /dev/null -w '%{http_code}' "$page")" = 200
+          curl -sSI "$page" | grep -qi "^content-security-policy: default-src 'self'"
+          test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8090/)" = 404
+          test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8090/api/health)" = 404
+          # Core unreachable -> generic 502 without details.
+          body="$(curl -s -H "Authorization: Share $(printf 'b%.0s' $(seq 1 43))" http://127.0.0.1:8090/s/api/status)"
+          echo "$body" | jq -e '. == {"ok":false,"error":"unavailable"}'
+          # Not reachable on other interfaces.
+          ip="$(hostname -I | awk '{print $1}')"
+          if curl -s -m 3 -o /dev/null "http://$ip:8090/"; then echo "listens beyond loopback"; exit 1; fi
+      - name: Logs on failure
+        if: failure()
+        run: docker logs hz-share
+      - name: Stop
+        if: always()
+        run: docker rm -f hz-share || true

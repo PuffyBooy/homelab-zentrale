@@ -18,6 +18,7 @@ import { describeUserAgent, formatAgo, formatDateTime, formatTime } from '../../
 import { useAuthState } from '../../lib/useAuthState.js';
 import { GithubTile } from './GithubTiles.js';
 import { NotifyTile, PushTile } from './PushTiles.js';
+import { ShareGatewayTile } from './ShareGatewayTile.js';
 
 export function SettingsPage(): ReactElement {
   return (
@@ -28,6 +29,7 @@ export function SettingsPage(): ReactElement {
       <PushTile />
       <NotifyTile />
       <GithubTile />
+      <ShareGatewayTile />
     </div>
   );
 }

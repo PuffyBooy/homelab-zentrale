@@ -22,8 +22,17 @@ export const PUBLIC_API_ROUTES: readonly string[] = [
   '/api/setup/start',
   '/api/setup/confirm',
 ];
-/** Prefixes with their own auth. Empty until M7 (`/api/share-gateway/`). */
-export const PUBLIC_API_PREFIXES: string[] = [];
+/**
+ * Prefixes with their own auth (no session). The share gateway API authenticates
+ * with a bearer token in a header, not a cookie, so it needs no Origin check
+ * (server-to-server calls send no Origin).
+ */
+export const PUBLIC_API_PREFIXES: string[] = ['/api/share-gateway/'];
+const OWN_AUTH_PREFIXES: readonly string[] = ['/api/share-gateway/'];
+
+function ownAuthPath(path: string): boolean {
+  return OWN_AUTH_PREFIXES.some((p) => path.startsWith(p));
+}
 
 const MUTATING = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 
@@ -122,7 +131,11 @@ export function installAuthGuard(
     if (!isPublicApiPath(path) && !request.auth) {
       return sendError(reply, 401, 'unauthorized');
     }
-    if (MUTATING.has(request.method) && !originAllowed(request, opts.baseUrl)) {
+    if (
+      MUTATING.has(request.method) &&
+      !ownAuthPath(path) &&
+      !originAllowed(request, opts.baseUrl)
+    ) {
       return sendError(reply, 403, 'bad_origin');
     }
   });

@@ -65,7 +65,7 @@ describe('TemplateFields (form generator)', () => {
 });
 
 describe('GameTile', () => {
-  it('shows status shape and tag, formatted values and a disabled Teilen', () => {
+  it('shows status shape and tag, formatted values and an enabled Teilen', () => {
     const out = html(<GameTile game={game()} onConsole={noop} />);
     expect(out).toContain('hz-status hz-status-ok');
     expect(out).toContain('>UP<');
@@ -73,7 +73,8 @@ describe('GameTile', () => {
     expect(out).toContain('<span>mc.hoebe.at:25565</span>');
     expect(out).toContain('>5,8 / 8 GB<');
     expect(out).toContain('>19,8<');
-    expect(out).toMatch(/disabled=""[^>]*>.*?<span>Teilen<\/span>/);
+    expect(out).not.toContain('disabled=""');
+    expect(out).toContain('<span>Teilen</span>');
     expect(out).toContain('aria-live="polite"');
   });
 
@@ -83,7 +84,8 @@ describe('GameTile', () => {
     );
     const busy = html(<GameTile game={game({ status: 'busy' })} onConsole={noop} />);
     expect(busy).toContain('>BOOT<');
-    expect(busy.match(/disabled=""/g)).toHaveLength(3);
+    // Stop and Restart wait; Konsole and Teilen stay usable.
+    expect(busy.match(/disabled=""/g)).toHaveLength(2);
   });
 });
 

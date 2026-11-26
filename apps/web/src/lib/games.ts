@@ -286,10 +286,10 @@ export function gameTileProps(
 
 /**
  * Footer buttons that do nothing right now: during setup, restart or backup (busy)
- * start/stop/restart wait; "Teilen" comes with the share links (M7).
+ * start/stop/restart wait. "Teilen" always works (share links, M7).
  */
 export function disabledTileActions(g: Pick<GameSummary, 'status'>): GameServerAction[] {
-  const out: GameServerAction[] = ['share'];
+  const out: GameServerAction[] = [];
   if (g.status === 'busy') out.push('start', 'stop', 'restart');
   return out;
 }

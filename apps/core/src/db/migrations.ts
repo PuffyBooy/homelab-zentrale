@@ -399,4 +399,44 @@ CREATE TABLE game_backups (
 CREATE INDEX game_backups_game_created ON game_backups(game_id, created_at);
 `,
   },
+  {
+    version: 7,
+    name: 'share',
+    // Share links (SPEC 6.4). Only the SHA-256 of the token and the argon2id hash
+    // of the optional PIN are stored. share_audit keeps person and game_id itself,
+    // so the history survives deleting a revoked link; it goes with the game.
+    // Gateway settings (enabled, publicUrl, token hash, lastSeenAt) live in
+    // `settings` under `share.gateway`.
+    sql: `
+CREATE TABLE share_links (
+  id TEXT PRIMARY KEY,
+  game_id TEXT NOT NULL REFERENCES game_servers(id) ON DELETE CASCADE,
+  person TEXT NOT NULL,
+  token_hash TEXT NOT NULL UNIQUE,
+  pin_hash TEXT,
+  perms_json TEXT NOT NULL,
+  expires_at INTEGER,
+  revoked_at INTEGER,
+  last_used_at INTEGER,
+  pin_failures INTEGER NOT NULL DEFAULT 0,
+  locked_until INTEGER,
+  created_at INTEGER NOT NULL
+);
+CREATE INDEX share_links_game ON share_links(game_id);
+
+CREATE TABLE share_audit (
+  id TEXT PRIMARY KEY,
+  share_id TEXT NOT NULL,
+  game_id TEXT NOT NULL REFERENCES game_servers(id) ON DELETE CASCADE,
+  person TEXT NOT NULL,
+  action TEXT NOT NULL,
+  detail TEXT,
+  ts INTEGER NOT NULL,
+  ip TEXT,
+  via TEXT NOT NULL
+);
+CREATE INDEX share_audit_game_ts ON share_audit(game_id, ts);
+CREATE INDEX share_audit_ts ON share_audit(ts);
+`,
+  },
 ];
