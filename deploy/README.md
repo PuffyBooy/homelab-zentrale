@@ -18,6 +18,8 @@ Tags: `latest` und `sha-<kurz>` (Push auf `main`), `v<version>` und `sha-<kurz>`
 
 Ein Image: Der Core liefert die gebaute Web-App mit aus.
 
+**Am einfachsten mit dem Installer:** `sudo ./deploy/install.sh` richtet alles ein (Docker, Tailscale, `/etc/homelab-zentrale/core.env` mit 0600, Image, Compose, `tailscale serve`, Health-Check, erster Login). Update, Status und Entfernen über dieselbe Datei, das Share-Gateway mit `sudo ./deploy/install.sh share`. Siehe [`docs/INSTALL.md`](../docs/INSTALL.md). Von Hand geht es so:
+
 ```bash
 cp .env.example .env            # HZ_SECRET_KEY setzen: openssl rand -base64 32
 docker compose -f deploy/docker-compose.core.yml up -d     # Image aus GHCR

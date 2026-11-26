@@ -168,11 +168,72 @@ jobs:
         if: always()
         run: docker rm -f hz-share || true
 
+  installer:
+    name: installer (deploy/install.sh, real docker, stub tailscale)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - name: shellcheck
+        run: shellcheck deploy/*.sh
+      - name: Stub tailscale (no tailnet in CI)
+        run: |
+          mkdir -p /tmp/hz-stub
+          cat > /tmp/hz-stub/tailscale <<'EOF'
+          #!/usr/bin/env bash
+          printf '%s\n' "$*" >> /tmp/hz-stub/tailscale.log
+          case "$1 ${2:-}" in
+            "status --json") echo '{"BackendState": "Running", "Self": {"DNSName": "heimserver.tail0000.ts.net."}}' ;;
+            "serve status") echo '{}' ;;
+          esac
+          exit 0
+          EOF
+          chmod 0755 /tmp/hz-stub/tailscale
+      - name: Install (build locally, no questions)
+        run: |
+          sudo env "PATH=/tmp/hz-stub:$PATH" HZ_HEALTH_TIMEOUT=120 \
+            ./deploy/install.sh --yes --build-local --timezone Europe/Vienna > install.log 2>&1
+      - name: Check install
+        run: |
+          grep -q 'https://heimserver.tail0000.ts.net/setup#token=' install.log
+          grep -qx -- 'serve --bg --https=443 http://127.0.0.1:8080' /tmp/hz-stub/tailscale.log
+          if grep -q 'funnel' /tmp/hz-stub/tailscale.log; then echo "funnel used"; exit 1; fi
+          test "$(sudo stat -c '%a' /etc/homelab-zentrale)" = 700
+          test "$(sudo stat -c '%a' /etc/homelab-zentrale/core.env)" = 600
+          key="$(sudo sed -n 's/^HZ_SECRET_KEY=//p' /etc/homelab-zentrale/core.env)"
+          test "$(printf '%s' "$key" | base64 -d | wc -c)" = 32
+          if grep -qF -- "$key" install.log; then echo "key in output"; exit 1; fi
+          curl -fsS http://127.0.0.1:8080/api/health | jq -e '.ok == true'
+          ip="$(hostname -I | awk '{print $1}')"
+          if curl -s -m 3 -o /dev/null "http://$ip:8080/"; then echo "core listens beyond loopback"; exit 1; fi
+          echo "$key" | sha256sum > key.sha
+      - name: Update keeps the key
+        run: |
+          sudo env "PATH=/tmp/hz-stub:$PATH" HZ_HEALTH_TIMEOUT=120 \
+            ./deploy/install.sh update --yes > update.log 2>&1
+          sudo sed -n 's/^HZ_SECRET_KEY=//p' /etc/homelab-zentrale/core.env | sha256sum | diff - key.sha
+          grep -q 'homelab-zentrale/core:local' update.log
+      - name: Uninstall keeps data, purge removes it
+        run: |
+          sudo env "PATH=/tmp/hz-stub:$PATH" ./deploy/install.sh uninstall --yes
+          docker volume inspect homelab-zentrale_hz-data > /dev/null
+          sudo test -f /etc/homelab-zentrale/core.env
+          sudo env "PATH=/tmp/hz-stub:$PATH" ./deploy/install.sh uninstall --purge --yes
+          if docker volume inspect homelab-zentrale_hz-data > /dev/null 2>&1; then echo "volume left"; exit 1; fi
+          sudo test ! -e /etc/homelab-zentrale
+      - name: Logs on failure
+        if: failure()
+        run: |
+          cat install.log update.log 2>/dev/null | sed 's/setup#token=[A-Za-z0-9_-]*/setup#token=[redacted]/' || true
+          docker ps -a
+
   images:
     name: publish images
     # Only a green push to main becomes :latest (never a pull request or another branch).
     if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
-    needs: [check, audit, docker, ha-smoke, share-image]
+    needs: [check, audit, docker, ha-smoke, share-image, installer]
     permissions:
       contents: read
       packages: write
