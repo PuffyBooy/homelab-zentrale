@@ -38,6 +38,9 @@ services:
     image: ${HZ_AGENT_IMAGE:-homelab-zentrale/agent:local}
     container_name: homelab-agent
     restart: unless-stopped
+    labels:
+      # Never stopped, restarted or replaced from the UI (the agent refuses).
+      hz.role: agent
     env_file:
       - path: ${HZ_AGENT_ENV_FILE:-/etc/homelab-agent/agent.env}
         required: false

@@ -1,5 +1,6 @@
 import { randomBytes } from 'node:crypto';
 import { lstat, mkdir, open, rename, unlink } from 'node:fs/promises';
+import { assertProjectNotProtected, type ProtectDocker } from './protected.js';
 import path from 'node:path';
 import { fileNameSchema, type RpcParams } from '@hz/shared';
 import type { RunResult } from '../exec.js';
@@ -13,7 +14,10 @@ import { ActionError, type ActionContext } from './types.js';
  * The compose file inside is checked again (it may be a symlink), and docker is
  * started through the exec wrapper with a fixed argument list:
  *
- *   DOCKER_HOST=unix://<socket> docker compose --ansi never --project-directory <dir> -f <file> <sub ...>
+ *   DOCKER_HOST=unix://<socket> docker compose --ansi never --project-directory <dir> [-p <project>] -f <file>... <sub ...>
+ *
+ * Project name and files come from the labels of existing containers (so `-p` and
+ * extra `-f` files used at creation are kept), else the default file and its override.
  *
  * The agent mounts /opt/homelab at the same path as on the host, so relative bind
  * mounts in the compose file point to the same place for the Docker daemon.
@@ -41,8 +45,89 @@ const TIMEOUTS: Record<ComposeOp, number> = {
 };
 
 /** The fixed argument list for one compose operation. */
-export function composeArgs(op: ComposeOp, dir: string, file: string): string[] {
-  return ['compose', '--ansi', 'never', '--project-directory', dir, '-f', file, ...SUBCOMMANDS[op]];
+export function composeArgs(
+  op: ComposeOp,
+  dir: string,
+  files: string | readonly string[],
+  project?: string,
+): string[] {
+  const list = typeof files === 'string' ? [files] : files;
+  return [
+    'compose',
+    '--ansi',
+    'never',
+    '--project-directory',
+    dir,
+    ...(project ? ['-p', project] : []),
+    ...list.flatMap((f) => ['-f', f]),
+    ...SUBCOMMANDS[op],
+  ];
+}
+
+const OVERRIDE_NAMES: Record<string, string> = {
+  'compose.yml': 'compose.override.yml',
+  'compose.yaml': 'compose.override.yaml',
+  'docker-compose.yml': 'docker-compose.override.yml',
+  'docker-compose.yaml': 'docker-compose.override.yaml',
+};
+const PROJECT_NAME = /^[a-z0-9][a-z0-9_-]{0,62}$/;
+const LABEL_DIR = 'com.docker.compose.project.working_dir';
+const LABEL_PROJECT = 'com.docker.compose.project';
+const LABEL_FILES = 'com.docker.compose.project.config_files';
+
+/** Checks one compose file path: below the root, a regular file. Returns the real path. */
+async function checkComposeFile(file: string, root: string): Promise<string> {
+  const check = await resolveHomelabPath(file, root);
+  if (!check.ok) throw new ActionError('bad_path', `${path.basename(file)}: ${check.reason}`);
+  const real = await lstat(check.path).catch(() => null);
+  if (!real?.isFile()) {
+    throw new ActionError('bad_path', `${path.basename(file)} is not a regular file`);
+  }
+  return check.path;
+}
+
+export interface ComposeTarget {
+  files: string[];
+  project?: string;
+}
+
+interface ListDocker {
+  listContainers(opts: { all: boolean; filters: string }): Promise<unknown[]>;
+}
+
+/**
+ * The compose files and project name to use for `dir`. If containers of the project
+ * exist, their labels win (project name from `-p`, every `-f` file incl. overrides);
+ * otherwise the default file plus its override file. Every file is checked again.
+ */
+export async function composeTarget(
+  dir: string,
+  root: string,
+  docker: ListDocker | null,
+): Promise<ComposeTarget> {
+  const main = await findComposeFile(dir, root);
+  if (docker) {
+    const list = (await docker
+      .listContainers({ all: true, filters: JSON.stringify({ label: [`${LABEL_DIR}=${dir}`] }) })
+      .catch(() => [])) as { Labels?: Record<string, string> | null }[];
+    const labels = list.find((c) => c.Labels?.[LABEL_PROJECT])?.Labels;
+    const project = labels?.[LABEL_PROJECT];
+    if (labels && project && PROJECT_NAME.test(project)) {
+      const raw = (labels[LABEL_FILES] ?? '').split(',').filter((f) => f.length > 0);
+      if (raw.length > 8) throw new ActionError('bad_path', 'too many compose files');
+      const files =
+        raw.length > 0 ? await Promise.all(raw.map((f) => checkComposeFile(f, root))) : [main];
+      return { files, project };
+    }
+  }
+  const files = [main];
+  const override = OVERRIDE_NAMES[path.basename(main)];
+  if (override) {
+    const candidate = path.join(dir, override);
+    if (await lstat(candidate).catch(() => null))
+      files.push(await checkComposeFile(candidate, root));
+  }
+  return { files };
 }
 
 /**
@@ -98,8 +183,11 @@ async function composeOp(
   ctx: ActionContext,
 ): Promise<{ output: string }> {
   return withDirLock(params.dir, async () => {
-    const file = await findComposeFile(params.dir, ctx.homelabRoot);
-    const r: RunResult = await ctx.run('docker', composeArgs(op, params.dir, file), {
+    const docker = ctx.host.docker as unknown as (ProtectDocker & ListDocker) | null;
+    const target = await composeTarget(params.dir, ctx.homelabRoot, docker);
+    if (docker) await assertProjectNotProtected(docker, params.dir);
+    const args = composeArgs(op, params.dir, target.files, target.project);
+    const r: RunResult = await ctx.run('docker', args, {
       timeoutMs: TIMEOUTS[op],
       env: { DOCKER_HOST: `unix://${ctx.dockerSocket}`, DOCKER_CONFIG: '/tmp/.docker' },
     });

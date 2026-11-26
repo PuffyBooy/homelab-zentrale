@@ -67,21 +67,23 @@ export const containerRoutes: FastifyPluginAsync<ContainerRoutesOptions> = async
       ...(plan ? { method: plan.kind } : {}),
     });
 
-    // Mark the downtime as intended before the agent acts.
+    // Mark the downtime as intended before the agent acts. A compose update recreates
+    // every service of the project, so all of its containers get the intent.
+    const affected = plan?.kind === 'compose' ? o.containers.projectIds(row) : [row.id];
     if (action === 'stop') o.containers.setIntent(row.id, 'stop');
     else if (action === 'restart' || action === 'update') {
-      o.containers.setIntent(row.id, 'restart', INTENT_TTL_MS);
+      for (const id of affected) o.containers.setIntent(id, 'restart', INTENT_TTL_MS);
     } else o.containers.setIntent(row.id, null);
 
     try {
       await run(o.hub, row, action, plan);
     } catch (err) {
-      if (action !== 'start') o.containers.setIntent(row.id, null);
+      if (action !== 'start') for (const id of affected) o.containers.setIntent(id, null);
       audit(`container.${action}_failed`, row.id, { serverId: row.serverId, name: row.name });
       throw rpcHttpError(err);
     }
     if (action === 'restart' || action === 'update') {
-      o.containers.setIntent(row.id, 'restart', SETTLE_MS);
+      for (const id of affected) o.containers.setIntent(id, 'restart', SETTLE_MS);
     }
     return containerActionResponseSchema.parse({
       ok: true,

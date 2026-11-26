@@ -827,13 +827,13 @@ body,
     opacity: 0;
   }
 }
+/* Search hits: info colour, not amber (amber is reserved, design/README.md). */
 ::highlight(hz-log-match) {
-  background-color: var(--accent-soft);
-  color: var(--accent-ink);
+  background-color: var(--info-soft);
 }
 ::highlight(hz-log-current) {
-  background-color: var(--accent);
-  color: var(--on-accent);
+  background-color: var(--info-soft);
+  text-decoration: underline 2px var(--info);
 }
 
 /* ---------- Log toolbar ---------- */

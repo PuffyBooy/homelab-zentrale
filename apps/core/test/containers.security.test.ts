@@ -126,6 +126,34 @@ describe('image update: path choice', () => {
     expect(JSON.parse(audit?.detailsJson ?? '{}')).toMatchObject({ method: 'compose' });
   });
 
+  it('a compose update marks every container of the project as intended (no false alerts)', async () => {
+    const dir = '/opt/homelab/apps/web';
+    const s = await withAgent(clients, {
+      containers: [
+        info('web', { composeProject: 'web', composeService: 'web', composeDir: dir }),
+        info('db', { composeProject: 'web', composeService: 'db', composeDir: dir }),
+        info('other', {
+          composeProject: 'other',
+          composeService: 'x',
+          composeDir: '/opt/homelab/o',
+        }),
+      ],
+    });
+    t = s.t;
+    const [web, db, other] = ['web', 'db', 'other'].map((n) => containerByName(s.t, n));
+    if (!web || !db || !other) throw new Error('missing');
+    const res = await s.t.app.inject({
+      method: 'POST',
+      url: `/api/containers/${web.id}/update`,
+      headers: authHeaders(s.cookie),
+    });
+    expect(res.statusCode).toBe(200);
+    const svc = s.t.app.hzCore.containers;
+    expect(svc.row(web.id)?.intent).toBe('restart');
+    expect(svc.row(db.id)?.intent).toBe('restart');
+    expect(svc.row(other.id)?.intent).toBeNull();
+  });
+
   it('compose dir outside /opt/homelab/ or not normalized: container.update, never compose.*', async () => {
     const dirs = ['/srv/web', '/opt/homelab/../etc', '/opt/homelabx/web', '/opt/homelab/a/./b'];
     const s = await withAgent(clients, {

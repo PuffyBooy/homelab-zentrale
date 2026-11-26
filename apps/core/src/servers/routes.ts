@@ -56,6 +56,7 @@ export function rpcHttpError(err: unknown): HttpError {
     case 'confirm_mismatch':
       return new HttpError(400, 'confirm_mismatch');
     case 'terminal_disabled':
+    case 'not_allowed':
       return new HttpError(403, 'forbidden');
     default:
       return new HttpError(502, 'agent_error');

@@ -128,6 +128,22 @@ export class ContainerService {
     return this.deps.db.select().from(containers).where(eq(containers.id, id)).get();
   }
 
+  /** Ids of all containers of the same compose project on the same server (incl. itself). */
+  projectIds(row: Pick<ContainerRow, 'id' | 'serverId' | 'composeProject'>): string[] {
+    if (!row.composeProject) return [row.id];
+    return this.deps.db
+      .select({ id: containers.id })
+      .from(containers)
+      .where(
+        and(
+          eq(containers.serverId, row.serverId),
+          eq(containers.composeProject, row.composeProject),
+        ),
+      )
+      .all()
+      .map((r) => r.id);
+  }
+
   private serverName(serverId: string): string {
     return (
       this.deps.db

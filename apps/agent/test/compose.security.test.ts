@@ -21,7 +21,13 @@ import {
   type RpcEnvelope,
 } from '@hz/shared';
 import { Dispatcher, type ActionContext } from '../src/actions/index.js';
-import { composeArgs, composeUp, composeWrite, findComposeFile } from '../src/actions/compose.js';
+import {
+  composeArgs,
+  composeTarget,
+  composeUp,
+  composeWrite,
+  findComposeFile,
+} from '../src/actions/compose.js';
 import { ActionError } from '../src/actions/types.js';
 import type { RunOptions, RunResult } from '../src/exec.js';
 import { createLogger } from '../src/log.js';
@@ -315,5 +321,76 @@ describe('compose.write', () => {
     const check = await resolveHomelabPath(path.join(root, 'mc-link'), `${root}/`);
     expect(check).toEqual({ ok: true, path: path.join(root, 'games', 'mc1') });
     expect(await readlink(path.join(root, 'mc-link'))).toBe(path.join(root, 'games', 'mc1'));
+  });
+});
+
+describe('compose target (project name, override and extra files)', () => {
+  const docker = (labels: Record<string, string> | null) => ({
+    listContainers: async () => (labels ? [{ Labels: labels }] : []),
+  });
+
+  it('adds the default override file when no containers exist yet', async () => {
+    const dir = path.join(root, 'apps', 'ovr');
+    await mkdir(dir, { recursive: true });
+    await writeFile(path.join(dir, 'compose.yml'), 'services: {}\n');
+    await writeFile(path.join(dir, 'compose.override.yml'), 'services: {}\n');
+    expect(await composeTarget(dir, `${root}/`, docker(null))).toEqual({
+      files: [path.join(dir, 'compose.yml'), path.join(dir, 'compose.override.yml')],
+    });
+  });
+
+  it('keeps the project name and every -f file from the labels', async () => {
+    const dir = path.join(root, 'apps', 'web');
+    const extra = path.join(dir, 'prod.yml');
+    await writeFile(extra, 'services: {}\n');
+    const t = await composeTarget(
+      dir,
+      `${root}/`,
+      docker({
+        'com.docker.compose.project': 'myweb',
+        'com.docker.compose.project.config_files': `${path.join(dir, 'compose.yml')},${extra}`,
+      }),
+    );
+    expect(t).toEqual({ project: 'myweb', files: [path.join(dir, 'compose.yml'), extra] });
+    expect(composeArgs('up', dir, t.files, t.project)).toEqual([
+      'compose',
+      '--ansi',
+      'never',
+      '--project-directory',
+      dir,
+      '-p',
+      'myweb',
+      '-f',
+      path.join(dir, 'compose.yml'),
+      '-f',
+      extra,
+      'up',
+      '-d',
+      '--remove-orphans',
+    ]);
+  });
+
+  it('refuses label files outside the homelab root', async () => {
+    const dir = path.join(root, 'apps', 'web');
+    await expect(
+      composeTarget(
+        dir,
+        `${root}/`,
+        docker({
+          'com.docker.compose.project': 'web',
+          'com.docker.compose.project.config_files': path.join(outside, 'compose.yml'),
+        }),
+      ),
+    ).rejects.toMatchObject({ code: 'bad_path' });
+  });
+
+  it('ignores an invalid project name from the labels', async () => {
+    const dir = path.join(root, 'apps', 'web');
+    const t = await composeTarget(
+      dir,
+      `${root}/`,
+      docker({ 'com.docker.compose.project': '-p evil' }),
+    );
+    expect(t.project).toBeUndefined();
   });
 });

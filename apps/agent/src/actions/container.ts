@@ -1,4 +1,5 @@
 import type { RpcParams } from '@hz/shared';
+import { assertNotProtected, type ProtectDocker } from './protected.js';
 import { ActionError, type ActionContext } from './types.js';
 
 type Op = 'start' | 'stop' | 'restart';
@@ -6,6 +7,7 @@ type Op = 'start' | 'stop' | 'restart';
 async function containerOp(op: Op, params: RpcParams<'container.start'>, ctx: ActionContext) {
   const docker = ctx.host.docker;
   if (!docker) throw new ActionError('failed', 'docker not available');
+  if (op !== 'start') await assertNotProtected(docker as unknown as ProtectDocker, params.id);
   const c = docker.getContainer(params.id);
   try {
     if (op === 'start') await c.start();

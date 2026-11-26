@@ -1,5 +1,6 @@
 import { isDeepStrictEqual } from 'node:util';
 import type Docker from 'dockerode';
+import { assertNotProtected, type ProtectDocker } from './protected.js';
 import type { RpcParams } from '@hz/shared';
 import type { Logger } from '../log.js';
 import { ActionError, type ActionContext } from './types.js';
@@ -460,5 +461,6 @@ export async function containerUpdate(
 ): Promise<UpdateResult> {
   const docker = ctx.host.docker;
   if (!docker) throw new ActionError('failed', 'docker not available');
+  await assertNotProtected(docker as unknown as ProtectDocker, params.id);
   return updateContainer(docker as unknown as UpdateDocker, params.id, { log: ctx.log });
 }
