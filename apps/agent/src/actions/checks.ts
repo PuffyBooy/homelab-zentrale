@@ -1,7 +1,7 @@
 import http from 'node:http';
 import https from 'node:https';
 import net from 'node:net';
-import tls, { type TLSSocket } from 'node:tls';
+import type { TLSSocket } from 'node:tls';
 import type { CheckResultData, RpcParams } from '@hz/shared';
 import { ActionError, type ActionContext } from './types.js';
 
@@ -125,9 +125,6 @@ function certExpiry(socket: unknown): string | undefined {
   return exp && !Number.isNaN(exp.getTime()) ? exp.toISOString() : undefined;
 }
 
-/** TLS verification errors: the certificate itself is the problem. */
-const isCertError = (code: string) => /CERT|SIGNATURE|SELF_SIGNED|ISSUER/.test(code);
-
 interface Hop {
   code: number;
   /** Set for 301/302/303/307/308 with a Location header. */
@@ -226,37 +223,6 @@ function hop(
 }
 
 /**
- * Reads only the certificate expiry (no HTTP request, nothing sent after the
- * handshake). Used when verification failed, so an expired or self-signed
- * certificate still reports its date.
- */
-function peekCertExpiry(url: URL, timeoutMs: number): Promise<string | undefined> {
-  if (timeoutMs <= 0) return Promise.resolve(undefined);
-  const host = url.hostname.replace(/^\[(.*)\]$/, '$1');
-  const port = url.port ? Number(url.port) : 443;
-  return new Promise((resolve) => {
-    let settled = false;
-    const socket = tls.connect({
-      host,
-      port,
-      ...(net.isIP(host) ? {} : { servername: host }),
-      // Verification already failed in the real request; this only reads the date.
-      rejectUnauthorized: false,
-    });
-    const done = (v: string | undefined) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      socket.destroy();
-      resolve(v);
-    };
-    const timer = setTimeout(() => done(undefined), timeoutMs);
-    socket.once('secureConnect', () => done(certExpiry(socket)));
-    socket.once('error', () => done(undefined));
-  });
-}
-
-/**
  * Builds the check.http handler.
  * - One deadline (timeoutMs) for everything: DNS, connect, TLS, redirects, body.
  * - Redirects: at most MAX_REDIRECTS, only to http/https. Credentials from the
@@ -272,7 +238,6 @@ export function createHttpChecker(opts: HttpCheckOptions = {}) {
     let url = parseCheckUrl(p.url);
     const configuredHost = url.hostname;
     const started = performance.now();
-    const deadline = started + p.timeoutMs;
     const ac = new AbortController();
     const timer = setTimeout(() => ac.abort(), p.timeoutMs);
     const wantBody = p.contains !== undefined && p.method !== 'HEAD';
@@ -288,15 +253,9 @@ export function createHttpChecker(opts: HttpCheckOptions = {}) {
           h = await hop(url, p.method, ac.signal, wantBody, opts);
         } catch (err) {
           if (ac.signal.aborted) return withTls({ ok: false, ms: null, error: 'timeout' });
+          // A failed verification (expired, self-signed) reports only its error code;
+          // TLS verification is never switched off to read the date.
           const code = errorCode(err, 'request failed');
-          if (
-            url.protocol === 'https:' &&
-            url.hostname === configuredHost &&
-            tlsExpiresAt === undefined &&
-            isCertError(code)
-          ) {
-            tlsExpiresAt = await peekCertExpiry(url, Math.round(deadline - performance.now()));
-          }
           return withTls({ ok: false, ms: null, error: code });
         }
         if (h.tlsExpiresAt && tlsExpiresAt === undefined && url.hostname === configuredHost) {

@@ -225,13 +225,13 @@ describe.skipIf(!hasOpenssl())('check.http over TLS', () => {
     });
   });
 
-  it('fails an untrusted certificate, still reports its expiry, sends no request', async () => {
+  it('fails an untrusted certificate without reading it insecurely, sends no request', async () => {
     requests = 0;
     const r = await checkHttp({ ...http0, url: `${httpsBase}/` });
     expect(r.ok).toBe(false);
     expect(r.ms).toBeNull();
     expect(r.error).toMatch(/SELF_SIGNED|CERT/);
-    expect(r.tlsExpiresAt).toBe(expires);
+    expect(r.tlsExpiresAt).toBeUndefined();
     expect(requests).toBe(0);
   });
 });
