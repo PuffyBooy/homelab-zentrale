@@ -19,6 +19,7 @@ import { repoOnServer } from '../../lib/github.js';
 import { isHaConfigured } from '../../lib/ha.js';
 import { useHaView } from '../../lib/haActions.js';
 import { useLiveTopic } from '../../lib/live.js';
+import { StorageOverviewTile } from '../storage/StorageOverviewTile.js';
 import { useModules } from '../../lib/useModules.js';
 import { ALL_SERVERS } from '../../lib/servers.js';
 import { consumersOf, fetchTopConsumers, topConsumersKey } from '../../lib/throttle.js';
@@ -111,6 +112,7 @@ export function OverviewPage(): ReactElement | null {
           <TopConsumersTile data={consumersOf(top.data, one)} error={top.error} />
         </div>
       ) : null}
+      {modules.storage ? <StorageOverviewTile serverId={one} /> : null}
       {games.data || checks.data ? (
         <div className="hz-grid app-grid">
           {games.data ? (

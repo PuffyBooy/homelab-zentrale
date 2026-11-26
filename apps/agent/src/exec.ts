@@ -31,6 +31,9 @@ export const PROGRAMS = new Set([
   // tar in the agent image, only for game.backup (actions/game-backup.ts, fixed arguments;
   // --zstd makes tar start zstd itself).
   'tar',
+  // smartctl in the agent image, only for SMART reads (collect/storage.ts, fixed arguments,
+  // --nocheck=standby so sleeping disks stay asleep).
+  'smartctl',
 ]);
 
 export const CHILD_ENV: Readonly<Record<string, string>> = Object.freeze({

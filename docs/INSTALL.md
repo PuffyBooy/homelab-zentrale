@@ -24,7 +24,7 @@ Der Assistent macht dann:
    - `HZ_SECRET_KEY`: 32 zufällige Byte, nur beim ersten Mal. Er wird nie überschrieben.
    - `HZ_BASE_URL`: automatisch aus `tailscale status`, z. B. `https://heimserver.<tailnet>.ts.net`.
    - `HZ_TIMEZONE`: Zeitzone des Servers (Standard `Europe/Vienna`).
-   - `HZ_INITIAL_MODULES`: welche Module beim ersten Start an sind (GitHub, Home Assistant, Gameserver). Gilt nur bis zum ersten Login, danach entscheidet Einstellungen → Module.
+   - `HZ_INITIAL_MODULES`: welche Module beim ersten Start an sind (GitHub, Home Assistant, Gameserver, NAS und Speicher). Gilt nur bis zum ersten Login, danach entscheidet Einstellungen → Module.
 4. **Image** fertig aus der GitHub Container Registry laden oder auf Wunsch lokal aus dem Checkout bauen (`--build-local`, dann braucht die Zentrale GitHub gar nicht).
 5. **Starten** mit Docker Compose. Der Core lauscht nur auf `127.0.0.1:8080`.
 6. **Health-Check** auf `/api/health`.
@@ -50,7 +50,7 @@ Agents für weitere Server (und für den Server der Zentrale selbst) kommen übe
 ## Ohne Fragen (Automatisierung)
 
 ```bash
-sudo ./deploy/install.sh --yes --timezone Europe/Vienna --modules github=0,homeassistant=1,games=1
+sudo ./deploy/install.sh --yes --timezone Europe/Vienna --modules github=0,homeassistant=1,games=1,storage=1
 ```
 
 `--yes` nimmt überall den Standard und installiert fehlendes Docker/Tailscale. Ist Tailscale noch nicht angemeldet, braucht es ohne Terminal einen Auth-Key in `HZ_TS_AUTHKEY` (geht als 0600-Datei an `tailscale up`, nie als Argument). Weitere Optionen: `sudo ./deploy/install.sh --help`.

@@ -47,7 +47,11 @@ describe('HZ_INITIAL_MODULES (install wizard)', () => {
       env: { HZ_INITIAL_MODULES: 'github=1,homeassistant=1,games=0' },
     });
     const { cookie } = await completeSetup(t);
-    expect(await modulesOf(t, cookie)).toEqual({ github: true, homeassistant: true, games: false });
+    expect(await modulesOf(t, cookie)).toMatchObject({
+      github: true,
+      homeassistant: true,
+      games: false,
+    });
   });
 
   it('is ignored once the admin exists (UI switches win after a restart)', async () => {
@@ -61,7 +65,7 @@ describe('HZ_INITIAL_MODULES (install wizard)', () => {
       env: { HZ_INITIAL_MODULES: 'github=1,games=0' },
     });
     // Same database, same session store: the old cookie is still valid.
-    expect(await modulesOf(t, cookie)).toEqual({
+    expect(await modulesOf(t, cookie)).toMatchObject({
       github: false,
       homeassistant: false,
       games: true,

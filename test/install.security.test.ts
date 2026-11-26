@@ -136,7 +136,7 @@ describe('deploy/install.sh (core)', () => {
     expect(Buffer.from(key, 'base64')).toHaveLength(32);
     expect(text).toContain('HZ_BASE_URL=https://heimserver.tail1234.ts.net\n');
     expect(text).toContain('HZ_TIMEZONE=Europe/Vienna\n');
-    expect(text).toContain('HZ_INITIAL_MODULES=github=0,homeassistant=0,games=1\n');
+    expect(text).toContain('HZ_INITIAL_MODULES=github=0,homeassistant=0,games=1,storage=1\n');
     // Never in the output, never as an argument of any command.
     expect(r.out).not.toContain(key);
     expect(r.calls).not.toContain(key);

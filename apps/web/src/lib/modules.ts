@@ -3,25 +3,33 @@ import type { IconName, NavItem } from '@hz/ui';
 import { api } from './api.js';
 
 /**
- * Optional modules (decision 2026-11-26): github, homeassistant, games. Their nav items,
+ * Optional modules (decision 2026-11-26): github, homeassistant, games, storage (M13). Their nav items,
  * overview tiles, palette entries and settings tiles are hidden while switched off.
  */
 
 export const modulesKey = ['settings', 'modules'] as const;
 
 /** Used while the auth state carries no modules (older core): show everything. */
-export const ALL_MODULES_ON: Modules = { github: true, homeassistant: true, games: true };
+export const ALL_MODULES_ON: Modules = {
+  github: true,
+  homeassistant: true,
+  games: true,
+  storage: true,
+};
 
 export const MODULE_LABEL: Record<ModuleId, string> = {
   github: 'GitHub',
   homeassistant: 'Home Assistant',
   games: 'Gameserver',
+  storage: 'NAS und Speicher',
 };
 
 export const MODULE_HINT: Record<ModuleId, string> = {
   github: 'Repos, CI, Deploy per Knopf. Braucht einen GitHub-Token.',
   homeassistant: 'Wohnung über Home Assistant: Schalter, Temperatur, Strom.',
   games: 'Gameserver aus Vorlagen und Benutzerlinks für Freunde.',
+  storage:
+    'RAID, Volumes und Festplatten (SMART, Temperatur) im Serverdetail, z. B. für ein UGREEN-NAS.',
 };
 
 /** Page of the module, for the "Modul ausgeschaltet" note. */
@@ -29,12 +37,14 @@ export const MODULE_PAGE: Record<ModuleId, string> = {
   github: 'GitHub',
   homeassistant: 'Wohnung',
   games: 'Gameserver',
+  storage: 'Server',
 };
 
 export const MODULE_ICON: Record<ModuleId, IconName> = {
   github: 'git',
   homeassistant: 'home',
   games: 'gamepad',
+  storage: 'server',
 };
 
 /** Nav item id -> module that owns it. */

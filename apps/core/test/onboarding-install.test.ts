@@ -187,7 +187,7 @@ describe('install.sh end to end (real curl + sh against the live app)', () => {
 
     // Compose: interpolation file without secrets, pull and up in CONF_DIR.
     expect(readFileSync(join(sb.conf, '.env'), 'utf8')).toBe(
-      `HZ_AGENT_IMAGE=ghcr.io/puffybooy/homelab-agent:latest\nHZ_AGENT_ENV_FILE=${envFile}\n`,
+      `HZ_AGENT_IMAGE=ghcr.io/puffybooy/homelab-agent:latest\nHZ_AGENT_ENV_FILE=${envFile}\nCOMPOSE_FILE=docker-compose.yml\n`,
     );
     expect(readFileSync(join(sb.conf, 'docker-compose.yml'), 'utf8')).toContain(
       'container_name: homelab-agent',

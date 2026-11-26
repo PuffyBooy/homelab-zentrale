@@ -96,6 +96,7 @@ design/                   Designsystem (nicht von Hand ändern, siehe design/REA
 | `server_throttle` | server_id, settings_json (`ThrottleSettings`: Automatik, Schwellen, Minuten, `throttleCpus`, `ramReserveMb`), schedules_json (Zeitfenster pro Stufe), updated_at. Fehlt die Zeile: Standardwerte. |
 | `container_throttles` | container_id, server_id, container_name, game_id, docker_id (das Limit gehört zu diesem Docker-Container), cpus, original_cpus (wird beim Aufheben wiederhergestellt), by (`auto`/`admin`/`schedule`), reason, since, auto_stopped_at |
 | `wichtig_restarts` | id, container_id, server_id, ts, ok (Startversuche gestoppter `wichtig`-Container, 10 Min) |
+| `server_storage` | server_id, storage_json (letztes `inventory.storage`: RAID, Volumes, Platten mit SMART), updated_at (M13, Migration 14) |
 | `game_backups` | id, game_id, path, size, created_at |
 | `game_migrations` | id, game_id, game_name, source/target_server_id und _name (ohne Fremdschlüssel), phase, failed_phase, bytes_done, bytes_total, sha256, error, error_text, rollback, ports_json, rcon_port, forwarding_hint (Ports am Ziel), was_running, target_touched (Import angenommen), cleanup_target, restart_source (offene Rückbau-Schritte), started_at, updated_at, finished_at (M11, Migration 13) |
 | `share_links` | id, game_id, person, token_hash (SHA-256 von `share:<token>`), pin_hash (argon2id), perms_json, expires_at, revoked_at, last_used_at, pin_failures, locked_until, created_at |
@@ -122,7 +123,7 @@ Die erste Nachricht muss innerhalb von 10 s ein gültiges `hello` sein. Danach a
 
 **Agent → Core**
 - `metrics {ts, cpu, ram, swap, disks[], temp, net}` alle 10 s
-- `inventory {containers[], updates, rebootRequired, sshFailed24h, fail2banBanned, listeningPorts[]}` alle 60 s und bei Docker-Events sofort
+- `inventory {containers[], updates, rebootRequired, sshFailed24h, fail2banBanned, listeningPorts[], storage?}` alle 60 s und bei Docker-Events sofort. `storage` (M13) nur, wenn der Host Platten oder md-RAID hat: `/proc/mdstat`, Mount-Tabelle von PID 1, `/sys/block`, SMART per `smartctl` nur mit `HZ_AGENT_SMART=1` (siehe `deploy/docker-compose.agent.smart.yml`)
 - `event {kind: 'container' | 'oom' | …, data}`
 - `rpc.result {id, ok, data | error}`
 - `stream.data {streamId, chunk}`, `stream.end {streamId, code}`

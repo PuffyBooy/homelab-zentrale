@@ -14,7 +14,7 @@
 #   -y, --yes              no questions, take the defaults (and install missing Docker/Tailscale)
 #   --build-local          build the image from this checkout instead of pulling it from GHCR
 #   --image <ref>          fixed image, e.g. ghcr.io/puffybooy/homelab-core:sha-<short>
-#   --modules <list>       github=0|1,homeassistant=0|1,games=0|1 (only before the first login)
+#   --modules <list>       github=0|1,homeassistant=0|1,games=0|1,storage=0|1 (only before the first login)
 #   --timezone <zone>      IANA zone, default: the server's zone or Europe/Vienna
 #   --base-url <url>       https://<name>.ts.net (default: read from `tailscale status`)
 #   --no-serve             do not set up `tailscale serve`
@@ -159,7 +159,7 @@ valid_modules() {
   [[ -n "$1" ]] || return 1
   IFS=',' read -r -a parts <<<"$1"
   for part in "${parts[@]}"; do
-    [[ "$part" =~ ^(github|homeassistant|games)=[01]$ ]] || return 1
+    [[ "$part" =~ ^(github|homeassistant|games|storage)=[01]$ ]] || return 1
   done
 }
 
@@ -168,7 +168,7 @@ if [[ -n "$image" ]]; then
   [[ $build_local -eq 0 ]] || die "--image und --build-local schließen sich aus"
 fi
 if [[ -n "$modules_arg" ]]; then
-  valid_modules "$modules_arg" || die "--modules: z. B. github=1,homeassistant=0,games=1"
+  valid_modules "$modules_arg" || die "--modules: z. B. github=1,homeassistant=0,games=1,storage=1"
 fi
 if [[ -n "$timezone_arg" ]]; then
   [[ "$timezone_arg" =~ $tz_re ]] || die "--timezone: z. B. Europe/Vienna"
@@ -502,12 +502,13 @@ detect_timezone() {
 }
 
 ask_modules() { # -> github=..,homeassistant=..,games=..
-  local gh=0 ha=0 games=1
+  local gh=0 ha=0 games=1 storage=1
   info "Module kannst du später jederzeit unter Einstellungen -> Module umschalten." >&2
   confirm "GitHub (Repos, CI, Deploy per Knopf, Rollback)?" n && gh=1
   confirm "Home Assistant (Wohnung, Licht, Sensoren)?" n && ha=1
   confirm "Gameserver (Vorlagen, Benutzerlinks für Freunde)?" j || games=0
-  printf 'github=%s,homeassistant=%s,games=%s' "$gh" "$ha" "$games"
+  confirm "NAS und Speicher (RAID, Volumes, Festplatten, SMART)?" j || storage=0
+  printf 'github=%s,homeassistant=%s,games=%s,storage=%s' "$gh" "$ha" "$games" "$storage"
 }
 
 configure_core() {
@@ -541,7 +542,7 @@ configure_core() {
       step "Module"
       mods="$(ask_modules)"
     else
-      mods="github=0,homeassistant=0,games=1"
+      mods="github=0,homeassistant=0,games=1,storage=1"
     fi
   fi
   valid_modules "$mods" || die "ungültige Module: $mods"

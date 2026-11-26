@@ -21,8 +21,9 @@ Alles hier braucht deine Zugänge oder ist nicht rückgängig zu machen. Bis dah
 13. **Images öffentlich lesbar machen (einmalig):** Nach dem ersten Lauf von `images.yml` auf `main` unter github.com → dein Profil → Packages bei `homelab-agent`, `homelab-core` und `homelab-share` die Sichtbarkeit auf „Public“ stellen (sonst brauchen die Server ein `docker login ghcr.io`).
 14. **Prioritäten setzen (ab M10):** Im Container-Detail deine wichtigen Apps (z. B. prepped) auf `wichtig` stellen, Gameserver auf `niedrig` und bei Bedarf „darf gestoppt werden“. Schwellen, Zeitpläne und RAM-Reserve stehen im Serverdetail unter „Automatik“ (Standard: CPU oder RAM über 90 % für 2 Min).
 15. **Neue Server anbinden (ab M11):** Unter Server → „Server hinzufügen“ Name eingeben, TOTP bestätigen, den angezeigten Einzeiler am neuen Server als root ausführen (braucht Docker und Tailscale). Dafür muss `HZ_BASE_URL` auf deine `https://…ts.net`-Adresse gesetzt sein, sonst gibt es keinen Einzeiler.
+16. **UGREEN-NAS anbinden (ab M13):** In UGOS Pro unter Systemsteuerung → Terminal SSH einschalten, Docker aus dem App Center installieren und Tailscale aufs NAS bringen (Tailscale-App aus dem App Center bzw. als Docker-Container mit `network_mode: host`; der Einzeiler prüft `tailscale status`). Dann in der Zentrale „Server hinzufügen“ und den Einzeiler per SSH als root (`sudo -i`) am NAS ausführen. SMART schaltet sich auf UGREEN-Hardware selbst ein. Danach SSH in UGOS wieder ausschalten, wenn du es nicht brauchst.
 
-**Noch von Hand abzunehmen** (braucht echte Zugänge): Push am Handy (M4); ein echter Deploy eines Test-Repos mit `compose.yml` auf den Heimserver-Agent (M5, automatisiert nur mit Fake-GitHub, Fake-Agent und echtem git gegen ein lokales Repo getestet). Der echte Türöffner (BTicino/Shelly) mit deiner HA (M8, im CI nur mit der HA-Demo getestet). Benutzerlink von außen über das Gateway auf oracle-a1 (M7, im CI nur lokal getestet).
+**Noch von Hand abzunehmen** (braucht echte Zugänge): Push am Handy (M4); ein echter Deploy eines Test-Repos mit `compose.yml` auf den Heimserver-Agent (M5, automatisiert nur mit Fake-GitHub, Fake-Agent und echtem git gegen ein lokales Repo getestet). Der echte Türöffner (BTicino/Shelly) mit deiner HA (M8, im CI nur mit der HA-Demo getestet). Benutzerlink von außen über das Gateway auf oracle-a1 (M7, im CI nur lokal getestet). SMART auf dem echten UGREEN-NAS (M13, im CI nur mit simuliertem `smartctl` und einem nachgebauten `/sys` getestet).
 
 ## Entschieden (26.11.2026)
 
@@ -46,7 +47,12 @@ Alles hier braucht deine Zugänge oder ist nicht rückgängig zu machen. Bis dah
 - **Prioritäten (M10):** „prepped“ kommt im Repo nicht vor; Annahme: eine eigene App, die als Container läuft. Du markierst sie selbst als `wichtig`, Gameserver als `niedrig`. Standard-Schwelle CPU oder RAM über 90 % für 2 Min, Drosseln auf 1 Kern, Stoppen erst nach weiteren 5 Min und nur mit „darf gestoppt werden“, nie mit Spielern online (außer ausdrücklich erlaubt). Passt das?
 - **Wandmodus-Zeitzone:** Die Wandseite zeigt die Zeit in der Zone des Tablets (sie hat keine Admin-Session). Soll der Core die Zeitzone mitschicken?
 
+- **NAS (M13):** Hast du ein UGREEN NASync (welches Modell, wie viele Platten, welches RAID)? Davon hängt ab, ob die Erkennung „UGREEN-NAS“ greift (DMI-Hersteller `UGREEN`). Soll das NAS auch Gameserver-Backups bekommen (M13b, nach dem Gameserver-Meilenstein)? Und sollen Gameserver selbst auf dem NAS laufen dürfen? Dann sollte `/opt/homelab` auf dem Datenvolume liegen (das Systemvolume von UGOS ist klein), z. B. per Bind-Mount von `/volume1/homelab`.
+
 ## Annahmen
+
+- **NAS ohne UGOS-Schnittstelle (M13):** UGOS Pro hat keine dokumentierte API. Der Agent liest deshalb den Linux-Unterbau selbst (`/proc/mdstat`, `/sys`, `smartctl`). Speicherpools mit SHR-ähnlichen Mischformen erscheinen als mehrere md-Arrays. Ein UGOS-Update kann Pfade ändern; dann fehlen Teile der Anzeige, nichts geht kaputt.
+- **SMART-Rechte:** SMART braucht `CAP_SYS_RAWIO` und Lesezugriff auf die Platten. Der Agent hat ohnehin Docker-Socket und `SYS_ADMIN` (gleichwertig zu root), das Override verschiebt die Grenze also kaum; es gibt bewusst kein Schreibrecht (`w`) auf Blockgeräte. Ohne Override zeigt die Zentrale Platten, RAID und Volumes, aber keine SMART-Werte, und sagt das.
 
 - **Trivy-Ausnahme (bis 15.01.2027):** Im Agent-Image steckt das offizielle `docker compose`-Binary mit einer HIGH-Lücke in `golang.org/x/net` (HTML-Parser, CVE-2026-78661). Compose parst kein fremdes HTML, und es gibt noch keine Version mit Fix. Die Ausnahme steht in `apps/agent/.trivyignore` und läuft am 15.01.2027 ab; dann schlägt CI wieder an.
 
@@ -62,6 +68,9 @@ Alles hier braucht deine Zugänge oder ist nicht rückgängig zu machen. Bis dah
 Sortiert nach Bereich. Nichts davon ist in den Meilensteinen, alles wäre ein eigener kleiner Ausbau.
 
 ### Server und Betrieb
+- NAS als Backup-Ziel: Gameserver-Backups und der Datenbank-Export automatisch aufs NAS kopieren (M13b).
+- RAID-Prüfung (Scrub) per Zeitplan anstoßen und das Ergebnis melden; btrfs-Scrub und -Fehlerzähler auslesen.
+- Speicherplatz-Prognose: „/volume1 ist in etwa 40 Tagen voll“ aus dem Verlauf.
 - Backups mit restic zwischen den Servern (Heimserver ↔ Oracle), mit Wiederherstellungstest pro Woche und Anzeige „letztes geprüftes Backup vor 3 Tagen“.
 - Wake-on-LAN für Rechner im Heimnetz über den Agent am Heimserver.
 - Automatische Sicherheitsupdates (unattended-upgrades) pro Server ein-/ausschalten und das Ergebnis anzeigen.

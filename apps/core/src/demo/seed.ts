@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { eq } from 'drizzle-orm';
-import type { ContainerInfo, Metrics } from '@hz/shared';
+import type { ContainerInfo, Metrics, StorageInfo } from '@hz/shared';
 import type { Clock } from '../clock.js';
 import type { ContainerLogs } from '../containers/logs.js';
 import { containerCoreId } from '../containers/service.js';
@@ -289,6 +289,7 @@ export function seedDemo(deps: {
       sshFailed24h: 0,
       fail2banBanned: null,
       listeningPorts: [{ proto: 'tcp', address: '127.0.0.1', port: 8080 }],
+      ...(s.name === 'heimserver' ? { storage: demoStorage(t0) } : {}),
     });
     deps.servers.ingestMetrics(row.id, demoMetrics(s, i, t0, t0));
     ids.push(row.id);
@@ -313,4 +314,57 @@ export function seedDemo(deps: {
     });
   });
   return ids;
+}
+
+/** M13: the home server carries two mirrored HDDs (shown under "Speicher"). */
+function demoStorage(t0: number): StorageInfo {
+  const readAt = new Date(t0).toISOString();
+  return {
+    platform: { kind: 'generic' },
+    smart: 'on',
+    arrays: [
+      {
+        name: 'md0',
+        level: 'raid1',
+        state: 'clean',
+        devicesTotal: 2,
+        devicesActive: 2,
+        members: [
+          { device: 'sda1', disk: 'sda', failed: false, spare: false },
+          { device: 'sdb1', disk: 'sdb', failed: false, spare: false },
+        ],
+        sizeBytes: 3.6 * 1024 ** 4,
+      },
+    ],
+    volumes: [
+      {
+        mount: '/srv/data',
+        fs: 'ext4',
+        usedBytes: 1.4 * 1024 ** 4,
+        totalBytes: 3.6 * 1024 ** 4,
+        arrays: ['md0'],
+        disks: ['sda', 'sdb'],
+      },
+    ],
+    disks: [
+      {
+        name: 'sda',
+        kind: 'hdd',
+        model: 'WDC WD40EFPX',
+        sizeBytes: 4_000_787_030_016,
+        tempC: 36,
+        standby: false,
+        smart: { health: 'passed', powerOnHours: 8760, reallocated: 0, pending: 0, readAt },
+      },
+      {
+        name: 'sdb',
+        kind: 'hdd',
+        model: 'WDC WD40EFPX',
+        sizeBytes: 4_000_787_030_016,
+        tempC: null,
+        standby: true,
+        smart: { health: 'passed', powerOnHours: 8754, reallocated: 0, pending: 0, readAt },
+      },
+    ],
+  };
 }
