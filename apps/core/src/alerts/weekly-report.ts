@@ -14,6 +14,8 @@ export interface WeeklyReportInput {
   checks: readonly { name: string; uptime: number | null }[];
   serversOffline: number;
   serversTotal: number;
+  /** Deploys of the last 7 days; null/undefined if no deploy target exists. */
+  deploys?: { ok: number; failed: number } | null;
 }
 
 /** German summary for the info push and the alert log. */
@@ -38,6 +40,15 @@ export function weeklyReportText(i: WeeklyReportInput): { title: string; body: s
     parts.push(line);
   } else {
     parts.push('Keine Checks mit Messwerten.');
+  }
+  if (i.deploys) {
+    const total = i.deploys.ok + i.deploys.failed;
+    if (total === 0) parts.push('Keine Deploys.');
+    else {
+      let line = total === 1 ? '1 Deploy' : `${total} Deploys`;
+      if (i.deploys.failed > 0) line += ` (${i.deploys.failed} fehlgeschlagen)`;
+      parts.push(`${line}.`);
+    }
   }
   if (i.serversTotal > 0) {
     parts.push(

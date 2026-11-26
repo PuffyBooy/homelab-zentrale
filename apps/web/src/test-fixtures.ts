@@ -1,5 +1,9 @@
 import type {
   Alert,
+  CommitInfo,
+  Deploy,
+  DeployTarget,
+  RepoSummary,
   CheckDef,
   CheckSummary,
   ContainerSummary,
@@ -145,5 +149,74 @@ export function check(
     uptime30d: 99.9,
     spark: [300, 310, 320, 312],
     ...rest,
+  };
+}
+
+let r = 0;
+const sha = (k: number): string => k.toString(16).padStart(40, 'a');
+
+export function commit(over: Partial<CommitInfo> = {}): CommitInfo {
+  r++;
+  return {
+    sha: sha(r),
+    message: `commit ${r}`,
+    author: 'alex',
+    at: '2026-11-25T20:04:00.000Z',
+    ci: 'ok',
+    ...over,
+  };
+}
+
+export function target(over: Partial<DeployTarget> = {}): DeployTarget {
+  r++;
+  return {
+    id: `tgt-${String(r).padStart(6, '0')}`,
+    repoId: 'repo-000001',
+    serverId: 'srv-home0001',
+    serverName: 'heimserver',
+    path: '/opt/homelab/apps/soundos',
+    branch: 'main',
+    method: 'compose',
+    autoDeploy: false,
+    keyName: null,
+    publicKey: null,
+    liveSha: sha(9999),
+    behind: 0,
+    deploying: false,
+    headSha: null,
+    headCi: 'off',
+    ...over,
+  };
+}
+
+export function repo(over: Partial<RepoSummary> = {}): RepoSummary {
+  r++;
+  const name = over.fullName ?? `PuffyBooy/repo-${r}`;
+  return {
+    id: `repo-${String(r).padStart(6, '0')}`,
+    fullName: name,
+    private: false,
+    defaultBranch: 'main',
+    htmlUrl: `https://github.com/${name}`,
+    lastCommit: commit(),
+    ci: 'ok',
+    targets: [],
+    updatedAt: '2026-11-25T22:03:00.000Z',
+    ...over,
+  };
+}
+
+export function deploy(over: Partial<Deploy> = {}): Deploy {
+  r++;
+  return {
+    id: `dep-${String(r).padStart(6, '0')}`,
+    targetId: 'tgt-000001',
+    sha: sha(r),
+    status: 'ok',
+    trigger: 'manual',
+    startedAt: '2026-11-25T22:00:00.000Z',
+    finishedAt: '2026-11-25T22:00:42.000Z',
+    summary: null,
+    ...over,
   };
 }

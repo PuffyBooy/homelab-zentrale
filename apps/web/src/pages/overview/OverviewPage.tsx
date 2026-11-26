@@ -7,13 +7,17 @@ import {
   useActiveAlerts,
   useChecks,
   useContainers,
+  useGithubSettings,
+  useRepos,
   useServerFilter,
   useServers,
 } from '../../lib/data.js';
 import { formatWhen } from '../../lib/format.js';
+import { repoOnServer } from '../../lib/github.js';
 import { useLiveTopic } from '../../lib/live.js';
 import { ALL_SERVERS } from '../../lib/servers.js';
 import { ContainersTile } from '../containers/ContainersTile.js';
+import { GithubTile } from '../github/GithubTile.js';
 import { NoServers, ServerListTile } from '../servers/ServerListTile.js';
 import { ChecksTile } from '../websites/ChecksTile.js';
 
@@ -21,9 +25,9 @@ const MAX_ALERTS = 3;
 
 /**
  * Overview after design/reference/previews/Dashboard.html: Statussatz (shell header),
- * open crit alerts, ServerList over the full width, then the pairs. Containers sit in
- * the right half of the GitHub/Container pair, websites in the right half of the
- * Gameserver/Websites pair; games and GitHub follow with their milestones.
+ * open crit alerts, ServerList over the full width, then the pairs (SPEC 4):
+ * Gameserver/Websites (games follow with M6, so websites sit alone for now) and
+ * GitHub/Container.
  */
 export function OverviewPage(): ReactElement | null {
   const servers = useServers();
@@ -32,6 +36,9 @@ export function OverviewPage(): ReactElement | null {
   const containers = useContainers();
   useLiveTopic('checks');
   const checks = useChecks();
+  useLiveTopic('github');
+  const repos = useRepos();
+  const github = useGithubSettings();
   const [filter] = useServerFilter();
   const navigate = useNavigate();
 
@@ -74,13 +81,21 @@ export function OverviewPage(): ReactElement | null {
         </div>
       ) : null}
       <ServerListTile servers={list} active={one} />
-      {containers.data || checks.data ? (
+      {checks.data ? (
         <div className="hz-grid app-grid">
-          {checks.data ? (
-            <ChecksTile
-              checks={one ? checks.data.filter((c) => checkMatchesServer(c, one)) : checks.data}
-              servers={servers.data}
-              serverId={one}
+          <ChecksTile
+            checks={one ? checks.data.filter((c) => checkMatchesServer(c, one)) : checks.data}
+            servers={servers.data}
+            serverId={one}
+          />
+        </div>
+      ) : null}
+      {repos.data || containers.data ? (
+        <div className="hz-grid app-grid">
+          {repos.data ? (
+            <GithubTile
+              repos={one ? repos.data.filter((r) => repoOnServer(r, one)) : repos.data}
+              settings={github.data}
             />
           ) : null}
           {containers.data ? (

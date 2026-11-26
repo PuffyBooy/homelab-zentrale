@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { alertSchema } from './api/alerts.js';
 import { checkSummarySchema } from './api/checks.js';
 import { containerSummarySchema } from './api/containers.js';
+import { repoSummarySchema } from './api/github.js';
 import { serverDetailSchema, serverSummarySchema } from './api/servers.js';
 
 /**
@@ -47,6 +48,7 @@ export const liveTopicItemSchemas = {
   alerts: alertSchema,
   containers: containerSummarySchema,
   checks: checkSummarySchema,
+  github: repoSummarySchema,
 } as const;
 
 /**

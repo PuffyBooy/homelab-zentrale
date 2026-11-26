@@ -7,3 +7,4 @@ export * from './live.js';
 export * from './api/containers.js';
 export * from './api/checks.js';
 export * from './api/push.js';
+export * from './api/github.js';

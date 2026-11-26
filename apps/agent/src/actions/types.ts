@@ -1,5 +1,5 @@
 import type { RpcAction, RpcErrorCode, RpcParams } from '@hz/shared';
-import type { RunOptions, RunResult } from '../exec.js';
+import type { RunOptions, RunResult, Spawner } from '../exec.js';
 import type { HostContext } from '../host.js';
 import type { Logger } from '../log.js';
 import type { StreamManager } from '../streams.js';
@@ -32,6 +32,10 @@ export interface ActionContext {
   run: (file: string, args: readonly string[], opts?: RunOptions) => Promise<RunResult>;
   /** Docker socket path, for the docker CLI (DOCKER_HOST). */
   dockerSocket: string;
+  /** Starts a program with streamed output (exec.ts spawnFile; injected for tests). */
+  spawn: Spawner;
+  /** HZ_AGENT_DATA (agent state, deploy keys). */
+  dataDir: string;
 }
 
 export type ActionHandler<A extends RpcAction> = (

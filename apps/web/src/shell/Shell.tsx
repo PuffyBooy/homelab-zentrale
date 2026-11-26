@@ -7,6 +7,7 @@ import { authStateKey } from '../lib/auth.js';
 import {
   useActiveAlerts,
   useChecks,
+  useRepos,
   useContainers,
   useServerFilter,
   useServers,
@@ -19,7 +20,7 @@ import { activeNavId, navItems, settingsItem, shortcutAction } from '../nav.js';
 import { AlertToasts } from './AlertToasts.js';
 import { BottomBar } from './BottomBar.js';
 import { CommandPalette } from './CommandPalette.js';
-import { needsChecks, needsContainers, pageMeta, serverDetailId } from './pageMeta.js';
+import { needsChecks, needsContainers, needsRepos, pageMeta, serverDetailId } from './pageMeta.js';
 import { ThemeButton } from './ThemeButton.js';
 
 const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform);
@@ -55,6 +56,7 @@ function ShellBody(): ReactElement {
   const alerts = useActiveAlerts();
   const containers = useContainers(needsContainers(pathname));
   const checks = useChecks(needsChecks(pathname));
+  const repos = useRepos(needsRepos(pathname));
   const [filter, setFilter] = useServerFilter();
   const detailId = serverDetailId(pathname);
 
@@ -63,6 +65,7 @@ function ShellBody(): ReactElement {
     alerts: alerts.data,
     containers: containers.data,
     checks: checks.data,
+    repos: repos.data,
     filter: detailId ?? filter,
     live,
     updatedAt: servers.dataUpdatedAt ? new Date(servers.dataUpdatedAt) : null,

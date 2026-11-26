@@ -9,7 +9,7 @@ import { SystemCollector } from './collect/system.js';
 import { ConfigError, loadConfig } from './config.js';
 import { AgentConnection } from './connection.js';
 import { debounce } from './debounce.js';
-import { makeHostExec, runFile } from './exec.js';
+import { makeHostExec, runFile, spawnFile } from './exec.js';
 import { normalizeArch, type HostContext } from './host.js';
 import { createLogger } from './log.js';
 import { StreamManager } from './streams.js';
@@ -70,6 +70,8 @@ async function main(): Promise<void> {
       streams,
       run: runFile,
       dockerSocket: config.dockerSocket,
+      spawn: spawnFile,
+      dataDir: config.dataDir,
     },
     (event) => conn.send(event),
   );

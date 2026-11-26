@@ -34,6 +34,12 @@ export function errorText(err: unknown): string {
       return 'Agent hat die Aktion abgelehnt oder sie ist fehlgeschlagen. Log des Agents prüfen.';
     case 'agent_timeout':
       return 'Agent hat nicht rechtzeitig geantwortet. Status prüfen und erneut versuchen.';
+    case 'busy':
+      return 'Auf diesem Ziel läuft gerade ein Deploy. Warten, bis er fertig ist.';
+    case 'ci_not_green':
+      return 'CI ist nicht grün. Deploy abgelehnt.';
+    case 'github_error':
+      return 'GitHub nicht erreichbar oder Anfrage abgelehnt. Details unter Einstellungen → GitHub.';
     case 'bad_response':
       return 'Antwort der Zentrale unerwartet. Versionen von Core und Web prüfen.';
     default:

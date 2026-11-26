@@ -10,7 +10,10 @@ Alles hier braucht deine Zugänge oder ist nicht rückgängig zu machen. Bis dah
 2. **Tailscale serve einrichten:** `tailscale serve --bg --https=443 http://127.0.0.1:8080` auf dem Heimserver, MagicDNS und HTTPS-Zertifikate im Tailscale-Admin aktivieren. `HZ_BASE_URL` auf `https://heimserver.<tailnet>.ts.net` setzen.
 3. **Erstes Setup:** Den einmaligen Setup-Link aus `docker compose logs core` öffnen, Konto anlegen, TOTP in der Authenticator-App einrichten, die 10 Wiederherstellungscodes offline sichern.
 4. **Push aufs Handy (ab M4):** In `.env` `HZ_VAPID_SUBJECT=mailto:<deine Adresse>` setzen (Apple lehnt Pushes ohne echte Adresse ab). Die VAPID-Schlüssel erzeugt der Core beim ersten Start selbst und speichert sie verschlüsselt; wer sie fest haben will, erzeugt sie mit `pnpm --filter @hz/core vapid` und trägt `HZ_VAPID_PUBLIC`/`HZ_VAPID_PRIVATE` ein. Dann am Handy die Zentrale über `https://…ts.net` öffnen, „Zum Home-Bildschirm“ (iOS braucht die installierte PWA für Push) und unter Einstellungen → Push „Auf diesem Gerät aktivieren“, danach „Testnachricht senden“.
-5. **Agent neu ausrollen (ab M3):** Auf Servern, die schon einen Agent haben, `deploy/install-agent.sh` einmal erneut ausführen (neues Image mit `ping`, Schutz-Label `hz.role`).
+5. **GitHub verbinden (ab M5):** Auf github.com unter Settings → Developer settings → Fine-grained tokens einen Token anlegen: nur die gewünschten Repos, Rechte *Contents: Read*, *Actions: Read*, *Metadata: Read*. In der Zentrale unter Einstellungen → GitHub eintragen (fragt nach dem TOTP-Code). Für private Repos pro Deploy-Ziel „Deploy-Key erzeugen“ und den angezeigten Schlüssel im Repo unter Settings → Deploy keys eintragen (ohne Schreibrecht). Zielordner unter `/opt/homelab/apps/` am besten vom ersten Deploy anlegen lassen; ein von Hand angelegter Ordner muss leer sein (außer `.env`) und root gehören, sonst lehnt git ihn ab. Gelöschte Deploy-Ziele lassen ihren privaten Key auf dem Server unter `/data/deploy-keys/` liegen (bei GitHub den Deploy-Key dann auch entfernen).
+6. **Agent neu ausrollen (ab M3):** Auf Servern, die schon einen Agent haben, `deploy/install-agent.sh` einmal erneut ausführen (neues Image mit `ping`, Schutz-Label `hz.role`).
+
+**Noch von Hand abzunehmen** (braucht echte Zugänge): Push am Handy (M4); ein echter Deploy eines Test-Repos mit `compose.yml` auf den Heimserver-Agent (M5, automatisiert nur mit Fake-GitHub, Fake-Agent und echtem git gegen ein lokales Repo getestet).
 
 ## Offene Fragen
 
@@ -21,6 +24,7 @@ Alles hier braucht deine Zugänge oder ist nicht rückgängig zu machen. Bis dah
 - **Agent-Image:** Es gibt noch keine Registry. Annahme: Das Agent-Image wird auf jedem Server lokal gebaut (`deploy/install-agent.sh`). Alternative: GitHub Container Registry (`ghcr.io/puffybooy/homelab-agent`), dann müsste das Repo-Paket für die Server lesbar sein. Soll ich das einrichten?
 - **Neu einschreiben unter gleichem Namen:** Ein widerrufener Server muss gelöscht werden, bevor er sich unter demselben Namen neu anmelden kann (dabei geht der Verlauf verloren). Soll ein Re-Enrollment den alten Eintrag samt Verlauf übernehmen?
 - **Checks, erste Fehlschläge:** Der erste Fehlschlag zeigt `WARN` ohne Meldung, erst der zweite in Folge ist `CRIT` mit Push. Weiterleitungen (max. 5, nur http/https) werden verfolgt, ein Check kann also keinen 3xx-Code erwarten. Passt das?
+- **Deploy ohne CI:** Repos ganz ohne GitHub Actions dürfen per Knopf deployt werden (rotes oder laufendes CI nicht). Auto-Deploy nur bei grünem CI. Rollback ignoriert den CI-Status. Passt das?
 - **Ruhezeit:** warn- und info-Pushes in der Ruhezeit (23–7 Uhr) werden verworfen, nicht morgens nachgeliefert (die Meldungen selbst bleiben in der Liste). Lieber morgens gesammelt nachliefern?
 - **Level für Updates/Neustart nötig:** derzeit `warn` (wie SPEC 5.1). Mit Push ab M4 wären das gesammelte Pushes alle 30 Min. Lieber `info` (kein Push)?
 

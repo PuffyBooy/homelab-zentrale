@@ -31,6 +31,11 @@ const tables = [
   schema.checkResults,
   schema.certStatus,
   schema.pushSubscriptions,
+  schema.githubRepos,
+  schema.githubBranches,
+  schema.githubEtags,
+  schema.deployTargets,
+  schema.deploys,
 ];
 
 describe('database', () => {

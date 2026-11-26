@@ -88,6 +88,10 @@ function ctx(
       return { code: 0, stdout: 'done', stderr: '' };
     },
     dockerSocket: '/var/run/docker.sock',
+    spawn: () => {
+      throw new Error('spawn not expected');
+    },
+    dataDir: '/nonexistent-data',
   };
 }
 

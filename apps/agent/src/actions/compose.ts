@@ -5,6 +5,7 @@ import path from 'node:path';
 import { fileNameSchema, type RpcParams } from '@hz/shared';
 import type { RunResult } from '../exec.js';
 import { resolveHomelabPath } from '../paths.js';
+import { withDirLock } from './dir-lock.js';
 import { ActionError, type ActionContext } from './types.js';
 
 /**
@@ -30,18 +31,21 @@ export const COMPOSE_FILE_NAMES = [
   'docker-compose.yaml',
 ] as const;
 
-export type ComposeOp = 'pull' | 'up' | 'down';
+/** `deploy` is `up` with `--build`, only used by deploy.run. */
+export type ComposeOp = 'pull' | 'up' | 'down' | 'deploy';
 
 const SUBCOMMANDS: Record<ComposeOp, readonly string[]> = {
   pull: ['pull', '--quiet'],
   up: ['up', '-d', '--remove-orphans'],
   down: ['down', '--remove-orphans'],
+  deploy: ['up', '-d', '--build', '--remove-orphans'],
 };
 
-const TIMEOUTS: Record<ComposeOp, number> = {
+export const COMPOSE_TIMEOUTS: Record<ComposeOp, number> = {
   pull: 15 * 60_000,
   up: 10 * 60_000,
   down: 5 * 60_000,
+  deploy: 20 * 60_000,
 };
 
 /** The fixed argument list for one compose operation. */
@@ -158,27 +162,19 @@ export async function findComposeFile(dir: string, root: string): Promise<string
   throw new ActionError('not_found', 'no compose.yml in the directory');
 }
 
+/** Environment for the docker CLI (the image root is read-only, so its config lives in /tmp). */
+export function composeEnv(dockerSocket: string): { DOCKER_HOST: string; DOCKER_CONFIG: string } {
+  return { DOCKER_HOST: `unix://${dockerSocket}`, DOCKER_CONFIG: '/tmp/.docker' };
+}
+
 /** Last lines of the output, for the result and error messages. */
 export function tail(text: string, max: number): string {
   const t = text.trim();
   return t.length <= max ? t : t.slice(t.length - max);
 }
 
-const locks = new Set<string>();
-
-async function withDirLock<T>(dir: string, fn: () => Promise<T>): Promise<T> {
-  if (locks.has(dir))
-    throw new ActionError('busy', 'another compose action runs in this directory');
-  locks.add(dir);
-  try {
-    return await fn();
-  } finally {
-    locks.delete(dir);
-  }
-}
-
 async function composeOp(
-  op: ComposeOp,
+  op: Exclude<ComposeOp, 'deploy'>,
   params: RpcParams<'compose.up'>,
   ctx: ActionContext,
 ): Promise<{ output: string }> {
@@ -188,8 +184,8 @@ async function composeOp(
     if (docker) await assertProjectNotProtected(docker, params.dir);
     const args = composeArgs(op, params.dir, target.files, target.project);
     const r: RunResult = await ctx.run('docker', args, {
-      timeoutMs: TIMEOUTS[op],
-      env: { DOCKER_HOST: `unix://${ctx.dockerSocket}`, DOCKER_CONFIG: '/tmp/.docker' },
+      timeoutMs: COMPOSE_TIMEOUTS[op],
+      env: composeEnv(ctx.dockerSocket),
     });
     if (r.error === 'not_found') throw new ActionError('failed', 'docker cli not available');
     if (r.error === 'timeout') throw new ActionError('timeout', `compose ${op} timed out`);

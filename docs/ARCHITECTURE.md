@@ -129,7 +129,8 @@ Die erste Nachricht muss innerhalb von 10 s ein gültiges `hello` sein. Danach a
 | `compose.write` | `{dir, files: {name: text}}` (nur unter `/opt/homelab/`) |
 | `game.rcon` | `{gameDir, command}` |
 | `game.backup` | `{gameDir}` → Stream |
-| `deploy.run` | `{dir, repoUrl, sha, method}` → Stream |
+| `deploy.run` | `{dir, repoUrl, sha, method, keyName?}` → Stream |
+| `deploy.key` | `{name}` → `{publicKey}` (ed25519, privater Schlüssel bleibt auf dem Server) |
 | `system.cleanupPreview` / `system.cleanup` | `{}` |
 | `system.reboot` | `{confirmName}` |
 | `check.http` / `check.tcp` / `check.ping` | wie Check-Definition |

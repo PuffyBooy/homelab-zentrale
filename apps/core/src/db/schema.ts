@@ -339,6 +339,95 @@ export const pushSubscriptions = sqliteTable('push_subscriptions', {
   lastOkAt: integer('last_ok_at'),
 });
 
+// ---- M5: GitHub and deploy ---------------------------------------------------
+
+export const githubRepos = sqliteTable('github_repos', {
+  id: text('id').primaryKey(),
+  /** "owner/name" as GitHub reports it (unique, case-insensitive). */
+  fullName: text('full_name').notNull().unique(),
+  private: integer('private', { mode: 'boolean' }).notNull().default(false),
+  defaultBranch: text('default_branch').notNull(),
+  lastCommitSha: text('last_commit_sha'),
+  ciStatus: text('ci_status').notNull().default('off'),
+  createdAt: integer('created_at').notNull(),
+  /** Last successful sync with GitHub. */
+  updatedAt: integer('updated_at'),
+});
+
+/** Last 30 commits (CommitInfo with CI) per tracked branch: default branch and target branches. */
+export const githubBranches = sqliteTable(
+  'github_branches',
+  {
+    repoId: text('repo_id')
+      .notNull()
+      .references(() => githubRepos.id, { onDelete: 'cascade' }),
+    branch: text('branch').notNull(),
+    headSha: text('head_sha'),
+    commitsJson: text('commits_json').notNull().default('[]'),
+    updatedAt: integer('updated_at').notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.repoId, t.branch] })],
+);
+
+/** Conditional requests: ETag and the reduced response data per GitHub API path. */
+export const githubEtags = sqliteTable('github_etags', {
+  url: text('url').primaryKey(),
+  etag: text('etag').notNull(),
+  dataJson: text('data_json').notNull(),
+  updatedAt: integer('updated_at').notNull(),
+});
+
+export const deployTargets = sqliteTable(
+  'deploy_targets',
+  {
+    id: text('id').primaryKey(),
+    repoId: text('repo_id')
+      .notNull()
+      .references(() => githubRepos.id, { onDelete: 'cascade' }),
+    serverId: text('server_id')
+      .notNull()
+      .references(() => servers.id, { onDelete: 'cascade' }),
+    path: text('path').notNull(),
+    branch: text('branch').notNull(),
+    method: text('method').notNull(),
+    autoDeploy: integer('auto_deploy', { mode: 'boolean' }).notNull().default(false),
+    /** Deploy key name on the agent; the private key never leaves the server. */
+    keyName: text('key_name'),
+    publicKey: text('public_key'),
+    /** Sha of the last successful deploy. */
+    liveSha: text('live_sha'),
+    /** Last sha an auto-deploy was started for (auto-deploy once per sha). */
+    autoSha: text('auto_sha'),
+    createdAt: integer('created_at').notNull(),
+    updatedAt: integer('updated_at').notNull(),
+  },
+  (t) => [unique().on(t.serverId, t.path), index('deploy_targets_repo').on(t.repoId)],
+);
+
+export const deploys = sqliteTable(
+  'deploys',
+  {
+    id: text('id').primaryKey(),
+    targetId: text('target_id')
+      .notNull()
+      .references(() => deployTargets.id, { onDelete: 'cascade' }),
+    sha: text('sha').notNull(),
+    status: text('status').notNull(),
+    /** manual | auto | rollback */
+    triggeredBy: text('triggered_by').notNull(),
+    summary: text('summary'),
+    /** Log tail, max 256 KB. */
+    logText: text('log_text').notNull().default(''),
+    startedAt: integer('started_at').notNull(),
+    finishedAt: integer('finished_at'),
+  },
+  (t) => [
+    index('deploys_target_started').on(t.targetId, t.startedAt),
+    index('deploys_started').on(t.startedAt),
+    index('deploys_status').on(t.status),
+  ],
+);
+
 export type User = typeof users.$inferSelect;
 export type Session = typeof sessions.$inferSelect;
 export type ServerRow = typeof servers.$inferSelect;
@@ -348,3 +437,6 @@ export type ContainerRow = typeof containers.$inferSelect;
 export type CheckRow = typeof checks.$inferSelect;
 export type CertStatusRow = typeof certStatus.$inferSelect;
 export type PushSubscriptionRow = typeof pushSubscriptions.$inferSelect;
+export type GithubRepoRow = typeof githubRepos.$inferSelect;
+export type DeployTargetRow = typeof deployTargets.$inferSelect;
+export type DeployRow = typeof deploys.$inferSelect;

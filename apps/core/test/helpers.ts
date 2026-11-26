@@ -43,6 +43,7 @@ export async function makeApp(
     liveOptions?: AppDeps['liveOptions'];
     pushTransport?: AppDeps['pushTransport'];
     rdapFetch?: AppDeps['rdapFetch'];
+    githubFetch?: AppDeps['githubFetch'];
   } = {},
 ): Promise<TestApp> {
   const clock: TestClock = {
@@ -69,6 +70,7 @@ export async function makeApp(
     ...(opts.liveOptions ? { liveOptions: opts.liveOptions } : {}),
     // Never reach the network from tests: RDAP fails unless a test injects one.
     rdapFetch: opts.rdapFetch ?? (() => Promise.reject(new Error('no network in tests'))),
+    githubFetch: opts.githubFetch ?? (() => Promise.reject(new Error('no network in tests'))),
     pushTransport: opts.pushTransport ?? {
       send: () => Promise.reject(new Error('no network in tests')),
     },
