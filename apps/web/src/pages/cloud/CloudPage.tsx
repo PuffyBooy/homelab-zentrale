@@ -25,7 +25,7 @@ import {
 } from '../../lib/cloud.js';
 import { useGames } from '../../lib/data.js';
 import { errorText } from '../../lib/errors.js';
-import { formatNumber } from '../../lib/format.js';
+import { formatGrouped, formatNumber } from '../../lib/format.js';
 import { isModuleOn } from '../../lib/modules.js';
 import { useModules } from '../../lib/useModules.js';
 import { useNow } from '../../lib/useNow.js';
@@ -152,9 +152,9 @@ export function BudgetTile({ budget: b }: { budget: CloudBudget }): ReactElement
     <Tile title="Budget" icon="cpu" status={st.status} statusLabel={st.label} span={2}>
       <div className="app-stack" data-testid="cloud-budget">
         <div className="app-metrics">
-          <Metric label="Monat bisher" value={formatNumber(b.monthEur, 2)} unit="€" />
-          <Metric label="Hochrechnung" value={formatNumber(b.projectedEur, 2)} unit="€" />
-          <Metric label="Budget" value={formatNumber(b.limitEur, 2)} unit="€" />
+          <Metric label="Monat bisher" value={formatGrouped(b.monthEur, 2, 2)} unit="€" />
+          <Metric label="Hochrechnung" value={formatGrouped(b.projectedEur, 2, 2)} unit="€" />
+          <Metric label="Budget" value={formatGrouped(b.limitEur, 2, 2)} unit="€" />
         </div>
         <UsageBar
           label="Budget"

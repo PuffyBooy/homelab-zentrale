@@ -179,7 +179,7 @@ function CreateForm({
   const suggest = useQuery({
     queryKey: suggestKey(tpl.id, draft.serverId),
     queryFn: ({ signal }) => fetchSuggest(tpl.id, draft.serverId, signal),
-    enabled: !!draft.serverId && !isCloud,
+    enabled: !!draft.serverId && draft.serverId !== CLOUD_TARGET,
     staleTime: 15_000,
   });
 
@@ -331,7 +331,7 @@ function CreateForm({
               Aufsetzen geht erst, wenn sich der Agent wieder meldet.
             </Alert>
           ) : null}
-          {suggest.error ? <FormError title={errorText(suggest.error)} /> : null}
+          {suggest.error && !isCloud ? <FormError title={errorText(suggest.error)} /> : null}
           {isCloud ? (
             <OrderFields
               order={order}
