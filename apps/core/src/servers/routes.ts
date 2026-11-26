@@ -43,6 +43,8 @@ export interface ServerRoutesOptions {
   tokens: AgentTokens;
   metrics: MetricsStore;
   alerts: AlertService;
+  /** M22: the server belongs to a cloud machine (deleted via the cloud page only). */
+  ownedByCloud?: (serverId: string) => boolean;
 }
 
 /** Maps RPC failures to HTTP. Agent messages are not passed through. */
@@ -199,6 +201,10 @@ export const serverRoutes: FastifyPluginAsync<ServerRoutesOptions> = async (app,
 
   app.delete('/servers/:id', { preHandler: stepUp }, async (request) => {
     const row = serverOf(request);
+    // Its VM would keep running (and costing) at the cloud provider.
+    if (o.ownedByCloud?.(row.id) === true) {
+      throw new HttpError(409, 'conflict', undefined, 'Über die Cloud-Seite löschen');
+    }
     o.tokens.revoke(row.id);
     o.hub.disconnect(row.id, 'deleted');
     o.hub.forget(row.id);

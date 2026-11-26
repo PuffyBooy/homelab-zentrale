@@ -50,6 +50,7 @@ export async function makeApp(
     gameFetch?: AppDeps['gameFetch'];
     dnsFetch?: AppDeps['dnsFetch'];
     discordFetch?: AppDeps['discordFetch'];
+    cloudFetch?: AppDeps['cloudFetch'];
     haOptions?: AppDeps['haOptions'];
     consoleOptions?: AppDeps['consoleOptions'];
     /**
@@ -93,6 +94,7 @@ export async function makeApp(
     gameFetch: opts.gameFetch ?? (() => Promise.reject(new Error('no network in tests'))),
     dnsFetch: opts.dnsFetch ?? (() => Promise.reject(new Error('no network in tests'))),
     discordFetch: opts.discordFetch ?? (() => Promise.reject(new Error('no network in tests'))),
+    cloudFetch: opts.cloudFetch ?? (() => Promise.reject(new Error('no network in tests'))),
     pushTransport: opts.pushTransport ?? {
       send: () => Promise.reject(new Error('no network in tests')),
     },

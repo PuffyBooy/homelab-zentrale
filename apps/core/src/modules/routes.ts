@@ -9,6 +9,7 @@ import { requireStepUp } from '../auth/guard.js';
 import type { Clock } from '../clock.js';
 import { writeAudit } from '../db/audit.js';
 import type { Db } from '../db/index.js';
+import { HttpError } from '../http/errors.js';
 import type { ModuleService } from './service.js';
 
 export interface ModuleRoutesOptions {
@@ -35,6 +36,8 @@ export const moduleRoutes: FastifyPluginAsync<ModuleRoutesOptions> = async (app,
       await stepUp(request, reply);
       if (reply.sent) return reply;
     }
+    const refusal = o.modules.offRefusal(body);
+    if (refusal !== null) throw new HttpError(409, 'conflict', undefined, refusal);
     const changed = o.modules.set(body);
     if (changed.length > 0) {
       const next = o.modules.get();

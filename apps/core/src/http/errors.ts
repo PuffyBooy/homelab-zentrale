@@ -12,6 +12,8 @@ export class HttpError extends Error {
     public readonly userMessage?: string,
     /** Only with `insufficient_ram` (admin API; share links never get details). */
     public readonly details?: InsufficientRamDetails,
+    /** Only with `price_changed` (M22): the current running price per hour. */
+    public readonly currentEurPerHour?: number,
   ) {
     super(code);
     this.name = 'HttpError';
@@ -25,6 +27,7 @@ export function sendError(
   retryAfter?: number,
   message?: string,
   details?: InsufficientRamDetails,
+  currentEurPerHour?: number,
 ): FastifyReply {
   const body: ErrorResponse = { ok: false, error: code };
   if (retryAfter !== undefined) {
@@ -33,6 +36,7 @@ export function sendError(
   }
   if (message !== undefined) body.message = message;
   if (details !== undefined) body.details = details;
+  if (currentEurPerHour !== undefined) body.currentEurPerHour = currentEurPerHour;
   return reply.code(status).send(body);
 }
 
@@ -64,7 +68,15 @@ export function errorHandler(
   reply: FastifyReply,
 ): FastifyReply {
   if (err instanceof HttpError) {
-    return sendError(reply, err.status, err.code, err.retryAfter, err.userMessage, err.details);
+    return sendError(
+      reply,
+      err.status,
+      err.code,
+      err.retryAfter,
+      err.userMessage,
+      err.details,
+      err.currentEurPerHour,
+    );
   }
   if (err instanceof z.ZodError) {
     request.log.debug({ issues: err.issues.length }, 'invalid input');

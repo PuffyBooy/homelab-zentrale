@@ -168,6 +168,18 @@ export const errorCodeSchema = z.enum([
   'ram_unknown',
   /** An alert channel (Discord, Telegram, ntfy) refused or did not answer the test message (502). */
   'channel_failed',
+  /**
+   * M22: the confirmed cloud price no longer matches the core's estimate (409).
+   * `currentEurPerHour` carries the current running price; the UI asks again.
+   */
+  'price_changed',
+  /**
+   * M22: the cloud budget of the month is used up (409). Automatic starts are refused;
+   * the admin repeats the order or the machine start with `overBudget: true`.
+   */
+  'over_budget',
+  /** M22: the cloud provider refused or did not answer (502); `message` is one of CLOUD_ERRORS. */
+  'cloud_error',
 ]);
 export type ErrorCode = z.infer<typeof errorCodeSchema>;
 export const errorResponseSchema = z.strictObject({
@@ -182,5 +194,7 @@ export const errorResponseSchema = z.strictObject({
   message: z.string().max(200).optional(),
   /** Only with error `insufficient_ram`. */
   details: insufficientRamDetailsSchema.optional(),
+  /** Only with error `price_changed` (M22): the current running price in EUR per hour. */
+  currentEurPerHour: z.number().nonnegative().optional(),
 });
 export type ErrorResponse = z.infer<typeof errorResponseSchema>;

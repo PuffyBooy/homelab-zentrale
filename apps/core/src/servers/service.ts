@@ -130,6 +130,7 @@ export class ServerService implements AgentSink {
   private readonly virtual = new Set<string>();
   private connections: ConnectionInfo = { isConnected: () => false, disconnectedAt: () => null };
   private containerSync: ContainerSync | null = null;
+  private asleep: ((serverId: string) => boolean) | null = null;
   private readonly bootAt: number;
 
   constructor(
@@ -150,6 +151,14 @@ export class ServerService implements AgentSink {
 
   setContainers(c: ContainerSync): void {
     this.containerSync = c;
+  }
+
+  /**
+   * M22: servers whose machine is switched off on purpose (a deallocated cloud VM).
+   * While disconnected they are OFF without reasons, so no offline alert is raised.
+   */
+  setAsleep(fn: ((serverId: string) => boolean) | null): void {
+    this.asleep = fn;
   }
 
   markVirtual(serverId: string): void {
@@ -399,7 +408,10 @@ export class ServerService implements AgentSink {
     const st = this.state(row.id);
     const t = thresholdsOf(row);
     const input = this.statusInput(row, st, t);
-    const result = evaluateStatus(input, t, this.deps.now());
+    const result: StatusResult =
+      !input.connected && this.asleep?.(row.id) === true
+        ? { status: 'off', reasons: [] }
+        : evaluateStatus(input, t, this.deps.now());
     const m = parse<StoredMetrics>(st?.metricsJson ?? null);
     const counts = this.deps.db
       .select({ state: containers.state, n: count() })
