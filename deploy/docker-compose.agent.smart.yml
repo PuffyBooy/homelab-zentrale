@@ -9,10 +9,15 @@
 # - HZ_AGENT_SMART=1         the agent runs `smartctl --json --info --health --attributes
 #                            --nocheck=standby,0` per disk at most every 10 minutes. With
 #                            --nocheck=standby a sleeping disk is skipped, never woken up.
-# - SYS_RAWIO                ATA pass-through (SG_IO) for SATA disks needs it.
-# - device_cgroup_rules      READ access (r) to the disk block devices only: SCSI/SATA disks
+# - SYS_RAWIO                ATA pass-through (SG_IO) for SATA disks needs it. NVMe admin
+#                            commands (-d nvme) need SYS_ADMIN, which the agent already has.
+# - device_cgroup_rules      open the disk block devices read-only (r): SCSI/SATA disks
 #                            (majors 8, 65-71, 128-135) and NVMe namespaces (259). No write
-#                            (w) and no mknod (m) right; the agent cannot write to a disk.
+#                            (w) and no mknod (m) right in the cgroup.
+# Honest limit: with SYS_RAWIO a read-only descriptor can still send any SCSI/ATA command
+# through SG_IO, write commands included. The agent itself only runs the fixed, reading
+# smartctl call above (collect/storage.ts). This adds little to what the agent can already
+# do: it holds the Docker socket and SYS_ADMIN, which are root-equivalent anyway.
 services:
   agent:
     environment:

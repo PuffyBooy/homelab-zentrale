@@ -2,8 +2,13 @@ import { useQuery } from '@tanstack/react-query';
 import type { ReactElement } from 'react';
 import { Link } from 'react-router';
 import { ServiceRow, Tile } from '@hz/ui';
-import { formatBytesOf } from '../../lib/format.js';
-import { fetchStorageList, storageListKey, storageStatus } from '../../lib/storage.js';
+import { formatBytesOf, plural } from '../../lib/format.js';
+import {
+  STORAGE_STATUS_TEXT,
+  fetchStorageList,
+  storageListKey,
+  storageStatus,
+} from '../../lib/storage.js';
 
 /**
  * Overview tile "Speicher" (ROADMAP M13): one row per server with storage data
@@ -36,7 +41,7 @@ export function StorageOverviewTile({
         title="Speicher"
         icon="server"
         span={2}
-        count={problems ? `${problems} Probleme` : undefined}
+        count={problems ? plural(problems, 'Problem', 'Probleme') : undefined}
         status={rows[0]?.status}
       >
         <div className="app-rows">
@@ -51,11 +56,12 @@ export function StorageOverviewTile({
                 host={
                   first
                     ? first.title
-                    : `${s.storage.arrays.length} RAID · ${s.storage.disks.length} Platten${
+                    : `${s.storage.arrays.length} RAID · ${plural(s.storage.disks.length, 'Platte', 'Platten')}${
                         total > 0 ? ` · ${formatBytesOf(used, total)}` : ''
                       }`
                 }
                 status={status}
+                meta={STORAGE_STATUS_TEXT[status]}
                 actions={
                   <Link className="hz-btn hz-btn-ghost hz-btn-sm" to={`/servers/${s.serverId}`}>
                     Ansehen

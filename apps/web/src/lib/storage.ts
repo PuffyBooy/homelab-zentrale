@@ -7,7 +7,7 @@ import {
 } from '@hz/shared';
 import type { Status } from '@hz/ui';
 import { api } from './api.js';
-import { formatBytes, formatGrouped, formatNumber, formatTemp } from './format.js';
+import { formatBytes, formatGrouped, formatNumber, formatTemp, plural } from './format.js';
 
 /** M13 NAS und Speicher: GET /api/storage, GET /api/storage/:id. */
 export const storageListKey = ['storage'] as const;
@@ -77,8 +77,8 @@ export function diskView(d: PhysicalDisk): {
   meta: string;
 } {
   const sm = d.smart;
-  const bad =
-    (sm?.reallocated ?? 0) + (sm?.pending ?? 0) + (sm?.uncorrectable ?? 0) + (sm?.mediaErrors ?? 0);
+  const bad = (sm?.reallocated ?? 0) + (sm?.pending ?? 0) + (sm?.uncorrectable ?? 0);
+  const media = sm?.mediaErrors ?? 0;
   let status: Status = 'ok';
   let label = 'In Ordnung';
   if (sm?.health === 'failed') {
@@ -86,7 +86,10 @@ export function diskView(d: PhysicalDisk): {
     label = 'SMART: Ausfall';
   } else if (bad > 0) {
     status = 'warn';
-    label = `${formatNumber(bad, 0)} defekte Sektoren`;
+    label = plural(bad, 'defekter Sektor', 'defekte Sektoren');
+  } else if (media > 0) {
+    status = 'warn';
+    label = plural(media, 'Medienfehler', 'Medienfehler');
   } else if (d.standby) {
     status = 'off';
     label = 'Schläft';
@@ -122,4 +125,14 @@ export const SMART_HINT: Record<StorageServer['storage']['smart'], string | null
   off: 'SMART ist aus. Für Gesundheit, defekte Sektoren und Temperatur der Festplatten den Agent mit --smart einrichten (auf einem UGREEN-NAS automatisch).',
   unavailable:
     'SMART ist an, aber der Agent darf die Platten nicht lesen. deploy/docker-compose.agent.smart.yml mitstarten.',
+};
+
+/** Status text next to the dot, so a row never relies on colour alone. */
+export const STORAGE_STATUS_TEXT: Record<Status, string> = {
+  ok: 'In Ordnung',
+  warn: 'Warnung',
+  crit: 'Problem',
+  busy: 'Synchronisiert',
+  info: 'Info',
+  off: 'Aus',
 };

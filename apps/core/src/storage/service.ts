@@ -38,9 +38,13 @@ export class StorageService {
     else for (const s of this.list()) this.reconcile(s.serverId, s.name, s.storage);
   }
 
-  /** Called after every stored inventory. Older agents send no storage: nothing changes. */
+  /**
+   * Called after every stored inventory. Older agents send no storage: nothing changes.
+   * While the module is off the snapshot is still stored (so switching it on judges the
+   * current state, not an old one), but no alert is raised.
+   */
   onInventory(serverId: string, storage: StorageInfo | undefined): void {
-    if (!this.enabled || storage === undefined) return;
+    if (storage === undefined) return;
     // The hub already validated the message; parse again so only known fields are stored.
     const parsed = storageInfoSchema.parse(storage);
     const now = this.deps.now();
@@ -58,7 +62,7 @@ export class StorageService {
       .from(servers)
       .where(eq(servers.id, serverId))
       .get();
-    if (server) this.reconcile(serverId, server.name, parsed);
+    if (server && this.enabled) this.reconcile(serverId, server.name, parsed);
   }
 
   private reconcile(serverId: string, name: string, storage: StorageInfo): void {
@@ -71,9 +75,22 @@ export class StorageService {
     for (const key of this.activeKeys(serverId)) {
       if (keys.has(key)) continue;
       const parsed = parseStorageAlertKey(key);
+      const disk = parsed ? storage.disks.find((d) => d.name === parsed.device) : undefined;
+      const present =
+        parsed?.kind === 'raid'
+          ? storage.arrays.some((a) => a.name === parsed.device)
+          : disk !== undefined;
+      // A sleeping disk reports no temperature: its heat alert stays until it is awake again.
+      if (parsed?.kind === 'temp' && disk?.standby) continue;
+      if (!parsed || !present) {
+        // The disk or array is gone: close without an "all fine" entry (that would mislead).
+        const active = this.deps.alerts.active(key);
+        if (active) this.deps.alerts.resolveById(active.id);
+        continue;
+      }
       this.deps.alerts.resolve(key, {
         title: `Speicher auf ${name} wieder in Ordnung`,
-        body: parsed ? `${okText(parsed.kind)} (${parsed.device}).` : 'Das Problem ist behoben.',
+        body: `${okText(parsed.kind)} (${parsed.device}).`,
       });
     }
   }

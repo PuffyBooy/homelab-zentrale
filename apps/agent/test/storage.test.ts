@@ -172,6 +172,12 @@ describe('smartctl json', () => {
     );
     expect(r).toMatchObject({ openFailed: true, smart: null });
     expect(parseSmartctlJson('not json').openFailed).toBe(true);
+    // Bit 0: smartctl did not understand the command line (too old): not a read.
+    expect(
+      parseSmartctlJson(
+        JSON.stringify({ smartctl: { exit_status: 1 }, smart_status: { passed: true } }),
+      ).openFailed,
+    ).toBe(true);
   });
 });
 

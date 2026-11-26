@@ -3,7 +3,7 @@ import type { ReactElement } from 'react';
 import { Alert, Badge, ServiceRow, Tile, UsageBar } from '@hz/ui';
 import { isApiError } from '../../lib/api.js';
 import { errorText } from '../../lib/errors.js';
-import { formatAgo, formatBytesOf } from '../../lib/format.js';
+import { formatAgo, formatBytesOf, plural } from '../../lib/format.js';
 import {
   SMART_HINT,
   arrayView,
@@ -50,7 +50,7 @@ export function StorageTile({ serverId }: { serverId: string }): ReactElement | 
       icon="server"
       span={4}
       status={status}
-      count={`${st.disks.length} Platten`}
+      count={plural(st.disks.length, 'Platte', 'Platten')}
       actions={st.platform.kind === 'ugreen' ? <Badge tone="neutral">UGREEN-NAS</Badge> : undefined}
       footer={
         <span className="app-foot-text">gemeldet {formatAgo(new Date(s.updatedAt), now)}</span>

@@ -33,7 +33,7 @@ import { hostPath, type HostContext } from '../host.js';
  */
 
 export const SMART_CACHE_MS = 10 * 60_000;
-const SMART_TIMEOUT_MS = 20_000;
+const SMART_TIMEOUT_MS = 15_000;
 const MAX_DISKS = 64;
 const MAX_ARRAYS = 32;
 const MAX_VOLUMES = 32;
@@ -354,8 +354,9 @@ export function parseSmartctlJson(text: string): SmartRead {
     : [];
   const status = j.smart_status as { passed?: unknown } | undefined;
   const standby = status === undefined && messages.some((m) => /STANDBY|SLEEP/i.test(m));
-  // Bit 1: device open failed or the device did not return an identify.
-  const openFailed = !standby && (exit & 2) !== 0 && status === undefined;
+  // Bit 0: command line not understood (e.g. an old smartctl); bit 1: device open
+  // failed or the device did not return an identify.
+  const openFailed = !standby && ((exit & 1) !== 0 || ((exit & 2) !== 0 && status === undefined));
   const model = typeof j.model_name === 'string' ? clip(j.model_name, 80) : undefined;
   const serial = typeof j.serial_number === 'string' ? clip(j.serial_number, 64) : undefined;
   const temp = num((j.temperature as { current?: unknown } | undefined)?.current);
@@ -480,15 +481,21 @@ export async function collectStorage(
 
   let smartState: StorageInfo['smart'] = opts.smart ? 'on' : 'off';
   let opened = 0;
-  const disks: PhysicalDisk[] = [];
-  for (const d of sysDisks) {
+  // SMART reads run in parallel, so one slow disk or controller delays the inventory
+  // by at most one timeout, not one per disk.
+  const reads = await Promise.all(
+    sysDisks.map((d) =>
+      opts.smart && opts.smartReader ? opts.smartReader.read(d.name) : Promise.resolve(null),
+    ),
+  );
+  const disks: PhysicalDisk[] = sysDisks.map((d, i) => {
     let tempC = d.hwmonTemp;
     let standby = false;
     let smart: PhysicalDisk['smart'] = null;
     let model = d.model;
     let serial = d.serial;
-    if (opts.smart && opts.smartReader) {
-      const e = await opts.smartReader.read(d.name);
+    const e = reads[i];
+    if (e) {
       if (!e.read.openFailed) opened += 1;
       standby = e.read.standby;
       model = e.read.model ?? e.awake?.read.model ?? model;
@@ -498,7 +505,7 @@ export async function collectStorage(
       const src = e.awake;
       if (src?.read.smart) smart = { ...src.read.smart, readAt: new Date(src.at).toISOString() };
     }
-    disks.push({
+    return {
       name: d.name,
       kind: d.kind,
       ...(model ? { model } : {}),
@@ -507,8 +514,8 @@ export async function collectStorage(
       tempC,
       standby,
       smart,
-    });
-  }
+    };
+  });
   if (opts.smart && sysDisks.length > 0 && opened === 0) smartState = 'unavailable';
   return { platform, smart: smartState, arrays, volumes, disks };
 }

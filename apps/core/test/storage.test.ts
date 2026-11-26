@@ -184,6 +184,21 @@ describe('storage (M13)', () => {
     expect(open).toHaveLength(3);
   });
 
+  it('a sleeping disk keeps its heat alert; a vanished disk closes without an OK entry', async () => {
+    const { serverId } = await setup();
+    const [a, b] = nasStorage().disks;
+    if (!a || !b) throw new Error('fixture');
+    await sendStorage(serverId, nasStorage({ disks: [{ ...a, tempC: 62 }, b] }));
+    const key = storageAlertKey(serverId, 'temp', 'sda');
+    const active = () => storageAlerts(serverId).filter((x) => x.state !== 'resolved');
+    expect(active().map((x) => x.key)).toEqual([key]);
+    await sendStorage(serverId, nasStorage({ disks: [{ ...a, tempC: null, standby: true }, b] }));
+    expect(active().map((x) => x.key)).toEqual([key]);
+    await sendStorage(serverId, nasStorage({ disks: [b] }));
+    expect(active()).toEqual([]);
+    expect(storageAlerts(serverId).some((x) => x.level === 'ok')).toBe(false);
+  });
+
   it('an inventory without storage (older agent) keeps the last snapshot', async () => {
     const { cookie, serverId } = await setup();
     await sendStorage(serverId, nasStorage());

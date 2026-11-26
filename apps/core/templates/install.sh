@@ -67,7 +67,9 @@ if [ -f "$CONF_DIR/agent.env" ] || docker inspect "$CONTAINER" >/dev/null 2>&1; 
 fi
 
 # A UGREEN NAS (NASync, UGOS Pro) gets SMART automatically.
-if grep -qi ugreen /sys/class/dmi/id/sys_vendor 2>/dev/null; then smart=1; fi
+if grep -qi ugreen /sys/class/dmi/id/sys_vendor 2>/dev/null \
+  || grep -Eqi 'ugreen|dxp[0-9]' /sys/class/dmi/id/product_name 2>/dev/null \
+  || grep -qi ugos /etc/os-release 2>/dev/null; then smart=1; fi
 
 # --- exchange -------------------------------------------------------------------
 install -d -m 0755 "$HOMELAB_DIR"

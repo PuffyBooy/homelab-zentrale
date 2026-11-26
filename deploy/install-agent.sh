@@ -100,7 +100,9 @@ if [[ -n "$token" ]]; then
 fi
 
 # A UGREEN NAS (NASync, UGOS Pro) gets SMART automatically.
-if grep -qi ugreen /sys/class/dmi/id/sys_vendor 2>/dev/null; then smart=1; fi
+if grep -qi ugreen /sys/class/dmi/id/sys_vendor 2>/dev/null \
+  || grep -Eqi 'ugreen|dxp[0-9]' /sys/class/dmi/id/product_name 2>/dev/null \
+  || grep -qi ugos /etc/os-release 2>/dev/null; then smart=1; fi
 
 # --- docker -------------------------------------------------------------------
 command -v docker >/dev/null 2>&1 || die "Docker fehlt (https://docs.docker.com/engine/install/)"

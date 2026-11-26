@@ -156,7 +156,8 @@ test.afterAll(async () => {
 test('server detail shows RAID, volumes and disks; overview has the tile', async () => {
   await page.goto(`/servers/${nasId}`);
   const tile = tileByTitle(page, 'Speicher');
-  await expect(tile).toBeVisible();
+  // The section loads after the server detail (own query).
+  await expect(tile).toBeVisible({ timeout: 15_000 });
   await expect(tile).toContainText('UGREEN-NAS');
   await expect(tile).toContainText('RAID 1 · 2/2 Platten');
   await expect(tile).toContainText('/volume1 (btrfs)');
@@ -191,8 +192,7 @@ test('a failed disk degrades the RAID: crit alert, resolved after the rebuild', 
 test('module off hides the section and the overview tile', async () => {
   await setModules(page, totp, { storage: false });
   await page.goto(`/servers/${nasId}`);
-  await expect(page.getByRole('heading', { name: NAS }).or(page.locator('main'))).toBeVisible();
-  await expect(tileByTitle(page, 'Auslastung')).toBeVisible();
+  await expect(tileByTitle(page, 'Auslastung')).toBeVisible({ timeout: 15_000 });
   await expect(tileByTitle(page, 'Speicher')).toHaveCount(0);
   await page.goto('/');
   await expect(tileByTitle(page, 'Speicher')).toHaveCount(0);
