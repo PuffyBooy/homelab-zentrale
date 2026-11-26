@@ -93,6 +93,7 @@ Alles, was nicht gebraucht wird, ist weg (`cap_drop: ALL`, schreibgeschütztes D
 
 - **Docker-Socket**: Container auflisten, starten, stoppen, Logs, Events, Image-Update und `docker compose`. Wer den Socket hat, ist faktisch root auf dem Host. Deshalb führt der Agent nur die Aktionen aus der Allowlist aus (`packages/shared/src/agent-protocol.ts`), mit festen Programmen und Argument-Arrays.
 - **`pid: host`, `network_mode: host`, `/proc` und `/sys` lesend**: Messwerte, Ports und Netz des Hosts statt des Containers.
+  Wake-on-LAN (`wol.send`) braucht das Host-Netz: Das Magic Packet geht als UDP-Broadcast (Port 7 oder 9) ins lokale Netz des Servers, höchstens 6 pro Minute. Ohne `network_mode: host` landet es nur im Docker-Bridge-Netz.
 - **`user: 0:0` mit `SYS_ADMIN`, `SYS_PTRACE`, `SYS_CHROOT`** und `apparmor=unconfined`: `nsenter` in die Namespaces von Host-PID 1 und Lesen von `/host/proc/1/root`. Das Image selbst läuft standardmäßig als `node`; dann gibt es nur Messwerte.
 - **`DAC_READ_SEARCH`**: `/var/log/auth.log` gehört `syslog:adm`.
 - **`DAC_OVERRIDE`, `CHOWN`, `FOWNER`, `FSETID`, `SETUID`, `SETGID`**: `apt-get`/`dpkg` beim Aufräumen.

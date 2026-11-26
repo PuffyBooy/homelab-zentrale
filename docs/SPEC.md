@@ -19,6 +19,10 @@ Optionale Teile sind **Module**, die der Admin unter Einstellungen → Module an
 | GitHub | aus | keine GitHub-Seite, kein Polling, keine Deploys; die Zentrale braucht GitHub nicht |
 | Home Assistant | aus | keine Seite „Wohnung“, keine Verbindung zu HA |
 | Gameserver | an | keine Gameserver-Seite, keine Benutzerlinks |
+| Proxmox | aus | keine Seite „VMs“, keine Verbindung zu Proxmox |
+| DNS-Filter (Pi-hole/AdGuard) | aus | kein DNS-Bereich auf „Netzwerk“ |
+| FRITZ!Box | aus | kein Router-Bereich auf „Netzwerk“ |
+| Uptime Kuma | aus | kein Kuma-Bereich auf „Websites“ |
 
 Ein ausgeschaltetes Modul verschwindet aus Navigation, Übersicht und Befehlspalette, seine API antwortet `404 module_disabled`, und es läuft nichts im Hintergrund. Container-Images gibt es fertig in der GitHub Container Registry; wer GitHub nicht nutzen will, baut sie lokal (`HZ_BUILD_LOCAL=1`).
 
@@ -35,17 +39,19 @@ Alle Server laufen auf Linux mit Docker. ARM (Oracle, Pi) und x86 müssen beide 
 
 ## 3. Navigation und Seiten
 
-Linke Navigation (`NavRail`), Tastenkürzel in Klammern:
+Linke Navigation (`NavRail`). Die Tastenkürzel `1`–`9` gehen nach Position der sichtbaren Punkte (ausgeschaltete Module fehlen), die Konsole hat immer `` ` ``:
 
-1. Übersicht (`1`)
-2. Server (`2`)
-3. Container (`3`)
-4. Gameserver (`4`)
-5. GitHub (`5`)
-6. Websites (`6`)
-7. Wohnung (`7`)
-8. Meldungen (`8`)
-9. Konsole (`` ` ``)
+1. Übersicht
+2. Server
+3. Container
+4. VMs (Modul Proxmox)
+5. Gameserver
+6. GitHub
+7. Websites
+8. Netzwerk (Module FRITZ!Box und DNS-Filter)
+9. Wohnung
+10. Meldungen
+11. Konsole (`` ` ``)
 
 Dazu kommen die Einstellungen (Zahnrad unten in der Navigation) und eine **Befehlspalette** (`Strg/⌘+K`): Suche über Server, Container, Repos, Gameserver und Aktionen wie „minecraft neu starten“ oder „my-app deployen“.
 
@@ -204,7 +210,7 @@ Verlauf: Uptime in % für 24 h / 7 d / 30 d, Antwortzeit als `Sparkline`.
 - Jedes Ereignis wird zur Meldung (`Alert`-Logzeile): Zeit, Level (OK/INFO/WARN/CRIT), Titel (Was + Wo), Details (seit wann + was hilft), Server, Quelle.
 - Meldungen haben einen Zustand: offen → bestätigt → erledigt (automatisch erledigt, wenn sich der Zustand erholt; dann kommt eine OK-Meldung).
 - **Push:** Web-Push (VAPID) an die installierte PWA. Regeln: `crit` sofort; `warn` gesammelt, höchstens eine Push alle 30 Min; „Ruhezeit“ 23–7 Uhr nur `crit`.
-- Optional als zweiter Kanal: ntfy (selbst gehostet) oder E-Mail.
+- Weitere Kanäle (Abschnitt 16): Discord-Webhook, Telegram-Bot, ntfy. Gleiche Regeln wie Push, pro Kanal ein Mindest-Level.
 - **Wochenbericht** sonntags 19:00: Uptime pro Server/Website, Ausfälle, Deploys, Backups, Speicherverbrauch.
 - Texte nach den Regeln in `design/README.md` → „Stimme und Text“.
 
@@ -242,4 +248,15 @@ Konto (Passwort, TOTP, aktive Sessions), Server (Schwellen, Konsole erlaubt, ent
 
 ## 15. Ideen für später (nicht in den Meilensteinen)
 
-Backups mit restic zwischen den Servern, Spiel-Statistiken, Steuerung eigener Apps, Morgen-Briefing (Wetter, Öffi-Abfahrten, Termine), Paket-Tracking, Pi-hole-Statistiken, Wake-on-LAN, KI-Befehle („Starte den Minecraft-Server“).
+Backups mit restic zwischen den Servern, Spiel-Statistiken, Steuerung eigener Apps, Morgen-Briefing (Wetter, Öffi-Abfahrten, Termine), Paket-Tracking, KI-Befehle („Starte den Minecraft-Server“).
+
+## 16. Anbindungen (M14)
+
+Jede Anbindung hat in den Einstellungen → Anbindungen URL, Zugangsdaten, optional ein CA-Zertifikat (für selbst signierte Zertifikate wie bei Proxmox) und „Verbindung testen“. Zugangsdaten werden verschlüsselt gespeichert und nie wieder angezeigt („gesetzt“). Ändern verlangt Step-up. Wechselt die Adresse, ist das alte Token weg und muss neu eingetragen werden. Ist eine Anbindung 5 Min nicht erreichbar, kommt eine `warn`-Meldung.
+
+- **Proxmox** (Seite „VMs“): alle VMs und LXC-Container aller Knoten mit Status, CPU, RAM, Laufzeit. Starten sofort; Herunterfahren, Stoppen und Neustart mit Bestätigung und Step-up. Zugang über ein API-Token (`benutzer@realm!name` + Secret), am besten mit der Rolle `PVEVMUser` statt root.
+- **DNS-Filter** (Seite „Netzwerk“): Pi-hole ab v6 oder AdGuard Home. Anfragen und Blockierte heute, Anteil, Einträge auf den Listen. Blocken für 5, 15, 30 oder 60 Min pausieren, danach blockt der Filter von selbst wieder. Kein Pausieren ohne Ende.
+- **FRITZ!Box** (Seite „Netzwerk“): über TR-064 Internet-Status (verbunden, Leitung, Laufzeit, externe IP) und Geräte im Netz (Name, IP, LAN/WLAN, aktiv). Neustart der Box mit Bestätigung und Step-up. Internet weg: `crit`-Meldung.
+- **Uptime Kuma** (Bereich auf „Websites“): liest die Monitore über `/metrics` mit einem API-Key und zeigt ihren Status. „Übernehmen“ legt daraus eigene Checks an (HTTP, Port, Ping), damit Kuma später abgeschaltet werden kann.
+- **Wake-on-LAN** (Server-Detail): MAC-Adresse pro Server, Broadcast-Adresse und Sender (die Zentrale oder ein Agent im selben Netz). Ein ausgeschalteter Server zeigt „Aufwecken“.
+- **Meldungskanäle** (Einstellungen → Meldungskanäle): Discord-Webhook, Telegram-Bot (Token + Chat-ID) und ntfy (Server, Thema, optional Token). An/aus, Mindest-Level, Testnachricht. IP-Adressen werden in den Texten maskiert, weil die Nachrichten das Tailnet verlassen.

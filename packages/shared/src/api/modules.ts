@@ -10,7 +10,16 @@ import { z } from 'zod';
  * Fresh install: games on, storage on, github off, homeassistant off. An existing install keeps
  * GitHub/HA on if they were configured (migration 10).
  */
-export const MODULES = ['github', 'homeassistant', 'games', 'storage'] as const;
+export const MODULES = [
+  'github',
+  'homeassistant',
+  'games',
+  'proxmox',
+  'dnsfilter',
+  'fritzbox',
+  'uptimekuma',
+  'storage',
+] as const;
 export const moduleIdSchema = z.enum(MODULES);
 export type ModuleId = z.infer<typeof moduleIdSchema>;
 
@@ -18,6 +27,11 @@ export const modulesSchema = z.strictObject({
   github: z.boolean(),
   homeassistant: z.boolean(),
   games: z.boolean(),
+  /** M14 Anbindungen (packages/shared/src/api/integrations.ts), all off by default. */
+  proxmox: z.boolean(),
+  dnsfilter: z.boolean(),
+  fritzbox: z.boolean(),
+  uptimekuma: z.boolean(),
   /** M13: NAS und Speicher (RAID, volumes, disks, SMART). Read only, on by default. */
   storage: z.boolean(),
 });
@@ -27,11 +41,22 @@ export const MODULE_DEFAULTS: Modules = {
   github: false,
   homeassistant: false,
   games: true,
+  proxmox: false,
+  dnsfilter: false,
+  fritzbox: false,
+  uptimekuma: false,
   storage: true,
 };
 
 /** Enabling these needs step-up (they hold tokens with access to outside systems). */
-export const MODULES_ENABLE_STEP_UP: readonly ModuleId[] = ['github', 'homeassistant'];
+export const MODULES_ENABLE_STEP_UP: readonly ModuleId[] = [
+  'github',
+  'homeassistant',
+  'proxmox',
+  'dnsfilter',
+  'fritzbox',
+  'uptimekuma',
+];
 
 // GET /api/settings/modules -> Modules
 export const modulesResponseSchema = modulesSchema;

@@ -4,7 +4,16 @@ import { pageCommands } from '../shell/CommandPalette.js';
 import { pageMeta } from '../shell/pageMeta.js';
 import { isModuleOn, moduleOfPath, visibleNavItems } from './modules.js';
 
-const off = { github: false, homeassistant: false, games: false, storage: false };
+const off = {
+  github: false,
+  homeassistant: false,
+  games: false,
+  proxmox: false,
+  dnsfilter: false,
+  fritzbox: false,
+  uptimekuma: false,
+  storage: false,
+};
 
 describe('modules', () => {
   it('maps paths to their module', () => {
@@ -12,6 +21,8 @@ describe('modules', () => {
     expect(moduleOfPath('/github/abcdefgh')).toBe('github');
     expect(moduleOfPath('/home')).toBe('homeassistant');
     expect(moduleOfPath('/games/new')).toBe('games');
+    expect(moduleOfPath('/vms')).toBe('proxmox');
+    expect(moduleOfPath('/network')).toBeUndefined();
     expect(moduleOfPath('/servers')).toBeUndefined();
     expect(moduleOfPath('/homeassistant')).toBeUndefined();
   });
@@ -26,6 +37,8 @@ describe('modules', () => {
     expect(ids).not.toContain('github');
     expect(ids).not.toContain('home');
     expect(ids).not.toContain('games');
+    expect(ids).not.toContain('vms');
+    expect(ids).not.toContain('network');
     const pages = pageCommands(off).map((c) => c.id);
     expect(pages).toEqual([...ids, 'settings']);
     expect(pageCommands().map((c) => c.id)).toContain('github');

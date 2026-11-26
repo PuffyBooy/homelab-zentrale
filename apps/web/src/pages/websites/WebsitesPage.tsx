@@ -8,9 +8,11 @@ import { errorText } from '../../lib/errors.js';
 import { plural } from '../../lib/format.js';
 import { useLiveTopic } from '../../lib/live.js';
 import { ALL_SERVERS } from '../../lib/servers.js';
+import { useModules } from '../../lib/useModules.js';
 import { useNow } from '../../lib/useNow.js';
 import { CheckDialog } from './CheckDialog.js';
 import { CheckRow } from './CheckRow.js';
+import { KumaSection } from './KumaTile.js';
 import { useRunCheck } from './useRunCheck.js';
 
 /** /websites (SPEC 8): one WebCheckRow per check, problems first, live over `checks`. */
@@ -23,6 +25,7 @@ export function WebsitesPage(): ReactElement | null {
   const navigate = useNavigate();
   const run = useRunCheck();
   const now = useNow(30_000);
+  const modules = useModules();
 
   const one = filter !== ALL_SERVERS ? filter : undefined;
   const list = useMemo(() => {
@@ -89,6 +92,7 @@ export function WebsitesPage(): ReactElement | null {
           </div>
         ) : null}
       </Tile>
+      {modules.uptimekuma ? <KumaSection servers={serverList} /> : null}
       {creating ? (
         <CheckDialog open onClose={() => setCreating(false)} servers={serverList} />
       ) : null}

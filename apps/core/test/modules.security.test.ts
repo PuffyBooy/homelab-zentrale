@@ -42,6 +42,10 @@ describe('optional modules', () => {
       github: false,
       homeassistant: false,
       games: true,
+      proxmox: false,
+      dnsfilter: false,
+      fritzbox: false,
+      uptimekuma: false,
       storage: true,
     });
     const state = await t.app.inject({
@@ -50,7 +54,15 @@ describe('optional modules', () => {
       headers: authHeaders(cookie),
     });
     expect(state.json()).toMatchObject({
-      modules: { github: false, homeassistant: false, games: true },
+      modules: {
+        github: false,
+        homeassistant: false,
+        games: true,
+        proxmox: false,
+        dnsfilter: false,
+        fritzbox: false,
+        uptimekuma: false,
+      },
       timeZone: 'Europe/Vienna',
     });
     // Anonymous: no module flags, no time zone.
@@ -122,6 +134,10 @@ describe('optional modules', () => {
       github: false,
       homeassistant: false,
       games: true,
+      proxmox: false,
+      dnsfilter: false,
+      fritzbox: false,
+      uptimekuma: false,
       storage: true,
     });
     // Off and games on: no step-up.
@@ -130,6 +146,10 @@ describe('optional modules', () => {
       github: false,
       homeassistant: false,
       games: true,
+      proxmox: false,
+      dnsfilter: false,
+      fritzbox: false,
+      uptimekuma: false,
       storage: true,
     });
     // Invalid input.

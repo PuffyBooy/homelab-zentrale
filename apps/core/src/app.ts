@@ -45,10 +45,19 @@ import type { HaClientOptions } from './homeassistant/client.js';
 import { haRoutes } from './homeassistant/routes.js';
 import { HaService } from './homeassistant/service.js';
 import { errorHandler, sendError } from './http/errors.js';
+import { Integrations } from './integrations/index.js';
+import type { IntegrationHttpOptions } from './integrations/http.js';
+import { integrationRoutes } from './integrations/routes.js';
 import { LiveHub, type LiveOptions } from './live/hub.js';
 import { liveRoutes } from './live/routes.js';
 import { DAY, HOUR, MetricsStore } from './metrics/store.js';
 import { Notifier } from './push/notifier.js';
+import { notifyRoutes } from './notify/routes.js';
+import { ChannelFanoutSink, NotifyService } from './notify/service.js';
+import type { NotifyTransport } from './notify/transport.js';
+import { wolRoutes } from './wol/routes.js';
+import { removeWolConfig, WolService } from './wol/service.js';
+import type { UdpSender } from './wol/packet.js';
 import { pushRoutes } from './push/routes.js';
 import { fetchTransport, type PushTransport } from './push/sender.js';
 import { PushService } from './push/service.js';
@@ -111,6 +120,12 @@ export interface AppDeps {
   /** Home Assistant client timers (tests: short backoff and heartbeat). */
   haOptions?: HaClientOptions;
   consoleOptions?: ConsoleOptions;
+  /** Outgoing client of the integrations (tests: short timeout, fake DNS). */
+  integrationHttpOptions?: IntegrationHttpOptions;
+  /** Outgoing transport of the alert channels (tests: capture Discord/Telegram/ntfy). */
+  notifyTransport?: NotifyTransport;
+  /** UDP sender for Wake-on-LAN from the core (tests: capture the magic packet). */
+  wolUdp?: UdpSender;
   /** M12: HTTP for Discord webhooks and the Modrinth API (tests: a fake). */
   gameFetch?: FetchLike;
 }
@@ -144,6 +159,9 @@ export interface CoreServices {
   throttle: ThrottleService;
   onboarding: OnboardingService;
   ports: PortAuditService;
+  integrations: Integrations;
+  notify: NotifyService;
+  wol: WolService;
   db: DbHandle;
 }
 
@@ -412,10 +430,18 @@ export async function buildApp(config: Config, deps: AppDeps = {}): Promise<Fast
     vapid: vapid.keys,
     subject: vapidSubject(config),
   });
+  // M14: Discord, Telegram and ntfy get the same pushes (same quiet hours and bundles).
+  const notify = new NotifyService({
+    db: db.db,
+    box,
+    now,
+    log: app.log.child({ mod: 'channels' }),
+    ...(deps.notifyTransport ? { transport: deps.notifyTransport } : {}),
+  });
   const notifier = new Notifier({
     alerts,
     db: db.db,
-    push,
+    push: new ChannelFanoutSink(push, notify),
     now,
     settings: () => readNotifySettings(db.db),
     log: app.log.child({ mod: 'notify' }),
@@ -629,6 +655,30 @@ export async function buildApp(config: Config, deps: AppDeps = {}): Promise<Fast
     }
   });
 
+  // ---- M14: integrations (Proxmox, DNS filter, FRITZ!Box, Uptime Kuma) ------------
+  const integrations = new Integrations({
+    db: db.db,
+    box,
+    now,
+    alerts,
+    checks,
+    log: app.log.child({ mod: 'integrations' }),
+    ...(deps.integrationHttpOptions ? { httpOptions: deps.integrationHttpOptions } : {}),
+  });
+
+  // ---- M14: Wake-on-LAN ------------------------------------------------------------
+  const wol = new WolService({
+    db: db.db,
+    now,
+    servers,
+    hub,
+    log: app.log.child({ mod: 'wol' }),
+    ...(deps.wolUdp ? { udp: deps.wolUdp } : {}),
+  });
+  servers.onChange((id, deleted) => {
+    if (deleted) removeWolConfig(db.db, id, now());
+  });
+
   app.decorate('hzCore', {
     scheduler,
     tokens,
@@ -657,6 +707,9 @@ export async function buildApp(config: Config, deps: AppDeps = {}): Promise<Fast
     throttle,
     onboarding,
     ports,
+    integrations,
+    notify,
+    wol,
     db,
   });
 
@@ -689,11 +742,13 @@ export async function buildApp(config: Config, deps: AppDeps = {}): Promise<Fast
   github.setEnabled(modules.enabled('github'));
   games.setEnabled(modules.enabled('games'));
   ha.setEnabled(modules.enabled('homeassistant'));
+  for (const s of integrations.all()) s.setEnabled(modules.enabled(s.id));
   modules.onChange((m, on) => {
     if (m === 'github') github.setEnabled(on);
     else if (m === 'games') games.setEnabled(on);
     else if (m === 'homeassistant') ha.setEnabled(on);
-    else storage.setEnabled(on);
+    else if (m === 'storage') storage.setEnabled(on);
+    else integrations.setModule(m, on);
     app.log.info({ module: m, on }, 'module switched');
   });
   checks.start();
@@ -701,6 +756,8 @@ export async function buildApp(config: Config, deps: AppDeps = {}): Promise<Fast
   games.start();
   gameSchedules.start();
   scheduler.every('ha.tick', 1_000, () => ha.tick());
+  // Polls run in the background (not awaited), so a slow host never holds up other jobs.
+  scheduler.every('integrations.tick', 1_000, () => integrations.tick());
   scheduler.every('push.warnBundle', 60_000, () => {
     notifier.flush();
     notifier.flushDigest();
@@ -735,7 +792,15 @@ export async function buildApp(config: Config, deps: AppDeps = {}): Promise<Fast
     scheduler.stop();
     // Let running checks and pushes finish before the database closes (bounded).
     await Promise.race([
-      Promise.all([checks.idle(), push.idle(), github.idle(), games.idle(), gameNotifier.idle()]),
+      Promise.all([
+        checks.idle(),
+        push.idle(),
+        github.idle(),
+        games.idle(),
+        gameNotifier.idle(),
+        integrations.idle(),
+        notify.idle(),
+      ]),
       new Promise((r) => setTimeout(r, 3_000).unref()),
     ]);
     ha.stop();
@@ -837,6 +902,9 @@ export async function buildApp(config: Config, deps: AppDeps = {}): Promise<Fast
     baseUrl: config.baseUrl,
   });
   await app.register(haRoutes, { prefix: '/api', db: db.db, now, ha });
+  await app.register(integrationRoutes, { prefix: '/api', db: db.db, now, integrations });
+  await app.register(notifyRoutes, { prefix: '/api', db: db.db, now, notify });
+  await app.register(wolRoutes, { prefix: '/api', db: db.db, now, wol });
   await app.register(shareGatewayRoutes, { prefix: '/api/share-gateway', shares, now });
   await app.register(shareTailnetRoutes, {
     prefix: '/s',
