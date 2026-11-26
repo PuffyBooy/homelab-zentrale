@@ -306,6 +306,10 @@ export class AgentHub {
         return;
       }
 
+      // A replaced, revoked or deleted connection is detached from the map but
+      // may still deliver frames until the socket is gone: ignore them.
+      if (this.conns.get(conn.serverId) !== conn) return;
+
       if (!msg || msg.type === 'hello') {
         const n = bump(invalid, now, this.opts.invalidWindowMs);
         log.debug({ serverId: conn.serverId, invalid: n }, 'invalid agent message dropped');
@@ -315,7 +319,19 @@ export class AgentHub {
         }
         return;
       }
-      this.dispatch(conn, msg);
+      try {
+        this.dispatch(conn, msg);
+      } catch (err) {
+        // A failing sink (e.g. a DB error) must never take the core down.
+        log.error(
+          {
+            serverId: conn.serverId,
+            type: msg.type,
+            err: err instanceof Error ? err.name : 'error',
+          },
+          'agent message handling failed',
+        );
+      }
     });
 
     ws.on('pong', () => {

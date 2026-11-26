@@ -272,6 +272,40 @@ describe('revocation', () => {
     expect(audit).toEqual([{ target: e.serverId }]);
   });
 
+  it('ignores frames that arrive after delete or revoke (no crash, no data)', async () => {
+    const { t, url, cookie, secret } = await setup();
+    const a = await enrollAgent(t, url, cookie, 'heimserver');
+    const b = await enrollAgent(t, url, cookie, 'oracle-a1');
+    track(a.agent);
+    track(b.agent);
+    await stepUp(t, secret, cookie);
+    const del = await t.app.inject({
+      method: 'DELETE',
+      url: `/api/servers/${a.serverId}`,
+      headers: authHeaders(cookie),
+    });
+    expect(del.statusCode).toBe(200);
+    const rev = await t.app.inject({
+      method: 'POST',
+      url: `/api/servers/${b.serverId}/revoke-agent`,
+      headers: authHeaders(cookie),
+    });
+    expect(rev.statusCode).toBe(200);
+    // Both agents keep talking until their sockets are gone.
+    for (let i = 0; i < 5; i++) {
+      if (a.agent.ws.readyState === a.agent.ws.OPEN) a.agent.send(metricsMsg());
+      if (b.agent.ws.readyState === b.agent.ws.OPEN) b.agent.send(metricsMsg());
+    }
+    await Promise.all([a.agent.closed, b.agent.closed]);
+    await new Promise((r) => setTimeout(r, 50));
+    const rows = t.db.sqlite
+      .prepare('SELECT COUNT(*) AS n FROM metrics_raw WHERE server_id IN (?, ?)')
+      .get(a.serverId, b.serverId) as { n: number };
+    expect(rows.n).toBe(0);
+    expect(t.app.hzCore.hub.isConnected(a.serverId)).toBe(false);
+    expect(t.app.hzCore.hub.isConnected(b.serverId)).toBe(false);
+  });
+
   it('revoke-agent and delete need step-up', async () => {
     const { t, url, cookie } = await setup();
     const e = await enrollAgent(t, url, cookie);
