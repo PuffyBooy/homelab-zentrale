@@ -139,6 +139,27 @@ Arbeite die Meilensteine **in dieser Reihenfolge** ab. Jeder Meilenstein bekommt
 
 **Später (M13b):** Das NAS als Backup-Ziel für Gameserver-Backups (Kopie über die Zentrale wie beim Umzug), sobald M12 (Gameserver komplett) gemergt ist.
 
+## M14: Anbindungen (Proxmox, Pi-hole/AdGuard, FRITZ!Box, Uptime Kuma, Wake-on-LAN, Discord/Telegram/ntfy)
+Wunsch des Admins vom 26.11.2026. Vier neue Module (alle standardmäßig aus, Einschalten mit Step-up), dazu Wake-on-LAN und weitere Meldungskanäle im Core. Schemas: `packages/shared/src/api/integrations.ts`.
+- **WP Schema** (`packages/shared`): Einstellungen, Daten und Aktionen jeder Anbindung, Agent-Aktion `wol.send`, Module `proxmox`, `dnsfilter`, `fritzbox`, `uptimekuma`.
+- **WP Core ∥** (`apps/core/src/integrations`, `apps/core/src/notify`, `apps/core/src/wol`): ein gemeinsamer HTTP-Client für Anbindungen (kein Folgen von Weiterleitungen, 8 s, 4 MB, eigene CA statt abgeschalteter Prüfung), Zugangsdaten verschlüsselt, URL-Wechsel verwirft das Token. Proxmox (VMs und LXC über API-Token; Starten, Herunterfahren, Stoppen, Neustart; alles außer Starten mit Step-up), Pi-hole v6 und AdGuard Home (Statistik, Blocken 5/15/30/60 Min pausieren), FRITZ!Box über TR-064 (Internet-Status, Geräte, Neustart mit Step-up), Uptime Kuma (Monitore über `/metrics` mit API-Key lesen, als eigene Checks übernehmen), Wake-on-LAN (MAC pro Server, gesendet von der Zentrale oder einem Agent im selben LAN), Meldungskanäle Discord-Webhook, Telegram-Bot und ntfy mit denselben Regeln wie Push (Ruhezeit, Bündeln) und maskierten Adressen. Meldung, wenn eine Anbindung 5 Min nicht erreichbar ist oder das Internet weg ist.
+- **WP Agent ∥** (`apps/agent`): Aktion `wol.send` (nur das Magic Packet an Broadcast:7/9, Rate-Limit).
+- **WP Web ∥** (`apps/web`): Seite „VMs“ (Proxmox), Seite „Netzwerk“ (FRITZ!Box und DNS-Filter), Uptime-Kuma-Bereich auf „Websites“, „Aufwecken“ im Server-Detail, Einstellungen „Anbindungen“ und „Meldungskanäle“, Kachel „Heimnetz“ auf der Übersicht.
+
+**Abnahme:** Gegen Test-Server (Proxmox-, Pi-hole-, AdGuard-, FRITZ!Box- und Kuma-Attrappen im Test) erscheinen VMs, Statistik, Geräte und Monitore; eine VM startet, Stoppen verlangt Step-up; Blocken pausiert und läuft danach wieder; ein Kuma-Monitor wird zum Check; ein Magic Packet geht raus; eine Meldung kommt im Discord-, Telegram- und ntfy-Test-Endpunkt an. Sicherheitstests: keine Link-lokalen Ziele, keine Weiterleitung, kein Token nach URL-Wechsel an den neuen Host, keine Secrets in Antworten, Logs und Fehlern, Proxmox-Aktionen nur für bekannte Gäste, Discord nur an discord.com, Telegram nur an api.telegram.org, ausgeschaltetes Modul antwortet 404.
+
+---
+
+## M18: Zusatzmodule Log-Suche, Schwachstellen-Scan, Fail2ban, Discord-Bot, Sprachsteuerung
+**Ziel:** Fünf optionale Module (alle Standard aus, unter Einstellungen → Module). Discord-Bot und Sprachsteuerung steuern von außerhalb der Zentrale und brauchen zum Einschalten Step-up. Keine neue Migration (Einstellungen im `settings`-Speicher), damit parallele Meilensteine nicht kollidieren.
+
+- **WP Schema** (`packages/shared`): Agent-Aktionen in `agent-ops.ts` (`logs.search`, `image.scan`, `fail2ban.status`, `fail2ban.unban`), API in `api/ops.ts`, Module in `api/modules.ts`, Share-Protokoll `via: discord`.
+- **WP Agent ∥** (`apps/agent`): Log-Suche als reine Textsuche (nie Regex) über `docker logs --since/--tail`; Scan mit dem per Digest gepinnten Trivy-Image als Nachbar-Container mit `--image-src remote` (kein Docker-Socket, read-only, `cap-drop ALL`, Speicher- und PID-Limit), lokal gebaute Images gelten als „nicht prüfbar“; Fail2ban über `fail2ban-client` auf dem Host, Entsperren nur für vorhandene Jails und gültige IPs.
+- **WP Core ∥** (`apps/core/src/ops`, `discord`, `voice`): Log-Suche über alle Server (Rate-Limit, Suchtext nie im Log), nächtlicher Scan zur eingestellten Uhrzeit mit `warn`-Meldung pro Container, Fail2ban-Übersicht mit 30 s Cache und Entsperren mit Protokoll. Discord-Bot über das Discord-Gateway (nur ausgehend, kein öffentlicher Endpunkt), Slash-Befehle `/status`, `/start`, `/stop`, `/restart` nur für Freunde, deren Discord-ID der Admin an einen aktiven Benutzerlink gebunden hat, mit genau dessen Rechten und RAM-Reserve. Sprachsteuerung über die bestehende Home-Assistant-Verbindung: ein `input_boolean` pro Gameserver startet/stoppt, ein `input_text` zeigt den Status (für Echo Show und Alexa), Abklingzeit 1 Min.
+- **WP Web ∥** (`apps/web`): Seite „Log-Suche“, Seite „Sicherheit“ (Schwachstellen, Fail2ban), Einstellungen „Discord-Bot“ und „Sprachsteuerung“, Schalter unter Module.
+
+**Abnahme:** Eine Suche findet eine Zeile in Containern zweier Sim-Server; ein Scan-Ergebnis mit kritischer Lücke erzeugt eine Meldung, die nach dem Fix verschwindet; eine gesperrte IP wird entsperrt; ein gebundener Freund startet per Slash-Befehl seinen Gameserver, ein fremder nicht; ein HA-Schalter startet den Gameserver und spiegelt den Status zurück. Sicherheitstests: Module aus = 404, keine Route ohne Session, kein Regex aus Nutzereingabe, kein Docker-Socket und kein Host-Pfad für Trivy, Bot-Token nie in Antwort oder Log, Discord nur von der eingestellten Guild, abgelaufene/widerrufene Links wirken nicht, Gateway-URL nur `*.discord.gg`, Sprachsteuerung nur `input_boolean`/`input_text`.
+
 ---
 
 ## M20: Automatik und Netzwerk (Aufgaben, Selbstheilung, Speedtest, Domains)

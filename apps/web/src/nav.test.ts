@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { visibleNavItems } from './lib/modules.js';
+import { ALL_MODULES_ON } from './lib/modules.js';
 import {
   activeNavId,
   isTypingTarget,
@@ -9,6 +10,8 @@ import {
   shortcutTarget,
   withShortcutKeys,
 } from './nav.js';
+
+const NONE_EXTRA = { proxmox: false, dnsfilter: false, fritzbox: false, uptimekuma: false };
 
 const key = (k: string, extra: Partial<Parameters<typeof shortcutAction>[0]> = {}) => ({
   key: k,
@@ -25,15 +28,19 @@ describe('navigation', () => {
       'Übersicht',
       'Server',
       'Container',
+      'VMs',
       'Gameserver',
       'GitHub',
       'Websites',
+      'Netzwerk',
       'Wohnung',
       'Meldungen',
       'Apps',
       'Internet',
       'Automatik',
       'Konsole',
+      'Log-Suche',
+      'Sicherheit',
     ]);
   });
 
@@ -41,6 +48,8 @@ describe('navigation', () => {
     expect(activeNavId('/')).toBe('overview');
     expect(activeNavId('/servers/heimserver')).toBe('servers');
     expect(activeNavId('/alerts')).toBe('alerts');
+    expect(activeNavId('/vms')).toBe('vms');
+    expect(activeNavId('/network')).toBe('network');
     expect(activeNavId('/settings')).toBe('settings');
     expect(activeNavId('/homeassistant')).toBe('overview');
     expect(activeNavId('/unknown')).toBe('overview');
@@ -51,14 +60,51 @@ describe('navigation', () => {
 });
 
 describe('shortcuts', () => {
-  it('maps 1–9 by position and ` to the console', () => {
+  it('maps 1–9 by position and ` to the console with every module on', () => {
     expect(shortcutTarget('1')).toBe('/');
     expect(shortcutTarget('2')).toBe('/servers');
-    expect(shortcutTarget('8')).toBe('/alerts');
-    expect(shortcutTarget('9')).toBe('/apps');
+    expect(shortcutTarget('4')).toBe('/vms');
+    expect(shortcutTarget('8')).toBe('/network');
+    expect(shortcutTarget('9')).toBe('/home');
     expect(shortcutTarget('`')).toBe('/console');
     expect(shortcutTarget('0')).toBeUndefined();
     expect(shortcutTarget('a')).toBeUndefined();
+    expect(shortcutTarget('\u00a0')).toBeUndefined();
+  });
+
+  it('gives items past the ninth no digit; the console keeps `', () => {
+    const keyed = withShortcutKeys(navItems);
+    expect(keyed.map((i) => i.key)).toEqual([
+      '1',
+      '2',
+      '3',
+      '4',
+      '5',
+      '6',
+      '7',
+      '8',
+      '9',
+      '',
+      '',
+      '',
+      '',
+      '`',
+      'l',
+      's',
+    ]);
+    expect(shortcutLabel({ id: 'x', label: 'X', icon: 'bell' }, 9)).toBe('');
+    // Same targets with the keyed items as NavRail shows them.
+    expect(shortcutTarget('9', keyed)).toBe('/home');
+    expect(shortcutTarget('`', keyed)).toBe('/console');
+    expect(shortcutTarget('', keyed)).toBeUndefined();
+    expect(shortcutTarget('\u00a0', keyed)).toBeUndefined();
+  });
+
+  it('opens Log-Suche with l and Sicherheit with s', () => {
+    expect(shortcutTarget('l')).toBe('/logs');
+    expect(shortcutTarget('s')).toBe('/security');
+    expect(activeNavId('/logs')).toBe('logs');
+    expect(activeNavId('/security')).toBe('security');
   });
 
   it('ignores plain keys while typing', () => {
@@ -86,7 +132,13 @@ describe('shortcuts', () => {
       github: false,
       homeassistant: false,
       games: true,
+      ...NONE_EXTRA,
       storage: true,
+      logsearch: false,
+      vulnscan: false,
+      fail2ban: false,
+      discordbot: false,
+      voice: false,
       tasks: false,
       selfheal: false,
       speedtest: false,
@@ -112,7 +164,13 @@ describe('shortcuts', () => {
       github: true,
       homeassistant: true,
       games: true,
+      ...NONE_EXTRA,
       storage: true,
+      logsearch: false,
+      vulnscan: false,
+      fail2ban: false,
+      discordbot: false,
+      voice: false,
       tasks: false,
       selfheal: false,
       speedtest: false,
@@ -122,23 +180,21 @@ describe('shortcuts', () => {
     expect(shortcutTarget('9', items)).toBe('/console');
   });
 
-  it('gives items past the ninth an empty key cap and no digit', () => {
-    const keyed = withShortcutKeys(navItems);
-    expect(keyed.map((i) => i.key)).toEqual([
-      '1',
-      '2',
-      '3',
-      '4',
-      '5',
-      '6',
-      '7',
-      '8',
-      '9',
-      '',
-      '',
-      '`',
+  it('shows Netzwerk when FRITZ!Box or DNS-Filter is on, VMs only with Proxmox', () => {
+    const base = { ...ALL_MODULES_ON, ...NONE_EXTRA };
+    const ids = (m: typeof base) => visibleNavItems(navItems, m).map((i) => i.id);
+    expect(ids(base)).not.toContain('network');
+    expect(ids(base)).not.toContain('vms');
+    expect(ids({ ...base, fritzbox: true })).toContain('network');
+    expect(ids({ ...base, dnsfilter: true })).toContain('network');
+    const withVms = visibleNavItems(navItems, { ...base, proxmox: true });
+    expect(withVms.map((i) => i.id).slice(0, 5)).toEqual([
+      'overview',
+      'servers',
+      'containers',
+      'vms',
+      'games',
     ]);
-    expect(shortcutLabel({ id: 'x', label: 'x', icon: 'cpu' }, 10)).toBe('');
-    expect(shortcutTarget('')).toBeUndefined();
+    expect(shortcutTarget('4', withVms)).toBe('/vms');
   });
 });

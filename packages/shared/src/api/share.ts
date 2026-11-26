@@ -134,7 +134,8 @@ export const shareAuditEntrySchema = z.strictObject({
   ts: z.iso.datetime(),
   /** Client IP as seen by the core (tailnet) or reported by the gateway. */
   ip: z.string().max(64).nullable(),
-  via: z.enum(['tailnet', 'gateway']),
+  /** discord: the Discord bot acting for the friend bound to this link (api/ops.ts). */
+  via: z.enum(['tailnet', 'gateway', 'discord']),
 });
 export const shareAuditResponseSchema = z.strictObject({
   entries: z.array(shareAuditEntrySchema),

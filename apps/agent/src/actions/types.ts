@@ -39,6 +39,8 @@ export interface ActionContext {
   spawn: Spawner;
   /** HZ_AGENT_DATA (agent state, deploy keys). */
   dataDir: string;
+  /** Pinned Trivy image for image.scan (config HZ_AGENT_TRIVY_IMAGE); default TRIVY_IMAGE_DEFAULT. */
+  trivyImage?: string;
   /** Web console sessions (actions/pty.ts); only set when HZ_AGENT_ALLOW_TERMINAL=1. */
   pty?: PtyManager;
   /** HZ_AGENT_ALLOW_TASKS=1: task.exec may run host commands. Missing = off. */

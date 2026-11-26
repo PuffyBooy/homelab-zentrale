@@ -188,7 +188,7 @@ describe('template editor', () => {
     expect(out).toContain('aria-label="amd64"');
     expect(out).toContain('>Parameter (JSON)</label>');
     expect(out).toContain('>compose.yml</label>');
-    expect(out).toMatch(/<textarea[^>]*class="hz-input app-textarea hz-input-mono"/);
+    expect(out).toMatch(/<textarea[^>]*class="hz-input app-textarea-raw hz-input-mono"/);
     expect(out).toContain('${BIND}:${WEB_PORT}:80');
   });
 });

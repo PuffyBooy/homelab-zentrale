@@ -20,8 +20,8 @@ function shownError(err: unknown): string | null {
 }
 
 /**
- * Settings → Module (decision 2026-11-26): every optional module can be switched on and off.
- * Switching one of MODULES_ENABLE_STEP_UP on needs step-up (api() asks).
+ * Settings → Module (decision 2026-11-26): every optional module can be switched. Switching
+ * one of MODULES_ENABLE_STEP_UP on needs step-up (api() asks).
  */
 export function ModulesTile(): ReactElement {
   const qc = useQueryClient();
@@ -44,8 +44,9 @@ export function ModulesTile(): ReactElement {
     <Tile title="Module" icon="cpu">
       <p className="app-text">
         Ausgeschaltete Module verschwinden aus Navigation und Übersicht, ihre Abfragen und Jobs
-        ruhen. Daten und Einstellungen bleiben erhalten. GitHub, Home Assistant, Geplante Aufgaben
-        und Domains einschalten braucht einen Code.
+        ruhen. Daten und Einstellungen bleiben erhalten. Module mit Zugangsdaten (GitHub, Home
+        Assistant, die Anbindungen, Domains), Module, die von außen steuern (Discord-Bot,
+        Sprachsteuerung), und Geplante Aufgaben einschalten braucht einen Code.
       </p>
       {modules.isError ? <FormError title={errorText(modules.error)} /> : null}
       {m ? (

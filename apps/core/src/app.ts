@@ -45,10 +45,19 @@ import type { HaClientOptions } from './homeassistant/client.js';
 import { haRoutes } from './homeassistant/routes.js';
 import { HaService } from './homeassistant/service.js';
 import { errorHandler, sendError } from './http/errors.js';
+import { Integrations } from './integrations/index.js';
+import type { IntegrationHttpOptions } from './integrations/http.js';
+import { integrationRoutes } from './integrations/routes.js';
 import { LiveHub, type LiveOptions } from './live/hub.js';
 import { liveRoutes } from './live/routes.js';
 import { DAY, HOUR, MetricsStore } from './metrics/store.js';
 import { Notifier } from './push/notifier.js';
+import { notifyRoutes } from './notify/routes.js';
+import { ChannelFanoutSink, NotifyService } from './notify/service.js';
+import type { NotifyTransport } from './notify/transport.js';
+import { wolRoutes } from './wol/routes.js';
+import { removeWolConfig, WolService } from './wol/service.js';
+import type { UdpSender } from './wol/packet.js';
 import { pushRoutes } from './push/routes.js';
 import { fetchTransport, type PushTransport } from './push/sender.js';
 import { PushService } from './push/service.js';
@@ -86,6 +95,10 @@ import { moduleRoutes } from './modules/routes.js';
 import { installModuleGate, ModuleService } from './modules/service.js';
 import { storageRoutes } from './storage/routes.js';
 import { StorageService } from './storage/service.js';
+import { setupOps, type OpsServices } from './ops/index.js';
+import { setupDiscordBot, type DiscordBotHandle } from './discord/index.js';
+import type { FetchLike as DiscordFetch } from './discord/rest.js';
+import { setupVoice, type VoiceHandle } from './voice/index.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 
@@ -119,8 +132,16 @@ export interface AppDeps {
   /** Home Assistant client timers (tests: short backoff and heartbeat). */
   haOptions?: HaClientOptions;
   consoleOptions?: ConsoleOptions;
+  /** Outgoing client of the integrations (tests: short timeout, fake DNS). */
+  integrationHttpOptions?: IntegrationHttpOptions;
+  /** Outgoing transport of the alert channels (tests: capture Discord/Telegram/ntfy). */
+  notifyTransport?: NotifyTransport;
+  /** UDP sender for Wake-on-LAN from the core (tests: capture the magic packet). */
+  wolUdp?: UdpSender;
   /** M12: HTTP for Discord webhooks and the Modrinth API (tests: a fake). */
   gameFetch?: FetchLike;
+  /** Discord REST for the bot (tests: a fake; the gateway URL comes from it). */
+  discordFetch?: DiscordFetch;
   /** M20/M21 modules: fake HTTP, short timers, template dirs (tests). */
   features?: FeatureDeps;
 }
@@ -154,6 +175,15 @@ export interface CoreServices {
   throttle: ThrottleService;
   onboarding: OnboardingService;
   ports: PortAuditService;
+  /** Log search, vulnerability scan, fail2ban (ops/index.ts). */
+  ops: OpsServices;
+  /** Discord bot for friends (discord/index.ts). */
+  discordBot: DiscordBotHandle;
+  /** Echo Show / Alexa through Home Assistant helpers (voice/index.ts). */
+  voice: VoiceHandle;
+  integrations: Integrations;
+  notify: NotifyService;
+  wol: WolService;
   /** M20/M21: tasks, selfheal, speedtest, domains, apps (features.ts). */
   features: Features;
   db: DbHandle;
@@ -424,10 +454,18 @@ export async function buildApp(config: Config, deps: AppDeps = {}): Promise<Fast
     vapid: vapid.keys,
     subject: vapidSubject(config),
   });
+  // M14: Discord, Telegram and ntfy get the same pushes (same quiet hours and bundles).
+  const notify = new NotifyService({
+    db: db.db,
+    box,
+    now,
+    log: app.log.child({ mod: 'channels' }),
+    ...(deps.notifyTransport ? { transport: deps.notifyTransport } : {}),
+  });
   const notifier = new Notifier({
     alerts,
     db: db.db,
-    push,
+    push: new ChannelFanoutSink(push, notify),
     now,
     settings: () => readNotifySettings(db.db),
     log: app.log.child({ mod: 'notify' }),
@@ -640,6 +678,59 @@ export async function buildApp(config: Config, deps: AppDeps = {}): Promise<Fast
       );
     }
   });
+  // ---- Operations: log search, vulnerability scan, fail2ban ----------------------
+  const ops = await setupOps(app, {
+    db: db.db,
+    now,
+    hub,
+    alerts,
+    scheduler,
+    modules,
+    servers,
+    containers,
+    log: app.log.child({ mod: 'ops' }),
+  });
+  // ---- Discord bot and voice control (Echo Show / Alexa via Home Assistant) --------
+  const discordBot = await setupDiscordBot(app, {
+    db: db.db,
+    box,
+    now,
+    log: app.log.child({ mod: 'discord' }),
+    shares,
+    games,
+    ...(deps.discordFetch ? { fetch: deps.discordFetch } : {}),
+  });
+  const voice = await setupVoice(app, {
+    db: db.db,
+    now,
+    log: app.log.child({ mod: 'voice' }),
+    ha,
+    games,
+  });
+
+  // ---- M14: integrations (Proxmox, DNS filter, FRITZ!Box, Uptime Kuma) ------------
+  const integrations = new Integrations({
+    db: db.db,
+    box,
+    now,
+    alerts,
+    checks,
+    log: app.log.child({ mod: 'integrations' }),
+    ...(deps.integrationHttpOptions ? { httpOptions: deps.integrationHttpOptions } : {}),
+  });
+
+  // ---- M14: Wake-on-LAN ------------------------------------------------------------
+  const wol = new WolService({
+    db: db.db,
+    now,
+    servers,
+    hub,
+    log: app.log.child({ mod: 'wol' }),
+    ...(deps.wolUdp ? { udp: deps.wolUdp } : {}),
+  });
+  servers.onChange((id, deleted) => {
+    if (deleted) removeWolConfig(db.db, id, now());
+  });
   // ---- M20/M21: tasks, selfheal, speedtest, domains, apps (features.ts) -------------
   const features = setupFeatures(
     {
@@ -690,6 +781,12 @@ export async function buildApp(config: Config, deps: AppDeps = {}): Promise<Fast
     throttle,
     onboarding,
     ports,
+    ops,
+    discordBot,
+    voice,
+    integrations,
+    notify,
+    wol,
     features,
     db,
   });
@@ -723,12 +820,16 @@ export async function buildApp(config: Config, deps: AppDeps = {}): Promise<Fast
   github.setEnabled(modules.enabled('github'));
   games.setEnabled(modules.enabled('games'));
   ha.setEnabled(modules.enabled('homeassistant'));
+  for (const s of integrations.all()) s.setEnabled(modules.enabled(s.id));
   modules.onChange((m, on) => {
     if (m === 'github') github.setEnabled(on);
     else if (m === 'games') games.setEnabled(on);
     else if (m === 'homeassistant') ha.setEnabled(on);
     else if (m === 'storage') storage.setEnabled(on);
-    // M20/M21 modules switch themselves (features.ts).
+    else if (m === 'discordbot') discordBot.setEnabled(on);
+    else if (m === 'voice') voice.setEnabled(on);
+    // M14 integrations; M20/M21 modules (features.ts) switch themselves.
+    else integrations.setModule(m, on);
     app.log.info({ module: m, on }, 'module switched');
   });
   checks.start();
@@ -736,6 +837,8 @@ export async function buildApp(config: Config, deps: AppDeps = {}): Promise<Fast
   games.start();
   gameSchedules.start();
   scheduler.every('ha.tick', 1_000, () => ha.tick());
+  // Polls run in the background (not awaited), so a slow host never holds up other jobs.
+  scheduler.every('integrations.tick', 1_000, () => integrations.tick());
   scheduler.every('push.warnBundle', 60_000, () => {
     notifier.flush();
     notifier.flushDigest();
@@ -764,6 +867,8 @@ export async function buildApp(config: Config, deps: AppDeps = {}): Promise<Fast
     metrics.rollup1h(30 * DAY);
     if (deps.startScheduler !== false) scheduler.start();
     ha.start();
+    discordBot.setEnabled(modules.enabled('discordbot'));
+    voice.setEnabled(modules.enabled('voice'));
     await removeStaleExports(config.dataDir);
   });
   app.addHook('preClose', async () => {
@@ -776,11 +881,17 @@ export async function buildApp(config: Config, deps: AppDeps = {}): Promise<Fast
         github.idle(),
         games.idle(),
         gameNotifier.idle(),
+        discordBot.idle(),
+        voice.idle(),
+        integrations.idle(),
+        notify.idle(),
         featuresIdle(features),
       ]),
       new Promise((r) => setTimeout(r, 3_000).unref()),
     ]);
     ha.stop();
+    discordBot.shutdown();
+    voice.shutdown();
     stopFeatures(features);
     github.deployer.shutdown();
     consoles.closeAll();
@@ -881,6 +992,9 @@ export async function buildApp(config: Config, deps: AppDeps = {}): Promise<Fast
     baseUrl: config.baseUrl,
   });
   await app.register(haRoutes, { prefix: '/api', db: db.db, now, ha });
+  await app.register(integrationRoutes, { prefix: '/api', db: db.db, now, integrations });
+  await app.register(notifyRoutes, { prefix: '/api', db: db.db, now, notify });
+  await app.register(wolRoutes, { prefix: '/api', db: db.db, now, wol });
   await app.register(shareGatewayRoutes, { prefix: '/api/share-gateway', shares, now });
   await app.register(shareTailnetRoutes, {
     prefix: '/s',

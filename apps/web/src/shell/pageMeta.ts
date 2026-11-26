@@ -7,6 +7,8 @@ import type {
   TasksResponse,
   CheckSummary,
   ContainerSummary,
+  DnsFilterStatus,
+  FritzStatus,
   GameSummary,
   HaState,
   Modules,
@@ -25,7 +27,17 @@ import { gameSentence, gamesSentence, isGameRunning, playersOnline } from '../li
 import { STATUS_TEXT, groupByRoom, haSentence } from '../lib/ha.js';
 import { githubSentence, repoOnServer, repoSentence } from '../lib/github.js';
 import type { LiveState } from '../lib/live.js';
-import { anyModuleOn, MODULE_LABEL, MODULE_PAGE, modulesOfPath } from '../lib/modules.js';
+import {
+  anyModuleOn,
+  isModuleOn,
+  isNetworkOn,
+  MODULE_LABEL,
+  MODULE_PAGE,
+  moduleLabels,
+  modulesOfPath,
+} from '../lib/modules.js';
+import { networkSentence, networkSub } from '../lib/network.js';
+import { proxmoxSentence, PROXMOX_REFRESH_MS, type ProxmoxGuests } from '../lib/proxmox.js';
 import {
   ALL_SERVERS,
   serverSentence,
@@ -55,6 +67,11 @@ export interface PageData {
   games?: GameSummary[] | undefined;
   /** Only read on the Wohnung page. */
   ha?: HaState | undefined;
+  /** Only read on /vms. */
+  proxmox?: ProxmoxGuests | undefined;
+  /** Only read on /network. */
+  fritz?: FritzStatus | undefined;
+  dns?: DnsFilterStatus | undefined;
   /** Server filter from the ServerSwitch, or the id of the detail page. */
   filter?: string | undefined;
   live?: LiveState | undefined;
@@ -129,6 +146,16 @@ export function needsHa(pathname: string): boolean {
   return pathname === '/home';
 }
 
+/** Pages that read the Proxmox guests in the shell header. */
+export function needsProxmox(pathname: string): boolean {
+  return pathname === '/vms';
+}
+
+/** Pages that read FRITZ!Box and DNS filter in the shell header. */
+export function needsNetwork(pathname: string): boolean {
+  return pathname === '/network';
+}
+
 /** Pages that read the repo list in the shell header. */
 export function needsRepos(pathname: string): boolean {
   return pathname === '/github' || repoDetailId(pathname) !== null;
@@ -152,20 +179,15 @@ export function pageMeta(pathname: string, data: PageData = {}): PageMeta {
       : undefined;
 
   const mods = modulesOfPath(pathname);
-  const mod = mods?.[0];
-  if (mods && mod && !anyModuleOn(data.modules, mods)) {
+  const mod = mods[0];
+  if (mod && !anyModuleOn(data.modules, mods)) {
     const page = MODULE_PAGE[mod];
-    if (mods.length > 1) {
-      // "Internet ist ausgeschaltet" would read as if the line were down.
-      return {
-        title: plain(`${page}: Module ausgeschaltet.`),
-        sub: `${page} · ${mods.map((m) => MODULE_LABEL[m]).join(' oder ')} einschalten unter Einstellungen → Module`,
-        serverSwitch: false,
-      };
-    }
     return {
-      title: plain(`${MODULE_LABEL[mod]} ist ausgeschaltet.`),
-      sub: `${page} · Modul einschalten unter Einstellungen → Module`,
+      title: plain(`${moduleLabels(mods)} ${mods.length > 1 ? 'sind' : 'ist'} ausgeschaltet.`),
+      sub:
+        mods.length > 1
+          ? `${page} · ${mods.map((m) => MODULE_LABEL[m]).join(' oder ')} einschalten unter Einstellungen → Module`
+          : `${page} · Modul einschalten unter Einstellungen → Module`,
       serverSwitch: false,
     };
   }
@@ -314,6 +336,36 @@ export function pageMeta(pathname: string, data: PageData = {}): PageMeta {
     return { title: haSentence(data.ha), sub: parts.join(' · '), serverSwitch: false };
   }
 
+  if (pathname === '/vms') {
+    if (data.proxmox === undefined)
+      return { title: plain('VMs'), sub: 'VMs · Proxmox', serverSwitch: false };
+    const guests = data.proxmox.guests.filter((g) => !g.template).length;
+    const parts = [
+      'VMs',
+      plural(data.proxmox.nodes.length, 'Knoten', 'Knoten'),
+      plural(guests, 'Gast', 'Gäste'),
+      `alle ${PROXMOX_REFRESH_MS / 1000} s aktualisiert`,
+    ];
+    return { title: proxmoxSentence(data.proxmox), sub: parts.join(' · '), serverSwitch: false };
+  }
+
+  if (pathname === '/network') {
+    if (!isNetworkOn(data.modules)) {
+      return {
+        title: plain('Netzwerk ist ausgeschaltet.'),
+        sub: 'Netzwerk · Modul FRITZ!Box oder DNS-Filter einschalten unter Einstellungen → Module',
+        serverSwitch: false,
+      };
+    }
+    const net = {
+      fritz: data.fritz,
+      dns: data.dns,
+      fritzOn: isModuleOn(data.modules, 'fritzbox'),
+      dnsOn: isModuleOn(data.modules, 'dnsfilter'),
+    };
+    return { title: networkSentence(net), sub: networkSub(net), serverSwitch: false };
+  }
+
   if (pathname === '/automation') {
     const on = (m: 'tasks' | 'selfheal'): boolean => data.modules?.[m] ?? true;
     const ts = on('tasks') && data.tasks ? tasksSentence(data.tasks.tasks) : null;
@@ -371,6 +423,20 @@ export function pageMeta(pathname: string, data: PageData = {}): PageMeta {
         ? plain(`Konsole bereit auf ${ready} von ${plural(total, 'Server', 'Servern')}.`)
         : plain('Keine Konsole verfügbar.'),
       sub: 'Konsole · nur mit Code · jede Sitzung wird protokolliert',
+      serverSwitch: false,
+    };
+  }
+  if (pathname === '/logs') {
+    return {
+      title: plain('Log-Suche'),
+      sub: 'Log-Suche · Textsuche in allen Containern · höchstens 7 Tage zurück',
+      serverSwitch: false,
+    };
+  }
+  if (pathname === '/security') {
+    return {
+      title: plain('Sicherheit'),
+      sub: 'Sicherheit · Schwachstellen in Images · Fail2ban-Sperren',
       serverSwitch: false,
     };
   }

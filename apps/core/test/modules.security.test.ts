@@ -42,7 +42,16 @@ describe('optional modules', () => {
       github: false,
       homeassistant: false,
       games: true,
+      proxmox: false,
+      dnsfilter: false,
+      fritzbox: false,
+      uptimekuma: false,
       storage: true,
+      logsearch: false,
+      vulnscan: false,
+      fail2ban: false,
+      discordbot: false,
+      voice: false,
       tasks: false,
       selfheal: false,
       speedtest: false,
@@ -55,7 +64,15 @@ describe('optional modules', () => {
       headers: authHeaders(cookie),
     });
     expect(state.json()).toMatchObject({
-      modules: { github: false, homeassistant: false, games: true },
+      modules: {
+        github: false,
+        homeassistant: false,
+        games: true,
+        proxmox: false,
+        dnsfilter: false,
+        fritzbox: false,
+        uptimekuma: false,
+      },
       timeZone: 'Europe/Vienna',
     });
     // Anonymous: no module flags, no time zone.
@@ -70,7 +87,7 @@ describe('optional modules', () => {
 
   it('routes of disabled modules are unreachable even with a valid session (404 module_disabled)', async () => {
     t = await makeApp({
-      modules: { github: false, homeassistant: false, games: false, storage: false },
+      modules: Object.fromEntries(MODULES.map((m) => [m, false])),
     });
     const { cookie } = await completeSetup(t);
     const routes = t.app.hzRoutes.filter((r) => moduleOfPath(r.url) !== null);
@@ -133,7 +150,16 @@ describe('optional modules', () => {
       github: false,
       homeassistant: false,
       games: true,
+      proxmox: false,
+      dnsfilter: false,
+      fritzbox: false,
+      uptimekuma: false,
       storage: true,
+      logsearch: false,
+      vulnscan: false,
+      fail2ban: false,
+      discordbot: false,
+      voice: false,
       tasks: false,
       selfheal: false,
       speedtest: false,
@@ -146,7 +172,16 @@ describe('optional modules', () => {
       github: false,
       homeassistant: false,
       games: true,
+      proxmox: false,
+      dnsfilter: false,
+      fritzbox: false,
+      uptimekuma: false,
       storage: true,
+      logsearch: false,
+      vulnscan: false,
+      fail2ban: false,
+      discordbot: false,
+      voice: false,
       tasks: false,
       selfheal: false,
       speedtest: false,

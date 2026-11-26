@@ -31,10 +31,20 @@ import { HaEntitiesTile, HaSettingsTile } from './HaTiles.js';
 import { NotifyTile, PushTile } from './PushTiles.js';
 import { ShareGatewayTile } from './ShareGatewayTile.js';
 import { ModulesTile } from './ModulesTile.js';
+import { DiscordBotTile } from './DiscordBotTile.js';
+import { VoiceTile } from './VoiceTile.js';
+import { enabledIntegrations, IntegrationTiles } from './IntegrationTiles.js';
+import { NotifyChannelsTile } from './NotifyChannelsTile.js';
 import { useModules } from '../../lib/useModules.js';
 
 /** Sections of SPEC 13, in that order. Ids are the anchors (`/settings#server`). */
-export const SETTINGS_SECTIONS: readonly { id: string; label: string; module?: ModuleId }[] = [
+export const SETTINGS_SECTIONS: readonly {
+  id: string;
+  label: string;
+  module?: ModuleId;
+  /** Shown while at least one of these modules is on. */
+  anyModule?: readonly ModuleId[];
+}[] = [
   { id: 'konto', label: 'Konto' },
   { id: 'module', label: 'Module' },
   { id: 'server', label: 'Server' },
@@ -42,9 +52,17 @@ export const SETTINGS_SECTIONS: readonly { id: string; label: string; module?: M
   { id: 'github', label: 'GitHub', module: 'github' },
   { id: 'checks', label: 'Checks' },
   { id: 'push', label: 'Push' },
+  { id: 'meldungskanaele', label: 'Meldungskanäle' },
   { id: 'ha', label: 'Home Assistant', module: 'homeassistant' },
+  { id: 'sprachsteuerung', label: 'Sprachsteuerung', module: 'voice' },
+  {
+    id: 'anbindungen',
+    label: 'Anbindungen',
+    anyModule: ['proxmox', 'dnsfilter', 'fritzbox', 'uptimekuma'],
+  },
   { id: 'wandmodus', label: 'Wandmodus' },
   { id: 'share-gateway', label: 'Share-Gateway', module: 'games' },
+  { id: 'discord-bot', label: 'Discord-Bot', module: 'discordbot' },
   { id: 'backup', label: 'Backup' },
 ];
 
@@ -70,7 +88,7 @@ export function SettingsPage(): ReactElement {
   // Tiles with their own anchor (github, ha, share-gateway) scroll themselves once loaded.
   useEffect(() => {
     const id = decodeURIComponent(hash.slice(1));
-    if (!id) return;
+    if (!id || id.startsWith('anbindung-')) return;
     const section = SETTINGS_SECTIONS.find((s) => s.id === id);
     if (section?.module && modules[section.module]) return;
     document.getElementById(id)?.scrollIntoView({ block: 'start' });
@@ -79,7 +97,11 @@ export function SettingsPage(): ReactElement {
   return (
     <>
       <nav className="app-settings-nav" aria-label="Bereiche der Einstellungen">
-        {SETTINGS_SECTIONS.filter((s) => !s.module || modules[s.module]).map((s) => (
+        {SETTINGS_SECTIONS.filter(
+          (s) =>
+            (!s.module || modules[s.module]) &&
+            (!s.anyModule || s.anyModule.some((m) => modules[m])),
+        ).map((s) => (
           <a key={s.id} href={`#${s.id}`} className="app-settings-link">
             {s.label}
           </a>
@@ -108,10 +130,26 @@ export function SettingsPage(): ReactElement {
           <PushTile />
         </Anchor>
         <NotifyTile />
+        <Anchor id="meldungskanaele">
+          <NotifyChannelsTile />
+        </Anchor>
         {modules.homeassistant ? (
           <>
             <HaSettingsTile />
             <HaEntitiesTile />
+          </>
+        ) : null}
+        {modules.voice ? <VoiceTile /> : null}
+        {enabledIntegrations(modules).length ? (
+          <>
+            <div id="anbindungen" className="app-anchor app-settings-wide app-settings-group">
+              <h2 className="hz-label">Anbindungen</h2>
+              <p className="app-text">
+                Systeme im LAN oder Tailnet. Zugangsdaten werden verschlüsselt gespeichert und nie
+                wieder angezeigt. Ändern braucht einen Code.
+              </p>
+            </div>
+            <IntegrationTiles modules={modules} />
           </>
         ) : null}
         {/* Wide: each device row has a pairing badge and two actions. */}
@@ -119,6 +157,7 @@ export function SettingsPage(): ReactElement {
           <WallDevicesTile />
         </Anchor>
         {modules.games ? <ShareGatewayTile /> : null}
+        {modules.discordbot ? <DiscordBotTile /> : null}
         <Anchor id="backup">
           <BackupTile />
         </Anchor>

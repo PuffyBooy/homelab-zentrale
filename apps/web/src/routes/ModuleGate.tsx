@@ -2,7 +2,7 @@ import type { ModuleId } from '@hz/shared';
 import type { ReactElement, ReactNode } from 'react';
 import { Link } from 'react-router';
 import { Tile } from '@hz/ui';
-import { anyModuleOn, MODULE_ICON, MODULE_PAGE, modulesLabel } from '../lib/modules.js';
+import { anyModuleOn, MODULE_ICON, MODULE_PAGE, moduleLabels } from '../lib/modules.js';
 import { useModules } from '../lib/useModules.js';
 
 type ModuleRef = ModuleId | readonly ModuleId[];
@@ -40,7 +40,7 @@ export function ModuleOff({
     <Tile title={title ?? MODULE_PAGE[first]} icon={MODULE_ICON[first]}>
       <div className="app-empty-block" data-testid="module-off">
         <p className="app-empty">
-          Modul ausgeschaltet. {modulesLabel(list)} {verb} in dieser Zentrale nicht aktiv.
+          Modul ausgeschaltet. {moduleLabels(list)} {verb} in dieser Zentrale nicht aktiv.
         </p>
         <div>
           <Link className="hz-btn hz-btn-secondary hz-btn-sm" to="/settings#module">

@@ -1,6 +1,12 @@
 import os from 'node:os';
 import { z } from 'zod';
-import { HOMELAB_ROOT, agentNameSchema, agentTokenSchema } from '@hz/shared';
+import {
+  HOMELAB_ROOT,
+  TRIVY_IMAGE_DEFAULT,
+  agentNameSchema,
+  agentTokenSchema,
+  pinnedImageRefSchema,
+} from '@hz/shared';
 
 const boolFlag = z
   .enum(['0', '1', 'true', 'false'])
@@ -74,6 +80,8 @@ export const configSchema = z.object({
   HZ_AGENT_DOCKER_SOCKET: z.string().min(1).default('/var/run/docker.sock'),
   /** Only for tests (NODE_ENV=test). */
   HZ_AGENT_HOMELAB_ROOT: z.string().min(2).optional(),
+  /** Trivy image for image.scan; must be pinned (`repo[:tag]@sha256:...`), else the default is used. */
+  HZ_AGENT_TRIVY_IMAGE: z.string().optional(),
   HZ_AGENT_LOG_LEVEL: z.enum(['debug', 'info', 'warn', 'error']).default('info'),
   NODE_ENV: z.enum(['development', 'production', 'test']).default('production'),
 });
@@ -92,6 +100,18 @@ export interface AgentConfig {
   dockerSocket: string;
   homelabRoot: string;
   logLevel: 'debug' | 'info' | 'warn' | 'error';
+  /** Pinned Trivy image for image.scan. */
+  trivyImage: string;
+  /** HZ_AGENT_TRIVY_IMAGE was set but not a pinned ref; trivyImage is the default (log a warning). */
+  trivyImageRejected: boolean;
+}
+
+/** HZ_AGENT_TRIVY_IMAGE -> pinned image; anything not pinned by digest falls back to the default. */
+export function resolveTrivyImage(v: string | undefined): { image: string; rejected: boolean } {
+  if (v === undefined || v === '') return { image: TRIVY_IMAGE_DEFAULT, rejected: false };
+  return pinnedImageRefSchema.safeParse(v).success
+    ? { image: v, rejected: false }
+    : { image: TRIVY_IMAGE_DEFAULT, rejected: true };
 }
 
 export class ConfigError extends Error {
@@ -123,6 +143,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AgentConfig {
   if (c.HZ_AGENT_HOMELAB_ROOT !== undefined && c.NODE_ENV !== 'test') {
     throw new ConfigError(['HZ_AGENT_HOMELAB_ROOT: nur mit NODE_ENV=test erlaubt']);
   }
+  const trivy = resolveTrivyImage(c.HZ_AGENT_TRIVY_IMAGE);
   return {
     coreUrl: c.HZ_CORE_URL,
     token: c.HZ_AGENT_TOKEN,
@@ -137,5 +158,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AgentConfig {
     dockerSocket: c.HZ_AGENT_DOCKER_SOCKET,
     homelabRoot: c.HZ_AGENT_HOMELAB_ROOT ?? HOMELAB_ROOT,
     logLevel: c.HZ_AGENT_LOG_LEVEL,
+    trivyImage: trivy.image,
+    trivyImageRejected: trivy.rejected,
   };
 }

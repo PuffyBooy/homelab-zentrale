@@ -170,6 +170,8 @@ export const errorCodeSchema = z.enum([
    * starts (the share API answers it as 409 `unavailable`); the admin may start.
    */
   'ram_unknown',
+  /** An alert channel (Discord, Telegram, ntfy) refused or did not answer the test message (502). */
+  'channel_failed',
 ]);
 export type ErrorCode = z.infer<typeof errorCodeSchema>;
 export const errorResponseSchema = z.strictObject({

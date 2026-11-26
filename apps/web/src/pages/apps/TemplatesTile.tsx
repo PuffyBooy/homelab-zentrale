@@ -368,7 +368,7 @@ function TextArea({
       </label>
       <textarea
         id={id}
-        className={cx('hz-input', 'app-textarea', mono && 'hz-input-mono')}
+        className={cx('hz-input', 'app-textarea-raw', mono && 'hz-input-mono')}
         value={value}
         rows={rows}
         spellCheck={false}

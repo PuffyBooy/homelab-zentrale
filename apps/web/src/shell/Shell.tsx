@@ -21,6 +21,8 @@ import { useSelfheal } from '../lib/selfheal.js';
 import { useSpeedtest } from '../lib/speedtest.js';
 import { useTasks } from '../lib/tasks.js';
 import { visibleNavItems } from '../lib/modules.js';
+import { useNetworkView } from '../lib/network.js';
+import { useProxmoxView } from '../lib/proxmox.js';
 import { useModules } from '../lib/useModules.js';
 import { LiveClient, LiveProvider, useLiveState, useLiveTopic } from '../lib/live.js';
 import { ALL_SERVERS, sentenceText, switchEntries } from '../lib/servers.js';
@@ -35,6 +37,8 @@ import {
   needsGames,
   needsHa,
   needsModuleData,
+  needsNetwork,
+  needsProxmox,
   needsRepos,
   pageMeta,
   serverDetailId,
@@ -85,6 +89,8 @@ function ShellBody(): ReactElement {
   const speedtest = useSpeedtest(7, area === 'internet' && modules.speedtest);
   const domains = useDomains(area === 'internet' && modules.domains);
   const apps = useApps(area === 'apps' && modules.apps);
+  const proxmox = useProxmoxView(needsProxmox(pathname) && modules.proxmox);
+  const net = useNetworkView(modules, needsNetwork(pathname));
   const [filter, setFilter] = useServerFilter();
   const detailId = serverDetailId(pathname);
 
@@ -101,6 +107,9 @@ function ShellBody(): ReactElement {
     speedtest: speedtest.data,
     domains: domains.data,
     apps: apps.data,
+    proxmox: modules.proxmox ? proxmox.guests.data : undefined,
+    fritz: net.fritzData,
+    dns: net.dnsData,
     filter: detailId ?? filter,
     live,
     modules,
@@ -110,8 +119,8 @@ function ShellBody(): ReactElement {
 
   const items = useMemo(() => {
     const open = openCount(alerts.data ?? []);
-    return withShortcutKeys(visible).map((it) =>
-      it.id === 'alerts' && open ? { ...it, count: open } : it,
+    return withShortcutKeys(
+      visible.map((it) => (it.id === 'alerts' && open ? { ...it, count: open } : it)),
     );
   }, [alerts.data, visible]);
 

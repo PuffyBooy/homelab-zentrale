@@ -70,6 +70,27 @@ const AppsPage = page(
   (m) => m.AppsPage,
 );
 
+const LogSearchPage = page(
+  () => import('../pages/logsearch/LogSearchPage.js'),
+  (m) => m.LogSearchPage,
+);
+const SecurityPage = page(
+  () => import('../pages/security/SecurityPage.js'),
+  (m) => m.SecurityPage,
+);
+
+/** Sicherheit shows while either of its modules is on. */
+const SECURITY_MODULES: readonly ModuleId[] = ['vulnscan', 'fail2ban'];
+
+const VmsPage = page(
+  () => import('../pages/vms/VmsPage.js'),
+  (m) => m.VmsPage,
+);
+const NetworkPage = page(
+  () => import('../pages/network/NetworkPage.js'),
+  (m) => m.NetworkPage,
+);
+
 function Loading(): ReactElement {
   return (
     <p className="app-empty" role="status">
@@ -98,8 +119,8 @@ function G({ m, c }: { m: ModuleId | readonly ModuleId[]; c: ComponentType }): R
   );
 }
 
-const AUTOMATION = navModules('automation') ?? [];
-const INTERNET = navModules('internet') ?? [];
+const AUTOMATION = navModules('automation');
+const INTERNET = navModules('internet');
 
 /** Dev-only component gallery. Dead code in production builds. */
 const DevUiPage = import.meta.env.DEV
@@ -111,15 +132,19 @@ const BUILT = new Set([
   '/',
   '/servers',
   '/containers',
+  '/vms',
   '/games',
   '/github',
   '/websites',
+  '/network',
   '/home',
   '/alerts',
   '/console',
   '/apps',
   '/internet',
   '/automation',
+  '/logs',
+  '/security',
 ]);
 
 export function AppRoutes(): ReactElement {
@@ -172,6 +197,7 @@ export function AppRoutes(): ReactElement {
         <Route path="servers/:id" element={<ServerDetailPage />} />
         <Route path="containers" element={<ContainersPage />} />
         <Route path="containers/:id/logs" element={<ContainerLogsPage />} />
+        <Route path="vms" element={<G m="proxmox" c={VmsPage} />} />
         <Route path="games" element={<G m="games" c={GamesPage} />} />
         <Route path="games/new" element={<G m="games" c={GameCreatePage} />} />
         <Route path="games/:id" element={<G m="games" c={GameDetailPage} />} />
@@ -179,6 +205,8 @@ export function AppRoutes(): ReactElement {
         <Route path="github/:id" element={<G m="github" c={RepoDetailPage} />} />
         <Route path="websites" element={<WebsitesPage />} />
         <Route path="websites/:id" element={<CheckDetailPage />} />
+        {/* Gated inside: on while FRITZ!Box or DNS-Filter is on. */}
+        <Route path="network" element={<L c={NetworkPage} />} />
         <Route
           path="home"
           element={
@@ -192,6 +220,8 @@ export function AppRoutes(): ReactElement {
         <Route path="apps" element={<G m="apps" c={AppsPage} />} />
         <Route path="internet" element={<G m={INTERNET} c={InternetPage} />} />
         <Route path="automation" element={<G m={AUTOMATION} c={AutomationPage} />} />
+        <Route path="logs" element={<G m="logsearch" c={LogSearchPage} />} />
+        <Route path="security" element={<G m={SECURITY_MODULES} c={SecurityPage} />} />
         {navItems
           .filter((it) => it.href && !BUILT.has(it.href))
           .map((it) => (

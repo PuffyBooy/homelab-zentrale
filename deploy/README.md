@@ -74,6 +74,7 @@ Beim ersten Verbinden tauscht der Agent das Einmal-Token gegen ein dauerhaftes A
 | `HZ_AGENT_ALLOW_TASKS` | `1` erlaubt geplante Befehle (M20, „Befehl ausführen“, `task.exec`): `/bin/sh -c` auf dem Host, ohne TTY, mit Zeitlimit und minimaler Umgebung. Standard `0`: jedes `task.exec` wird abgelehnt. Setzen mit `install-agent.sh --tasks` oder in `agent.env`, dann den Agent neu starten. |
 | `HZ_AGENT_SMART` | `1` liest SMART der Platten (M13). Setzt das Override `docker-compose.agent.smart.yml`, nicht von Hand: es bringt auch die nötigen Rechte. |
 | `HZ_AGENT_DATA` | Datenordner (`/data`). |
+| `HZ_AGENT_TRIVY_IMAGE` | Scanner für `image.scan` (Schwachstellen-Scan). Nur mit Digest (`repo[:tag]@sha256:…`), sonst nimmt der Agent den eingebauten Standard (`TRIVY_IMAGE_DEFAULT`) und schreibt eine Warnung ins Log. Der Scanner läuft als eigener Container ohne Docker-Socket und ohne Host-Pfade (read-only, `--cap-drop ALL`, 1 GB RAM, 256 PIDs), holt das Image selbst aus der Registry und legt seine Datenbank im Docker-Volume `hz-trivy-cache` ab (wird beim ersten Scan angelegt, löschen mit `docker volume rm hz-trivy-cache`). |
 | `HZ_AGENT_HOST_EXEC` | `nsenter` (Image-Standard), `direct` (Agent direkt auf dem Host, Entwicklung), `none`. |
 
 ### NAS und SMART (M13)
@@ -95,6 +96,7 @@ Alles, was nicht gebraucht wird, ist weg (`cap_drop: ALL`, schreibgeschütztes D
 
 - **Docker-Socket**: Container auflisten, starten, stoppen, Logs, Events, Image-Update und `docker compose`. Wer den Socket hat, ist faktisch root auf dem Host. Deshalb führt der Agent nur die Aktionen aus der Allowlist aus (`packages/shared/src/agent-protocol.ts`), mit festen Programmen und Argument-Arrays.
 - **`pid: host`, `network_mode: host`, `/proc` und `/sys` lesend**: Messwerte, Ports und Netz des Hosts statt des Containers.
+  Wake-on-LAN (`wol.send`) braucht das Host-Netz: Das Magic Packet geht als UDP-Broadcast (Port 7 oder 9) ins lokale Netz des Servers, höchstens 6 pro Minute. Ohne `network_mode: host` landet es nur im Docker-Bridge-Netz.
 - **`user: 0:0` mit `SYS_ADMIN`, `SYS_PTRACE`, `SYS_CHROOT`** und `apparmor=unconfined`: `nsenter` in die Namespaces von Host-PID 1 und Lesen von `/host/proc/1/root`. Das Image selbst läuft standardmäßig als `node`; dann gibt es nur Messwerte.
 - **`DAC_READ_SEARCH`**: `/var/log/auth.log` gehört `syslog:adm`.
 - **`DAC_OVERRIDE`, `CHOWN`, `FOWNER`, `FSETID`, `SETUID`, `SETGID`**: `apt-get`/`dpkg` beim Aufräumen.
