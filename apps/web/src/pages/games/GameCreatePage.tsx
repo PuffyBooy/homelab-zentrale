@@ -6,6 +6,16 @@ import { Alert, Button, GameTemplates, Tile, Toggle } from '@hz/ui';
 import { Field } from '../../components/Field.js';
 import { FormError } from '../../components/FormError.js';
 import { SelectField } from '../../components/SelectField.js';
+import {
+  CLOUD_TARGET,
+  MACHINE_PARAM,
+  defaultMachineName,
+  pendingGame,
+  ramGbOf,
+  useCloudOverview,
+  validateMachine,
+  type MachineErrors,
+} from '../../lib/cloud.js';
 import { useGames, useServers, useTemplates } from '../../lib/data.js';
 import { archMismatch } from '../../lib/gameFeatures.js';
 import { errorText } from '../../lib/errors.js';
@@ -30,7 +40,11 @@ import {
   type TemplateInfo,
 } from '../../lib/games.js';
 import { mergeById } from '../../lib/live.js';
+import { isModuleOn } from '../../lib/modules.js';
+import { useModules } from '../../lib/useModules.js';
 import { suggestRamText } from '../../lib/throttle.js';
+import { OrderFields } from '../cloud/OrderFields.js';
+import { useMachineOrder } from '../cloud/useMachineOrder.js';
 import { ForwardHint } from './ForwardHint.js';
 import { TemplateFields } from './TemplateFields.js';
 import { gameErrorText } from './useGameAction.js';
@@ -121,8 +135,10 @@ function CreateForm({
   const online = servers.filter((s) => s.connected && archMismatch(tpl, s) === null);
   const wanted = params.get('server');
   const initialServer =
-    servers.find((s) => s.id === wanted && archMismatch(tpl, s) === null)?.id ??
-    (online.length === 1 ? (online[0]?.id ?? '') : '');
+    wanted === CLOUD_TARGET
+      ? CLOUD_TARGET
+      : (servers.find((s) => s.id === wanted && archMismatch(tpl, s) === null)?.id ??
+        (online.length === 1 ? (online[0]?.id ?? '') : ''));
 
   const [draft, setDraft] = useState<CreateDraft>(() => emptyCreateDraft(tpl, initialServer));
   const [errors, setErrors] = useState<CreateErrors>({});
@@ -130,6 +146,25 @@ function CreateForm({
   const touchedPorts = useRef(new Set<string>());
   const nameTouched = useRef(false);
   const formRef = useRef<HTMLFormElement>(null);
+
+  const modules = useModules();
+  const cloudOn = isModuleOn(modules, 'cloud');
+  const cloud = useCloudOverview(cloudOn);
+  /** "Neuer Azure-Server …" is offered once the Azure account is filled in. */
+  const cloudOffered = cloudOn && !!cloud.data && cloud.data.azure.status !== 'off';
+  const isCloud = cloudOffered && draft.serverId === CLOUD_TARGET;
+  const [machineErrors, setMachineErrors] = useState<MachineErrors>({});
+  const order = useMachineOrder({
+    region: cloud.data?.azure.region ?? 'germanywestcentral',
+    name: defaultMachineName(draft.name),
+    gameRamGb: ramGbOf(tpl.ram.min),
+    overview: cloud.data,
+    enabled: isCloud,
+    onCreated: (m) => {
+      void qc.invalidateQueries({ queryKey: gamesKey });
+      void navigate(`/cloud?${MACHINE_PARAM}=${encodeURIComponent(m.id)}`);
+    },
+  });
 
   const taken = useMemo(
     () => (games.data ?? []).filter((g) => g.serverId === draft.serverId).map((g) => g.name),
@@ -144,7 +179,7 @@ function CreateForm({
   const suggest = useQuery({
     queryKey: suggestKey(tpl.id, draft.serverId),
     queryFn: ({ signal }) => fetchSuggest(tpl.id, draft.serverId, signal),
-    enabled: !!draft.serverId,
+    enabled: !!draft.serverId && !isCloud,
     staleTime: 15_000,
   });
 
@@ -189,12 +224,23 @@ function CreateForm({
       tpl,
       servers.find((s) => s.id === draft.serverId),
     );
-    if (!res.ok || misfit) {
+    const machine = isCloud
+      ? validateMachine(
+          order.draft,
+          (cloud.data?.machines ?? []).map((m) => m.name),
+        )
+      : ({ ok: true } as const);
+    setMachineErrors(machine.ok ? {} : machine.errors);
+    if (!res.ok || misfit || !machine.ok) {
       setErrors({ ...(res.ok ? {} : res.errors), ...(misfit ? { serverId: `${misfit}.` } : {}) });
       // Focus the first field with an error (after React painted the messages).
       requestAnimationFrame(() =>
         formRef.current?.querySelector<HTMLElement>('[aria-invalid="true"]')?.focus(),
       );
+      return;
+    }
+    if (isCloud) {
+      if (order.ready) order.submit(pendingGame(res.body));
       return;
     }
     create.mutate(res.body);
@@ -207,13 +253,15 @@ function CreateForm({
     if (k.startsWith('field:')) fieldErrors[k.slice(6)] = v;
   }
   const freeRam = suggest.data?.freeRamBytes;
-  const ramHint = draft.serverId
-    ? suggest.isPending
-      ? 'freier RAM wird geprüft …'
-      : freeRam != null
-        ? suggestRamText(freeRam, suggest.data?.ramReserveBytes, ramBytesOf(tpl.ram.recommended))
-        : `empfohlen ${formatBytes(ramBytesOf(tpl.ram.recommended))} RAM`
-    : `empfohlen ${formatBytes(ramBytesOf(tpl.ram.recommended))} RAM`;
+  const ramHint = isCloud
+    ? `braucht ${formatBytes(ramBytesOf(tpl.ram.min))} RAM plus 1 GB für das System`
+    : draft.serverId
+      ? suggest.isPending
+        ? 'freier RAM wird geprüft …'
+        : freeRam != null
+          ? suggestRamText(freeRam, suggest.data?.ramReserveBytes, ramBytesOf(tpl.ram.recommended))
+          : `empfohlen ${formatBytes(ramBytesOf(tpl.ram.recommended))} RAM`
+      : `empfohlen ${formatBytes(ramBytesOf(tpl.ram.recommended))} RAM`;
 
   const previewPorts = tpl.ports.map((p) => {
     const n = parseNumber(draft.ports[p.name] ?? '');
@@ -267,6 +315,7 @@ function CreateForm({
                     disabled: misfit !== null,
                   };
                 }),
+                ...(cloudOffered ? [{ value: CLOUD_TARGET, label: 'Neuer Azure-Server …' }] : []),
               ]}
               hint={ramHint}
               error={errors.serverId}
@@ -283,6 +332,14 @@ function CreateForm({
             </Alert>
           ) : null}
           {suggest.error ? <FormError title={errorText(suggest.error)} /> : null}
+          {isCloud ? (
+            <OrderFields
+              order={order}
+              budget={cloud.data?.budget}
+              errors={machineErrors}
+              onNameTyped={() => setMachineErrors(({ name: _drop, ...rest }) => rest)}
+            />
+          ) : null}
 
           <fieldset className="app-fieldset">
             <legend className="hz-label">Ports</legend>
@@ -344,7 +401,11 @@ function CreateForm({
               value={draft.externalAddress}
               onChange={(e) => set('externalAddress', e.target.value)}
               placeholder="mc.example.org"
-              hint="DDNS-Name oder öffentliche IP für Freunde. Leer: Tailscale-IP."
+              hint={
+                isCloud
+                  ? 'Leer: öffentliche IP des Azure-Servers (ohne öffentliche IP: Tailscale-IP).'
+                  : 'DDNS-Name oder öffentliche IP für Freunde. Leer: Tailscale-IP.'
+              }
               error={errors.externalAddress}
               maxLength={253}
               autoComplete="off"
@@ -371,14 +432,36 @@ function CreateForm({
           {create.error ? <FormError title={gameErrorText(create.error)} /> : null}
           <div className="hz-form-actions">
             <Button onClick={() => void navigate('/games')}>Abbrechen</Button>
-            <Button variant="primary" type="submit" icon="play" disabled={create.isPending}>
-              {create.isPending ? 'Wird gestartet …' : 'Aufsetzen'}
-            </Button>
+            {isCloud ? (
+              <Button
+                variant="primary"
+                type="submit"
+                icon="cloud"
+                disabled={!order.ready || order.pending}
+              >
+                {order.pending ? 'Wird bestellt …' : 'Bestellen und aufsetzen'}
+              </Button>
+            ) : (
+              <Button variant="primary" type="submit" icon="play" disabled={create.isPending}>
+                {create.isPending ? 'Wird gestartet …' : 'Aufsetzen'}
+              </Button>
+            )}
           </div>
         </form>
       </Tile>
       <Tile title="Von außen erreichbar" icon="globe" span={4}>
-        <ForwardHint ports={previewPorts} server={server} />
+        {isCloud ? (
+          <p className="app-text" data-testid="cloud-forward">
+            Keine Portweiterleitung nötig: Die Zentrale öffnet in der Azure-Firewall genau die Ports
+            dieses Gameservers (
+            {previewPorts.map((p) => portLabel(p.port, p.protocol, p.count)).join(', ')}).
+            {order.draft.publicIp
+              ? ' Freunde verbinden sich über die öffentliche IP des Servers.'
+              : ' Ohne öffentliche IP nur über Tailscale.'}
+          </p>
+        ) : (
+          <ForwardHint ports={previewPorts} server={server} />
+        )}
       </Tile>
     </div>
   );
