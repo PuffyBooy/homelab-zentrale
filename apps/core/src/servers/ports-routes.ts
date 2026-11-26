@@ -33,22 +33,21 @@ export const portRoutes: FastifyPluginAsync<PortRoutesOptions> = async (app, o) 
     return portAuditResponseSchema.parse(o.ports.get(row.id));
   });
 
-  app.put('/servers/:id/ports/allowed', async (request, reply) => {
+  app.put('/servers/:id/ports/allowed', async (request) => {
     const row = serverOf(request);
     const body = allowedPortsUpdateRequestSchema.parse(request.body);
-    const res = o.ports.replace(row.id, body.ports);
+    o.ports.replace(row.id, body.ports);
     writeAudit(o.db, o.now(), {
       actor: 'admin',
       action: 'ports.update',
       target: row.id,
       details: { name: row.name, ports: body.ports.map((p) => `${p.proto}/${p.port}`) },
     });
-    // JSON only (notes are admin text): never served as HTML.
-    void reply.type('application/json; charset=utf-8');
-    return portAuditResponseSchema.parse(res);
+    // Answer from the stored state, not from the request (JSON, never HTML).
+    return portAuditResponseSchema.parse(o.ports.get(row.id));
   });
 
-  app.post('/servers/:id/ports/allow', async (request, reply) => {
+  app.post('/servers/:id/ports/allow', async (request) => {
     const row = serverOf(request);
     const body = portAllowRequestSchema.parse(request.body);
     const res = o.ports.allow(row.id, body);
@@ -59,8 +58,7 @@ export const portRoutes: FastifyPluginAsync<PortRoutesOptions> = async (app, o) 
       target: row.id,
       details: { name: row.name, port: body.port, proto: body.proto },
     });
-    // JSON only (notes are admin text): never served as HTML.
-    void reply.type('application/json; charset=utf-8');
-    return portAuditResponseSchema.parse(res);
+    // Answer from the stored state, not from the request (JSON, never HTML).
+    return portAuditResponseSchema.parse(o.ports.get(row.id));
   });
 };
