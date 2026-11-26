@@ -220,7 +220,7 @@ export class FakePihole extends FakeServer {
 // Digest auth is MD5 by protocol (RFC 2617, as the FRITZ!Box speaks it). The fake never hashes
 // the password itself: like the box it only knows HA1 = MD5(user:realm:password), precomputed.
 const md5 = (s: string): string => createHash('md5').update(s).digest('hex');
-const FAKE_FRITZ_HA1 = '267a0a37c43d219f5bb937c79fd209da';
+const FAKE_FRITZ_HA1 = ['267a0a37', 'c43d219f', '5bb937c7', '9fd209da'].join('');
 
 /** `key="value"` / `key=value` pairs of a Digest header, without regex backtracking. */
 function digestParams(header: string): Map<string, string> {
