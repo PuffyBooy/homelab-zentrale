@@ -16,3 +16,6 @@ e8b1101f81e57f2b4331f38e31646431de07ea36:apps/web/src/pages/security/ops-pages.t
 7fce8449796e5005fa3aa6526fdd945ae4c8dcde:apps/agent/test/deploy-key.security.test.ts:generic-api-key:154
 # Fake Discord user id in the M18 web step-up test (replaced in a later commit).
 6ca5b7677a8e290faaa289998a3333bd3676b585:apps/web/src/lib/ops.test.ts:discord-client-id:223
+# Fake Cloudflare/DuckDNS test tokens in the M20 domains helper (other feature branch).
+70a5d3003151d4e49f8a0ae2cad3279941ad70dd:apps/core/test/domains-helpers.ts:generic-api-key:36
+70a5d3003151d4e49f8a0ae2cad3279941ad70dd:apps/core/test/domains-helpers.ts:generic-api-key:37

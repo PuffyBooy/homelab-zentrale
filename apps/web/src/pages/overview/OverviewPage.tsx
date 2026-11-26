@@ -66,17 +66,17 @@ export function OverviewPage(): ReactElement | null {
   const net = useNetworkView(modules, isNetworkOn(modules));
   const [filter] = useServerFilter();
   const navigate = useNavigate();
+  const one = filter !== ALL_SERVERS ? filter : undefined;
   // No live topic: polled while the overview is open.
   const top = useQuery({
-    queryKey: topConsumersKey,
-    queryFn: ({ signal }) => fetchTopConsumers(signal),
+    queryKey: [...topConsumersKey, one ?? 'all'],
+    queryFn: ({ signal }) => fetchTopConsumers(one, signal),
     refetchInterval: 15_000,
   });
 
   if (!servers.data) return null;
   if (servers.data.length === 0) return <NoServers />;
 
-  const one = filter !== ALL_SERVERS ? filter : undefined;
   const list = one ? servers.data.filter((s) => s.id === one) : servers.data;
   const crit = openCrit(alerts.data ?? [], one);
   const shown = crit.slice(0, MAX_ALERTS);
