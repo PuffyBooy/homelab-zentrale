@@ -57,6 +57,15 @@ const GameDetailPage = page(
   (m) => m.GameDetailPage,
 );
 
+const VmsPage = page(
+  () => import('../pages/vms/VmsPage.js'),
+  (m) => m.VmsPage,
+);
+const NetworkPage = page(
+  () => import('../pages/network/NetworkPage.js'),
+  (m) => m.NetworkPage,
+);
+
 function Loading(): ReactElement {
   return (
     <p className="app-empty" role="status">
@@ -92,9 +101,11 @@ const BUILT = new Set([
   '/',
   '/servers',
   '/containers',
+  '/vms',
   '/games',
   '/github',
   '/websites',
+  '/network',
   '/home',
   '/alerts',
   '/console',
@@ -150,6 +161,7 @@ export function AppRoutes(): ReactElement {
         <Route path="servers/:id" element={<ServerDetailPage />} />
         <Route path="containers" element={<ContainersPage />} />
         <Route path="containers/:id/logs" element={<ContainerLogsPage />} />
+        <Route path="vms" element={<G m="proxmox" c={VmsPage} />} />
         <Route path="games" element={<G m="games" c={GamesPage} />} />
         <Route path="games/new" element={<G m="games" c={GameCreatePage} />} />
         <Route path="games/:id" element={<G m="games" c={GameDetailPage} />} />
@@ -157,6 +169,8 @@ export function AppRoutes(): ReactElement {
         <Route path="github/:id" element={<G m="github" c={RepoDetailPage} />} />
         <Route path="websites" element={<WebsitesPage />} />
         <Route path="websites/:id" element={<CheckDetailPage />} />
+        {/* Gated inside: on while FRITZ!Box or DNS-Filter is on. */}
+        <Route path="network" element={<L c={NetworkPage} />} />
         <Route
           path="home"
           element={

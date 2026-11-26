@@ -5,9 +5,11 @@ export const navItems: NavItem[] = [
   { id: 'overview', label: 'Übersicht', icon: 'cpu', href: '/' },
   { id: 'servers', label: 'Server', icon: 'server', href: '/servers' },
   { id: 'containers', label: 'Container', icon: 'container', href: '/containers' },
+  { id: 'vms', label: 'VMs', icon: 'cloud', href: '/vms' },
   { id: 'games', label: 'Gameserver', icon: 'gamepad', href: '/games' },
   { id: 'github', label: 'GitHub', icon: 'git', href: '/github' },
   { id: 'websites', label: 'Websites', icon: 'globe', href: '/websites' },
+  { id: 'network', label: 'Netzwerk', icon: 'wifi', href: '/network' },
   { id: 'home', label: 'Wohnung', icon: 'home', href: '/home' },
   { id: 'alerts', label: 'Meldungen', icon: 'bell', href: '/alerts' },
   { id: 'console', label: 'Konsole', icon: 'terminal', href: '/console', key: '`' },
@@ -39,20 +41,36 @@ export function activeNavId(pathname: string): string {
   return match?.id ?? 'overview';
 }
 
-/** Label shown on the key cap, as NavRail renders it. */
+/** Digits 1–9 go by position; items past the ninth get no digit. */
+export const MAX_DIGIT_KEYS = 9;
+
+/** Key cap of a visible nav item: its own key (console: `), else 1–9, else ''. */
 export function shortcutLabel(item: NavItem, index: number): string {
-  return item.key || String(index + 1);
+  if (item.key) return item.key;
+  return index < MAX_DIGIT_KEYS ? String(index + 1) : '';
+}
+
+/** Blank key cap: NavRail falls back to the position for an empty key. */
+const NO_KEY = '\u00a0';
+
+/**
+ * Visible items with an explicit key cap each, for NavRail: items past the ninth show an
+ * empty cap instead of "10", "11" (no such shortcut exists).
+ */
+export function withShortcutKeys<T extends NavItem>(items: readonly T[]): T[] {
+  return items.map((it, i) => ({ ...it, key: shortcutLabel(it, i) || NO_KEY }));
 }
 
 /**
- * Target path for a global shortcut key: 1–8 by position, 9 and ` for the console.
- * `items` are the visible nav items (switched-off modules left out), so the digits
- * match the key caps in the NavRail. Returns undefined for any other key.
+ * Target path for a global shortcut key: 1–9 by position of the visible items, ` for
+ * the console. `items` are the visible nav items (switched-off modules left out), so the
+ * digits match the key caps in the NavRail. Returns undefined for any other key.
  */
 export function shortcutTarget(
   key: string,
   items: readonly NavItem[] = navItems,
 ): string | undefined {
+  if (!key.trim()) return undefined;
   const byLabel = items.find((it, i) => shortcutLabel(it, i) === key);
   if (byLabel) return hrefOf(byLabel);
   if (/^[1-9]$/.test(key)) {

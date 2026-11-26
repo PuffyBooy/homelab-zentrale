@@ -1676,3 +1676,184 @@ body,
 a.hz-btn {
   text-decoration: none;
 }
+
+/* ---------- M14 Anbindungen ---------- */
+/* VMs: guest rows (ServiceRow) with CPU, RAM bar and uptime in the meta column. */
+.app-guest + .app-guest {
+  border-top: 1px solid var(--line);
+}
+.app-guest-meta {
+  display: inline-grid;
+  grid-template-columns: 10ch 17ch 250px 6ch;
+  align-items: center;
+  gap: var(--space-4);
+}
+.app-guest-cpu {
+  text-align: right;
+}
+.app-guest-actions {
+  display: inline-flex;
+  justify-content: flex-end;
+  gap: var(--space-1);
+  min-width: 100px;
+}
+.app-guest-up {
+  text-align: right;
+}
+@media (max-width: 999px) {
+  .app-guest .hz-row {
+    flex-wrap: wrap;
+    row-gap: var(--space-1);
+  }
+  .app-guest .hz-row-meta {
+    order: 3;
+    flex-basis: 100%;
+    margin-left: calc(56px + var(--space-3));
+    white-space: normal;
+  }
+  .app-guest-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2) var(--space-4);
+  }
+  .app-guest-ram {
+    width: 240px;
+  }
+  .app-guest-cpu {
+    text-align: left;
+    min-width: 0;
+  }
+}
+.app-nodes {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: var(--space-4);
+}
+.app-node {
+  display: grid;
+  gap: var(--space-2);
+  min-width: 0;
+}
+.app-node-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+/* Netzwerk */
+.app-seg {
+  display: inline-flex;
+  gap: var(--space-1);
+}
+.app-devices {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 480px;
+  overflow-y: auto;
+}
+.app-devices > .hz-row > .hz-status {
+  width: auto;
+}
+.app-device-meta {
+  display: inline-grid;
+  grid-template-columns: 16ch 6ch 8ch;
+  gap: var(--space-3);
+}
+@media (max-width: 699px) {
+  .app-device-meta {
+    grid-template-columns: auto auto;
+  }
+  .app-device-state {
+    display: none;
+  }
+}
+.app-actions-start {
+  justify-content: flex-start;
+}
+.app-heimnetz-item {
+  display: grid;
+  gap: var(--space-1);
+  align-content: start;
+}
+
+/* Uptime Kuma on /websites */
+.app-kuma-action {
+  display: inline-flex;
+  justify-content: flex-end;
+  align-items: center;
+  width: 160px;
+}
+.app-kuma-foot {
+  display: grid;
+  gap: var(--space-3);
+  border-top: 1px solid var(--line);
+}
+.app-kuma-foot .hz-field {
+  max-width: 360px;
+}
+.app-kuma-skipped {
+  margin: var(--space-1) 0 0;
+  padding-left: var(--space-4);
+}
+.app-kuma-skipped-name {
+  font-family: var(--font-mono);
+}
+.app-check {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--ink);
+}
+.app-check input {
+  color-scheme: dark;
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: var(--ink-muted);
+  cursor: pointer;
+}
+.app-check input:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+[data-theme='light'] .app-check input {
+  color-scheme: light;
+}
+.app-check-line {
+  justify-self: start;
+}
+
+/* Settings: Anbindungen, Meldungskanäle */
+.app-textarea {
+  height: auto;
+  min-height: 72px;
+  padding: var(--space-2) var(--space-3);
+  resize: vertical;
+  font-size: 12px;
+  line-height: 18px;
+  letter-spacing: 0;
+}
+.app-settings-group {
+  display: grid;
+  gap: var(--space-1);
+  padding-top: var(--space-2);
+}
+.app-settings-group > .hz-label {
+  margin: 0;
+}
+.app-channels {
+  display: grid;
+  gap: var(--space-4);
+}
+.app-channel {
+  display: grid;
+  gap: var(--space-3);
+}
+.app-channel + .app-channel {
+  border-top: 1px solid var(--line);
+  padding-top: var(--space-4);
+}

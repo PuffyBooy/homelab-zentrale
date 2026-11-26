@@ -33,6 +33,14 @@ Die Zentrale hat Root-ähnliche Macht über alle Server. Diese Regeln sind **nic
 - Die Share-Seite gibt keine internen Daten preis (keine Tailscale-IPs, keine anderen Server, keine Container-IDs).
 - Jede Aktion landet im `share_audit` und im `audit_log`.
 
+## Anbindungen und Meldungskanäle (M14)
+- Ausgehende Anfragen an Proxmox, Pi-hole/AdGuard, FRITZ!Box und Uptime Kuma laufen nur über `apps/core/src/integrations/http.ts`: http/https, keine Zugangsdaten, Query oder Anker in der URL, nie link-lokal (169.254.0.0/16, fe80::/10, auch IPv4-mapped), geprüft bei der Eingabe, vor jeder Anfrage und nach der DNS-Auflösung (verbunden wird nur mit der geprüften Adresse). Weiterleitungen werden nie gefolgt. 8 s Zeitlimit, 4 MB Obergrenze. Selbst signierte Zertifikate nur mit eingefügter CA, die Prüfung wird nie abgeschaltet.
+- Zugangsdaten sind verschlüsselt (AAD pro Anbindung bzw. Kanal-Feld). Ändern von URL, Benutzer, Secret oder CA verlangt Step-up. Wird die URL zum ersten Mal gesetzt oder ändert sich ihr Origin, muss das Secret in derselben Anfrage kommen, sonst wird das gespeicherte verworfen.
+- Step-up und Bestätigung für Proxmox Herunterfahren/Stoppen/Neustart und den FRITZ!Box-Neustart. Proxmox-Aktionen nur für Gäste aus der letzten Abfrage. DNS-Blocken nur befristet pausierbar.
+- Antworten fremder Systeme werden begrenzt und ohne DTD/Entities geparst; Fehlertexte sind feste Strings, nie der fremde Inhalt.
+- Meldungskanäle: Discord nur an die offiziellen Discord-Webhook-Adressen, Telegram nur an `api.telegram.org`, ntfy nach denselben URL-Regeln. Adressen in den Texten werden maskiert, weil die Nachrichten das Tailnet verlassen; keine Erwähnungen (Discord) und kein Markup (Telegram).
+- Wake-on-LAN sendet nur das Magic Packet an 255.255.255.255 oder eine private IPv4-Adresse, Port 7 oder 9, höchstens 6 pro Minute (Core pro Server und Agent gesamt).
+
 ## Allgemein
 - Jede Eingabe wird mit zod geprüft (Body, Query, Params, WebSocket-Nachrichten, Agent-Nachrichten).
 - Sicherheits-Header über `@fastify/helmet` mit strenger CSP (keine Inline-Skripte, `connect-src 'self'`).

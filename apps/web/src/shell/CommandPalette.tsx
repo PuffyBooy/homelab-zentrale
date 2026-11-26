@@ -52,7 +52,7 @@ export function pageCommands(modules: Modules = ALL_MODULES_ON): PaletteCommand[
       label: it.label,
       to: it.href ?? '/',
       icon: it.icon,
-      hint: shortcutLabel(it, i),
+      hint: shortcutLabel(it, i) || undefined,
     })),
     { id: settingsItem.id, label: settingsItem.label, to: settingsItem.href },
   ];

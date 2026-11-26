@@ -19,6 +19,8 @@ import { repoOnServer } from '../../lib/github.js';
 import { isHaConfigured } from '../../lib/ha.js';
 import { useHaView } from '../../lib/haActions.js';
 import { useLiveTopic } from '../../lib/live.js';
+import { isNetworkOn } from '../../lib/modules.js';
+import { internetState, useNetworkView } from '../../lib/network.js';
 import { useModules } from '../../lib/useModules.js';
 import { ALL_SERVERS } from '../../lib/servers.js';
 import { consumersOf, fetchTopConsumers, topConsumersKey } from '../../lib/throttle.js';
@@ -26,6 +28,7 @@ import { ContainersTile } from '../containers/ContainersTile.js';
 import { GamesTile } from '../games/GamesTile.js';
 import { GithubTile } from '../github/GithubTile.js';
 import { HomeTile } from '../home/HomeTile.js';
+import { HeimnetzTile } from '../network/HeimnetzTile.js';
 import { NoServers, ServerListTile } from '../servers/ServerListTile.js';
 import { TopConsumersTile } from '../throttle/TopConsumersTile.js';
 import { ChecksTile } from '../websites/ChecksTile.js';
@@ -36,7 +39,8 @@ const MAX_ALERTS = 3;
  * Overview after design/reference/previews/Dashboard.html: Statussatz (shell header),
  * open crit alerts, ServerList over the full width, "Wer frisst gerade?" (M10) under it
  * because it explains the server load, then the pairs (SPEC 4):
- * Gameserver/Websites and GitHub/Container, then "Wohnung" when Home Assistant is set up.
+ * Gameserver/Websites and GitHub/Container, then "Heimnetz" (M14, FRITZ!Box/DNS-Filter;
+ * above the server list while the internet is down) and "Wohnung" when HA is set up.
  * Tiles of switched-off modules (Einstellungen → Module) are left out.
  */
 export function OverviewPage(): ReactElement | null {
@@ -58,6 +62,7 @@ export function OverviewPage(): ReactElement | null {
   const games = { data: modules.games ? gamesQuery.data : undefined };
   const repos = { data: modules.github ? reposQuery.data : undefined };
   const ha = { view: modules.homeassistant ? haQuery.view : undefined };
+  const net = useNetworkView(modules, isNetworkOn(modules));
   const [filter] = useServerFilter();
   const navigate = useNavigate();
   // No live topic: polled while the overview is open.
@@ -75,6 +80,17 @@ export function OverviewPage(): ReactElement | null {
   const crit = openCrit(alerts.data ?? [], one);
   const shown = crit.slice(0, MAX_ALERTS);
   const more = crit.length - shown.length;
+  // Heimnetz only for the whole hub, once FRITZ!Box or DNS-Filter is set up.
+  const heimnetz =
+    !one && (net.fritzReady || net.dnsReady) ? (
+      <HeimnetzTile
+        fritz={net.fritzData}
+        dns={net.dnsData}
+        fritzOn={net.fritzReady}
+        dnsOn={net.dnsReady}
+      />
+    ) : null;
+  const internetDown = !!net.fritzData && internetState(net.fritzData) === 'down';
 
   return (
     <>
@@ -105,6 +121,7 @@ export function OverviewPage(): ReactElement | null {
           ) : null}
         </div>
       ) : null}
+      {heimnetz && internetDown ? <div className="hz-grid app-grid">{heimnetz}</div> : null}
       <ServerListTile servers={list} active={one} />
       {top.data ? (
         <div className="hz-grid app-grid">
@@ -144,6 +161,7 @@ export function OverviewPage(): ReactElement | null {
           ) : null}
         </div>
       ) : null}
+      {heimnetz && !internetDown ? <div className="hz-grid app-grid">{heimnetz}</div> : null}
       {!one && ha.view && isHaConfigured(ha.view) ? (
         <div className="hz-grid app-grid">
           <HomeTile state={ha.view} />
