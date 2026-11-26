@@ -807,7 +807,9 @@ CREATE INDEX whitelist_requests_share ON whitelist_requests(share_id, created_at
     // M22 Cloud-Server (apps/core/src/cloud). One row per ordered VM. pending_game_json:
     // the gameserver to create once the agent enrolled, AES-256-GCM via crypto.ts (AAD
     // cloud_machines.pending_game:<id>, template fields may be secret). compute_eur_per_hour:
-    // the compute price confirmed at the order. cloud_usage: running seconds per machine and
+    // the compute price confirmed at the order. vm_powered: the VM may be running at Azure
+    // (set when it is created or started, cleared when Azure reports it deallocated or gone);
+    // running time is counted while it is set, whatever the state. cloud_usage: running seconds per machine and
     // month (YYYY-MM in HZ_TIMEZONE). Azure account settings live in `settings` (cloud.azure.*).
     sql: `
 CREATE TABLE cloud_machines (
@@ -830,6 +832,7 @@ CREATE TABLE cloud_machines (
   pending_game_json TEXT,
   compute_eur_per_hour REAL NOT NULL,
   price_source TEXT NOT NULL DEFAULT 'estimate',
+  vm_powered INTEGER NOT NULL DEFAULT 0,
   state_changed_at INTEGER NOT NULL,
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL

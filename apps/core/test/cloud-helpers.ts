@@ -1,3 +1,4 @@
+import { expect } from 'vitest';
 import type { LightMyRequestResponse } from 'fastify';
 import {
   estimateAzureCost,
@@ -158,6 +159,30 @@ export async function untilState(
   }
   const m = machineOf(s, id);
   throw new Error(`state ${m.state} (${m.stateText}), wanted ${state}`);
+}
+
+/** Advances the clock in 30 s steps, keeping the agent alive (heartbeat 90 s). */
+export async function pass(
+  c: CloudSetup,
+  ms: number,
+  agent?: SimAgent,
+  step = 30_000,
+): Promise<void> {
+  for (let left = ms; left > 0; left -= step) await cloudTick(c, Math.min(step, left), agent);
+}
+
+/** Lets the machine fall asleep: game stopped, idle time over, VM deallocated. */
+export async function sleepMachine(c: CloudSetup, id: string, gameId: string, agent: SimAgent) {
+  const stop = await req(c, 'POST', `/api/games/${gameId}/stop`);
+  expect(stop.statusCode).toBe(200);
+  await cloudTick(c, 5_000, agent);
+  expect(machineOf(c, id).state).toBe('running');
+  c.azure.onPower = (_vm, state) => {
+    if (state === 'deallocated') void agent.disconnect();
+  };
+  await pass(c, 15 * 60_000, agent);
+  await untilState(c, id, 'deallocated');
+  await until(() => !c.t.app.hzCore.hub.isConnected(agent.serverId));
 }
 
 let dockerSeq = 0x200000000000;

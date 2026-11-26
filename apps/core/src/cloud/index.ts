@@ -63,6 +63,8 @@ export async function setupCloud(app: FastifyInstance, d: CloudDeps): Promise<Cl
   d.games.onChange(() => cloud.tick());
   d.servers.onAgentConnected(() => cloud.tick());
   d.scheduler.every('cloud.tick', CLOUD_TICK_MS, () => cloud.tick());
+  // Switched off, nothing would put a running VM to sleep any more.
+  d.modules.setOffGuard('cloud', () => cloud.offRefusal());
   d.modules.onChange((m, on) => {
     if (m === 'cloud') cloud.setEnabled(on);
   });

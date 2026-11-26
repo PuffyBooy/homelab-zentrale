@@ -84,6 +84,10 @@ import { gameState, type GamePhase } from './status.js';
 import { serverNetworkOf } from '../servers/service.js';
 import type { LoadedTemplate } from './templates.js';
 
+/** M22: admin game start on a cloud VM over budget (the cloud page can start it anyway). */
+export const CLOUD_OVER_BUDGET_GAME_MESSAGE =
+  'Cloud-Budget aufgebraucht. Auf der Cloud-Seite mit Bestätigung starten.';
+
 export type GameCreateRequest = z.output<typeof gameCreateRequestSchema>;
 export type GameUpdateRequest = z.output<typeof gameUpdateRequestSchema>;
 export type GameEvent = z.infer<typeof gameEventSchema>;
@@ -1473,7 +1477,7 @@ export class GameService {
     if (starts && this.cloudHost) {
       const gate = this.cloudHost.startGate(row.serverId);
       if (gate === 'over_budget') {
-        throw new HttpError(409, 'over_budget', undefined, CLOUD_GAME_TEXT.overBudget);
+        throw new HttpError(409, 'over_budget', undefined, CLOUD_OVER_BUDGET_GAME_MESSAGE);
       }
       if (gate === 'wake') return this.startAfterCloud(row, actor);
     }

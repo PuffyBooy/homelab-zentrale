@@ -1,4 +1,4 @@
-import { eq, sql } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
 import type { FastifyBaseLogger } from 'fastify';
 import {
   AZURE_DISK_EUR_PER_MONTH,
@@ -56,24 +56,45 @@ export const CLOUD_TICK_MS = 5_000;
 const INSTALL_TIMEOUT_MS = CLOUD_INSTALL_TIMEOUT_MINUTES * 60_000;
 const START_TIMEOUT_MS = CLOUD_START_TIMEOUT_MINUTES * 60_000;
 const GIB = 1024 ** 3;
-const BILLABLE: ReadonlySet<CloudMachineState> = new Set([
-  'creating',
-  'installing',
-  'running',
-  'starting',
-  'stopping',
-]);
 /** The machine is off on purpose: its server is OFF, not offline. */
 const ASLEEP: ReadonlySet<CloudMachineState> = new Set(['deallocated', 'stopping', 'starting']);
 const BUDGET_ALERT = 'cloud:budget';
+const CREDENTIALS_ALERT = 'cloud:credentials';
+const OFF_REFUSAL = 'Erst alle Cloud-Server schlafen legen oder löschen';
 
-const eurFmt = new Intl.NumberFormat('de-AT', { style: 'currency', currency: 'EUR' });
-const eurHourFmt = new Intl.NumberFormat('de-AT', {
-  style: 'currency',
-  currency: 'EUR',
-  minimumFractionDigits: 2,
-  maximumFractionDigits: 4,
-});
+/** Alert/state text of a failure, by the state the machine failed in. */
+const FAIL_TEXT: Record<CloudMachineState, string> = {
+  creating: 'Bestellung fehlgeschlagen',
+  installing: 'Einrichtung fehlgeschlagen',
+  running: 'Betrieb gestört',
+  stopping: 'Schlafen legen fehlgeschlagen',
+  deallocated: 'Fehler',
+  starting: 'Start fehlgeschlagen',
+  deleting: 'Löschen fehlgeschlagen',
+  failed: 'Fehler',
+};
+
+/** de-AT digits with '.' as group separator (same as the web). */
+function grouped(v: number, minDigits: number, maxDigits: number): string {
+  return new Intl.NumberFormat('de-AT', {
+    minimumFractionDigits: minDigits,
+    maximumFractionDigits: maxDigits,
+    useGrouping: true,
+  })
+    .formatToParts(v)
+    .map((p) => (p.type === 'group' ? '.' : p.value))
+    .join('');
+}
+
+/** "0,10 €", "1.234,50 €". */
+export function formatEur(v: number): string {
+  return `${grouped(v, 2, 2)} €`;
+}
+
+/** "0,0961 €/Std" below 0,10 €, else two digits ("0,19 €/Std"). */
+export function formatEurHour(v: number): string {
+  return `${grouped(v, 2, v > 0 && v < 0.1 ? 4 : 2)} €/Std`;
+}
 const round2 = (n: number): number => Math.round(n * 100) / 100;
 
 /** YYYY-MM of an instant in HZ_TIMEZONE. */
@@ -115,7 +136,7 @@ export interface CloudServiceDeps {
   now: Clock;
   log: FastifyBaseLogger;
   alerts: AlertService;
-  hub: Pick<AgentHub, 'isConnected' | 'disconnect' | 'forget'>;
+  hub: Pick<AgentHub, 'isConnected' | 'disconnect' | 'forget' | 'disconnectedAt'>;
   tokens: Pick<AgentTokens, 'nameTaken' | 'revoke'>;
   onboarding: OnboardingService;
   servers: ServerService;
@@ -157,6 +178,8 @@ export class CloudService implements GameCloudHost {
   private readonly stopJobs = new Set<string>();
   /** NSG rules last applied per machine (JSON). */
   private readonly appliedNsg = new Map<string, string>();
+  /** Since when the agent of a running machine is offline (machine id). */
+  private readonly offlineSince = new Map<string, number>();
 
   constructor(private readonly deps: CloudServiceDeps) {
     this.store = new AzureAccountStore(deps.db, deps.box, deps.now);
@@ -210,9 +233,13 @@ export class CloudService implements GameCloudHost {
     return azureDiskTypeSchema.parse(r.diskType);
   }
 
-  /** Adds the running time since the last accounting (restart-safe via updated_at). */
+  /**
+   * Adds the running time since the last accounting (restart-safe via updated_at).
+   * Billed is the VM, not the state: from the VM PUT or start until Azure reports it
+   * deallocated or gone (also while failed or deleting).
+   */
   private account(r: CloudMachineRow, now: number): void {
-    if (!BILLABLE.has(this.stateOf(r)) || now <= r.updatedAt) return;
+    if (!r.vmPowered || now <= r.updatedAt) return;
     for (const { month, seconds } of splitByMonth(r.updatedAt, now)) {
       this.deps.db
         .insert(cloudUsage)
@@ -225,29 +252,53 @@ export class CloudService implements GameCloudHost {
     }
   }
 
-  /** Every write of a machine row goes through here (usage first). */
-  private patch(id: string, set: Partial<CloudMachineRow>): CloudMachineRow | undefined {
+  /**
+   * Every write of a machine row goes through here (usage first). With `expect`
+   * it is a compare-and-set: written only while the machine is still in that state
+   * (a step that awaited Azure must not overwrite a stop or delete from meanwhile).
+   * Returns the new row, or undefined if nothing was written.
+   */
+  private patch(
+    id: string,
+    set: Partial<CloudMachineRow>,
+    expect?: CloudMachineState,
+  ): CloudMachineRow | undefined {
     const r = this.row(id);
-    if (!r) return undefined;
+    if (!r || (expect !== undefined && r.state !== expect)) return undefined;
     const now = this.deps.now();
     this.account(r, now);
     const next: Partial<CloudMachineRow> = { ...set, updatedAt: Math.max(now, r.updatedAt) };
     if (set.state !== undefined && set.state !== r.state) next.stateChangedAt = now;
-    this.deps.db.update(cloudMachines).set(next).where(eq(cloudMachines.id, id)).run();
-    return this.row(id);
+    const res = this.deps.db
+      .update(cloudMachines)
+      .set(next)
+      .where(and(eq(cloudMachines.id, id), eq(cloudMachines.state, r.state)))
+      .run();
+    return res.changes > 0 ? this.row(id) : undefined;
   }
 
   private setState(
     id: string,
     state: CloudMachineState,
     extra: Partial<CloudMachineRow> = {},
+    expect?: CloudMachineState,
   ): CloudMachineRow | undefined {
-    return this.patch(id, {
-      state,
-      stateText: CLOUD_MACHINE_STATE_TEXT[state],
-      ...(state === 'failed' ? {} : { error: null }),
-      ...extra,
-    });
+    return this.patch(
+      id,
+      {
+        state,
+        stateText: CLOUD_MACHINE_STATE_TEXT[state],
+        ...(state === 'failed' ? {} : { error: null }),
+        ...extra,
+      },
+      expect,
+    );
+  }
+
+  /** The row, if the machine is still in this state (re-read after every await). */
+  private still(id: string, state: CloudMachineState): CloudMachineRow | undefined {
+    const r = this.row(id);
+    return r && this.stateOf(r) === state ? r : undefined;
   }
 
   private pendingOf(r: CloudMachineRow): CloudPendingGame | null {
@@ -295,7 +346,7 @@ export class CloudService implements GameCloudHost {
   ): { hours: number; eur: number; projected: number } {
     const month = monthKey(now);
     let seconds = this.monthSeconds(r.id, month);
-    const billable = BILLABLE.has(this.stateOf(r));
+    const billable = r.vmPowered;
     if (billable && now > r.updatedAt) {
       const since = Math.max(r.updatedAt, monthStart(now));
       seconds += Math.max(0, Math.floor(now / 1000) - Math.floor(since / 1000));
@@ -387,12 +438,14 @@ export class CloudService implements GameCloudHost {
 
   updateSettings(req: AzureSettingsRequest): AzureSettings {
     const ch = this.store.changes(req);
-    if ((ch.tenant || ch.subscription || ch.group) && this.rows().length > 0) {
+    // The machines need these credentials to be put to sleep and deleted (a changed
+    // app or account would also drop the stored secret).
+    if ((ch.tenant || ch.client || ch.subscription || ch.group) && this.rows().length > 0) {
       throw new HttpError(
         409,
         'conflict',
         undefined,
-        'Erst alle Cloud-Server löschen, dann Konto oder Ressourcengruppe wechseln',
+        'Erst alle Cloud-Server löschen, dann Konto, App oder Ressourcengruppe wechseln',
       );
     }
     const res = this.store.update(req);
@@ -522,15 +575,20 @@ export class CloudService implements GameCloudHost {
         'Ohne https-Adresse der Zentrale (HZ_BASE_URL) kann kein Cloud-Server eingerichtet werden',
       );
     }
-    const rows = this.rows();
-    if (rows.length >= CLOUD_MAX_MACHINES) refuse(`Höchstens ${CLOUD_MAX_MACHINES} Cloud-Server`);
-    if (
-      rows.some((r) => r.name === req.name) ||
-      this.deps.tokens.nameTaken(req.name) ||
-      this.deps.onboarding.nameBusy(req.name)
-    ) {
-      refuse('Name ist schon vergeben');
-    }
+    const slot = (): void => {
+      const rows = this.rows();
+      if (rows.length >= CLOUD_MAX_MACHINES) {
+        refuse(`Höchstens ${CLOUD_MAX_MACHINES} Cloud-Server`);
+      }
+      if (
+        rows.some((r) => r.name === req.name) ||
+        this.deps.tokens.nameTaken(req.name) ||
+        this.deps.onboarding.nameBusy(req.name)
+      ) {
+        refuse('Name ist schon vergeben');
+      }
+    };
+    slot();
     const size = azureVmSize(req.size);
     if (!size) throw new HttpError(400, 'invalid_input');
     if (req.game) {
@@ -545,6 +603,8 @@ export class CloudService implements GameCloudHost {
     }
     const region = req.region ?? this.store.region();
     const { prices } = await this.regionPrices(region);
+    // A second order may have taken the name or the last slot during the await.
+    slot();
     const compute = CloudService.compute(size.size, prices);
     const cost = estimateAzureCost({
       computeEurPerHour: compute.eurPerHour,
@@ -558,7 +618,7 @@ export class CloudService implements GameCloudHost {
         409,
         'price_changed',
         undefined,
-        `Der Preis hat sich geändert: jetzt ${eurHourFmt.format(cost.runningEurPerHour)} pro Stunde`,
+        `Der Preis hat sich geändert: jetzt ${formatEurHour(cost.runningEurPerHour)}`,
         undefined,
         cost.runningEurPerHour,
       );
@@ -669,6 +729,13 @@ export class CloudService implements GameCloudHost {
     if (st !== 'running' && st !== 'starting' && !(st === 'failed' && r.serverId !== null)) {
       throw new HttpError(409, 'busy');
     }
+    // A game in setup, backup, restore or move would be cut off by the deallocate.
+    if (
+      r.serverId !== null &&
+      this.deps.games.gameIdsOn(r.serverId).some((g) => this.deps.games.isBusy(g))
+    ) {
+      throw new HttpError(409, 'busy', undefined, 'Ein Gameserver ist gerade beschäftigt');
+    }
     this.wantStart.delete(id);
     this.setState(id, 'stopping', { idleSince: null });
     this.resolveWaiters(id, false);
@@ -744,6 +811,28 @@ export class CloudService implements GameCloudHost {
     });
     this.kick();
     return this.machine(id);
+  }
+
+  /** The server belongs to a cloud machine (also while it is still being set up). */
+  ownsServer(serverId: string): boolean {
+    return this.rows().some(
+      (r) =>
+        r.serverId === serverId ||
+        (r.onboardingId !== null &&
+          this.deps.onboarding.status(r.onboardingId)?.serverId === serverId),
+    );
+  }
+
+  /**
+   * Module switch-off guard: without ticks a running VM would cost unnoticed. Off
+   * only while every machine is deallocated, or failed without a powered VM.
+   */
+  offRefusal(): string | null {
+    const busy = this.rows().some((r) => {
+      const st = this.stateOf(r);
+      return r.vmPowered || (st !== 'deallocated' && st !== 'failed');
+    });
+    return busy ? OFF_REFUSAL : null;
   }
 
   // ---- GameCloudHost -------------------------------------------------------------
@@ -881,24 +970,50 @@ export class CloudService implements GameCloudHost {
 
   private async runTick(): Promise<void> {
     const creds = this.store.credentials();
-    for (const r of this.rows()) {
+    const value = creds.kind === 'ok' ? creds.value : null;
+    for (const { id } of this.rows()) {
       if (!this.active) return;
+      // Fresh row: an earlier step awaited, a request may have changed this one.
+      const r = this.row(id);
+      if (!r) continue;
+      const st = this.stateOf(r);
       try {
-        await this.step(r, creds.kind === 'ok' ? creds.value : null);
+        await this.step(r, value);
       } catch (err) {
-        this.onStepError(r.id, err);
+        this.onStepError(id, st, err);
       }
     }
     // Usage up to now, also without state changes.
     const now = this.deps.now();
     for (const r of this.rows()) {
-      if (BILLABLE.has(this.stateOf(r)) && now - r.updatedAt >= 60_000) this.patch(r.id, {});
+      if (r.vmPowered && now - r.updatedAt >= 60_000) this.patch(r.id, {});
     }
+    this.credentialsAlert(value === null);
     this.expireWaiters(now);
     this.budgetAlerts();
   }
 
-  private onStepError(id: string, err: unknown): void {
+  /** Without readable credentials no VM can be put to sleep or deleted: say so. */
+  private credentialsAlert(missing: boolean): void {
+    const stuck = missing && this.rows().some((r) => r.vmPowered || this.stateOf(r) === 'deleting');
+    const active = this.deps.alerts.active(CREDENTIALS_ALERT) !== null;
+    if (!stuck) {
+      if (active) this.deps.alerts.resolve(CREDENTIALS_ALERT);
+      return;
+    }
+    if (active) return;
+    this.deps.alerts.raise(
+      CREDENTIALS_ALERT,
+      'crit',
+      'Azure-Zugang nicht lesbar',
+      `${UNREADABLE}. Bis dahin kann die Zentrale Cloud-Server weder schlafen legen noch löschen, laufende VMs kosten weiter.`,
+      null,
+      'system',
+    );
+  }
+
+  /** `st`: the state the failed step started in. */
+  private onStepError(id: string, st: CloudMachineState, err: unknown): void {
     const r = this.row(id);
     if (!r) return;
     const text: CloudErrorText =
@@ -907,71 +1022,147 @@ export class CloudService implements GameCloudHost {
     if (text === 'Zugangsdaten ungültig' || text === 'Keine Berechtigung in der Ressourcengruppe') {
       this.store.markError(text);
     }
-    this.deps.log.info({ machineId: id, state: r.state, error: text }, 'cloud step failed');
-    const st = this.stateOf(r);
+    this.deps.log.info({ machineId: id, state: st, error: text }, 'cloud step failed');
+    // A stop or delete from meanwhile wins; a failed machine keeps its first error.
+    if (this.stateOf(r) !== st || st === 'failed') return;
     if (transient) {
-      this.patch(id, { stateText: `${CLOUD_MACHINE_STATE_TEXT[st]} (${text})` });
+      this.patch(id, { stateText: `${CLOUD_MACHINE_STATE_TEXT[st]} (${text})` }, st);
       return;
     }
     if (st === 'creating') this.fail(r, text);
     else if (st === 'starting') {
+      // The start POST was refused (4xx): the VM stays off. A failure after it: the VM
+      // may run, so it is put to sleep again.
+      const started = this.startIssued.has(id);
+      const next = started ? 'stopping' : 'deallocated';
+      const done = this.setState(
+        id,
+        next,
+        {
+          error: text,
+          stateText: `${CLOUD_MACHINE_STATE_TEXT[next]} (${text})`,
+          ...(started ? {} : { vmPowered: false }),
+        },
+        'starting',
+      );
+      if (!done) return;
       this.startIssued.delete(id);
-      this.setState(id, 'deallocated', {
-        error: text,
-        stateText: `${CLOUD_MACHINE_STATE_TEXT.deallocated} (${text})`,
-      });
       this.resolveWaiters(id, false);
-    } else this.patch(id, { error: text, stateText: `${CLOUD_MACHINE_STATE_TEXT[st]} (${text})` });
+    } else {
+      this.patch(id, { error: text, stateText: `${CLOUD_MACHINE_STATE_TEXT[st]} (${text})` }, st);
+    }
   }
 
-  private fail(r: CloudMachineRow, text: CloudErrorText): void {
+  /** Compare-and-set to failed (from the state of `r`); false if it changed meanwhile. */
+  private fail(r: CloudMachineRow, text: CloudErrorText): boolean {
+    const st = this.stateOf(r);
+    const done = this.setState(
+      r.id,
+      'failed',
+      { error: text, idleSince: null, stateText: FAIL_TEXT[st] },
+      st,
+    );
+    if (!done) return false;
     this.startIssued.delete(r.id);
     this.wantStart.delete(r.id);
-    this.setState(r.id, 'failed', { error: text, idleSince: null });
+    this.offlineSince.delete(r.id);
     this.resolveWaiters(r.id, false);
     writeAudit(this.deps.db, this.deps.now(), {
       actor: 'system',
       action: 'cloud.machine_failed',
       target: r.id,
-      details: { name: r.name, state: r.state, error: text },
+      details: { name: r.name, state: st, error: text },
     });
+    const next = r.serverId
+      ? 'Auf der Seite Cloud neu starten oder löschen'
+      : 'Auf der Seite Cloud löschen und neu bestellen';
     this.deps.alerts.raise(
       `cloud:${r.id}:failed`,
       'crit',
       `Cloud-Server ${r.name}: ${text}`,
-      `${CLOUD_MACHINE_STATE_TEXT[this.stateOf(r)]} ist fehlgeschlagen. Auf der Seite Cloud neu starten oder löschen.`,
+      `${FAIL_TEXT[st]}. ${next}.`,
       r.serverId,
       'system',
     );
+    return true;
   }
 
+  /** `r` is fresh: read right before the step, nothing awaited yet. */
   private async step(r: CloudMachineRow, creds: AzureCredentials | null): Promise<void> {
     const st = this.stateOf(r);
     const now = this.deps.now();
     switch (st) {
       case 'creating':
-        if (now - r.stateChangedAt > INSTALL_TIMEOUT_MS) return this.fail(r, 'Zeitüberschreitung');
-        if (!creds) return;
+        if (now - r.stateChangedAt > INSTALL_TIMEOUT_MS) {
+          this.fail(r, 'Zeitüberschreitung');
+          return;
+        }
+        if (!creds) {
+          this.fail(r, UNREADABLE);
+          return;
+        }
         return this.provision(r, creds);
       case 'installing':
         return this.install(r, creds);
       case 'running':
         return this.running(r, creds);
       case 'stopping':
-        if (!creds || this.stopJobs.has(r.id)) return;
+        if (this.stopJobs.has(r.id)) return;
+        if (!creds) return this.waitForCredentials(r);
         return this.stopping(r, creds);
       case 'starting':
-        if (!creds) return;
+        if (now - r.stateChangedAt > START_TIMEOUT_MS) {
+          if (this.fail(r, 'Agent hat sich nicht gemeldet') && creds) {
+            await this.deps.azure
+              .deallocate(creds, r.name, this.regionOf(r))
+              .catch(() => undefined);
+          }
+          return;
+        }
+        if (!creds) {
+          this.fail(r, UNREADABLE);
+          return;
+        }
         return this.starting(r, creds);
       case 'deleting':
-        if (!creds) return;
+        if (!creds) return this.waitForCredentials(r);
         return this.deleting(r, creds);
-      case 'deallocated':
-        if (r.serverId && creds) await this.syncNsg(r, creds);
+      case 'deallocated': {
+        if (!creds) return;
+        if (r.vmPowered) await this.powerOff(r, creds);
+        const fresh = this.still(r.id, 'deallocated');
+        if (fresh?.serverId) await this.syncNsg(fresh, creds);
         return;
+      }
       case 'failed':
-        return;
+        if (!r.vmPowered) return;
+        if (!creds) return this.waitForCredentials(r);
+        return this.powerOff(r, creds);
     }
+  }
+
+  /** Stopping/deleting wait for readable credentials (the credentials alert says so). */
+  private waitForCredentials(r: CloudMachineRow): void {
+    const st = this.stateOf(r);
+    if (st === 'failed') return; // keeps its error text
+    const stateText = `${CLOUD_MACHINE_STATE_TEXT[st]} (${UNREADABLE})`;
+    if (r.stateText !== stateText) this.patch(r.id, { stateText }, st);
+  }
+
+  /**
+   * The machine is off (deallocated/failed) but its VM may still be powered: ask
+   * Azure, and deallocate again until it reports deallocated (or gone).
+   */
+  private async powerOff(r: CloudMachineRow, creds: AzureCredentials): Promise<void> {
+    const st = this.stateOf(r);
+    const region = this.regionOf(r);
+    const ps = await this.deps.azure.powerState(creds, r.name, region);
+    if (ps === 'deallocated' || ps === null) {
+      this.patch(r.id, { vmPowered: false });
+      return;
+    }
+    if (ps === 'deallocating' || !this.still(r.id, st)) return;
+    await this.deps.azure.deallocate(creds, r.name, region);
   }
 
   private async provision(r: CloudMachineRow, creds: AzureCredentials): Promise<void> {
@@ -980,35 +1171,50 @@ export class CloudService implements GameCloudHost {
     const steps: ('vnet' | 'nsg' | 'ip' | 'nic' | 'vm')[] = r.publicIpEnabled
       ? ['vnet', 'nsg', 'ip', 'nic', 'vm']
       : ['vnet', 'nsg', 'nic', 'vm'];
+    const say = (stateText: string): boolean =>
+      this.patch(r.id, { stateText }, 'creating') !== undefined;
     for (const kind of steps) {
       const ps = await az.provisioningState(creds, kind, r.name, region);
-      if (ps === 'Failed' || ps === 'Canceled')
-        return this.fail(r, 'Unerwartete Antwort von Azure');
+      const fresh = this.still(r.id, 'creating');
+      if (!fresh) return;
+      if (ps === 'Failed' || ps === 'Canceled') {
+        this.fail(fresh, 'Unerwartete Antwort von Azure');
+        return;
+      }
       if (ps === 'InProgress') return;
       if (ps === 'Succeeded') continue;
       switch (kind) {
         case 'vnet':
-          this.patch(r.id, { stateText: 'Netzwerk wird angelegt' });
-          return az.putVnet(creds, region);
+          if (say('Netzwerk wird angelegt')) await az.putVnet(creds, region);
+          return;
         case 'nsg':
-          this.patch(r.id, { stateText: 'Firewall wird angelegt' });
-          return az.putNsg(creds, r.name, region, []);
+          if (say('Firewall wird angelegt')) await az.putNsg(creds, r.name, region, []);
+          return;
         case 'ip':
-          this.patch(r.id, { stateText: 'Öffentliche IP wird angelegt' });
-          return az.putPublicIp(creds, r.name, region);
+          if (say('Öffentliche IP wird angelegt')) await az.putPublicIp(creds, r.name, region);
+          return;
         case 'nic':
-          this.patch(r.id, { stateText: 'Netzwerkkarte wird angelegt' });
-          return az.putNic(creds, r.name, region, r.publicIpEnabled);
+          if (say('Netzwerkkarte wird angelegt')) {
+            await az.putNic(creds, r.name, region, r.publicIpEnabled);
+          }
+          return;
         case 'vm':
-          return this.putVm(r, creds, region);
+          return this.putVm(fresh, creds, region);
       }
     }
     const ip = r.publicIpEnabled ? await az.publicIpAddress(creds, r.name, region) : null;
-    this.appliedNsg.set(r.id, '[]');
-    this.setState(r.id, 'installing', {
-      publicIp: ip,
-      stateText: 'Docker, Tailscale und Agent werden installiert',
-    });
+    // The VM exists and runs (also if its PUT answered with a transient error).
+    const done = this.setState(
+      r.id,
+      'installing',
+      {
+        publicIp: ip,
+        vmPowered: true,
+        stateText: 'Docker, Tailscale und Agent werden installiert',
+      },
+      'creating',
+    );
+    if (done) this.appliedNsg.set(r.id, '[]');
   }
 
   private async putVm(
@@ -1017,14 +1223,17 @@ export class CloudService implements GameCloudHost {
     region: AzureRegion,
   ): Promise<void> {
     const key = this.store.tailscaleKey();
-    if (key.kind === 'unreadable') return this.fail(r, UNREADABLE);
+    if (key.kind === 'unreadable') {
+      this.fail(r, UNREADABLE);
+      return;
+    }
     if (key.kind === 'missing') {
-      this.patch(r.id, { stateText: 'Wartet auf den Tailscale-Auth-Key' });
+      this.patch(r.id, { stateText: 'Wartet auf den Tailscale-Auth-Key' }, 'creating');
       return;
     }
     const hub = this.deps.onboarding.hub();
     if (!hub) {
-      this.patch(r.id, { stateText: 'Wartet auf HZ_BASE_URL' });
+      this.patch(r.id, { stateText: 'Wartet auf HZ_BASE_URL' }, 'creating');
       return;
     }
     if (r.onboardingId) this.deps.onboarding.cancel(r.onboardingId);
@@ -1038,12 +1247,25 @@ export class CloudService implements GameCloudHost {
       onboardingId = o.id;
     } catch (err) {
       if (err instanceof OnboardingError) {
-        this.patch(r.id, { stateText: 'Wartet auf einen freien Einrichtungscode' });
+        this.patch(
+          r.id,
+          { onboardingId: null, stateText: 'Wartet auf einen freien Einrichtungscode' },
+          'creating',
+        );
         return;
       }
       throw err;
     }
-    this.patch(r.id, { onboardingId, stateText: 'Server wird bestellt' });
+    // From the PUT on the VM may run: billed until Azure reports it deallocated or gone.
+    const set = this.patch(
+      r.id,
+      { onboardingId, vmPowered: true, stateText: 'Server wird bestellt' },
+      'creating',
+    );
+    if (!set) {
+      this.deps.onboarding.cancel(onboardingId);
+      return;
+    }
     const customData = cloudInitCustomData({
       name: r.name,
       tailscaleAuthKey: key.value,
@@ -1061,7 +1283,12 @@ export class CloudService implements GameCloudHost {
         customData,
       });
     } catch (err) {
-      this.deps.onboarding.cancel(onboardingId);
+      // Timeout, network, 5xx: the VM may exist; the code stays and the next tick
+      // asks Azure. A definite refusal (4xx) created nothing: the code goes.
+      if (!(err instanceof AzureError && err.transient)) {
+        this.deps.onboarding.cancel(onboardingId);
+        this.patch(r.id, { onboardingId: null, vmPowered: false });
+      }
       throw err;
     }
   }
@@ -1075,8 +1302,14 @@ export class CloudService implements GameCloudHost {
       this.deps.hub.isConnected(status.serverId)
     ) {
       const serverId = status.serverId;
+      const next = this.setState(
+        r.id,
+        'running',
+        { serverId, onboardingId: null, idleSince: null },
+        'installing',
+      );
+      if (!next) return;
       this.deps.servers.update(serverId, { network: 'cloud' });
-      this.setState(r.id, 'running', { serverId, onboardingId: null, idleSince: null });
       writeAudit(this.deps.db, now, {
         actor: 'system',
         action: 'cloud.machine_ready',
@@ -1084,30 +1317,68 @@ export class CloudService implements GameCloudHost {
         details: { name: r.name, serverId },
       });
       this.deps.alerts.resolve(`cloud:${r.id}:failed`);
-      const next = this.row(r.id);
-      if (next) await this.running(next, creds);
+      await this.running(next, creds);
       return;
     }
     if (!status || status.state === 'expired' || now - r.stateChangedAt > INSTALL_TIMEOUT_MS) {
-      this.fail(r, 'Agent hat sich nicht gemeldet');
-      // A VM without agent only costs money.
-      if (creds)
+      // A VM without agent only costs money (retried while failed).
+      if (this.fail(r, 'Agent hat sich nicht gemeldet') && creds) {
         await this.deps.azure.deallocate(creds, r.name, this.regionOf(r)).catch(() => undefined);
+      }
     }
   }
 
   private async running(r: CloudMachineRow, creds: AzureCredentials | null): Promise<void> {
     if (!r.serverId) return;
-    const connected = this.deps.hub.isConnected(r.serverId);
-    if (connected && r.pendingGameJson !== null) this.createPendingGame(r, r.serverId);
+    if (this.deps.hub.isConnected(r.serverId)) {
+      this.offlineSince.delete(r.id);
+      if (r.pendingGameJson !== null) this.createPendingGame(r, r.serverId);
+    } else if (await this.agentGone(r, r.serverId, creds)) return;
     if (creds) await this.syncNsg(r, creds);
-    const fresh = this.row(r.id);
+    const fresh = this.still(r.id, 'running');
     if (!fresh) return;
     if (this.ready(fresh)) {
       this.startRequestedAt.delete(fresh.id);
       this.resolveWaiters(fresh.id, true);
     }
     if (creds) await this.idleCheck(fresh, creds);
+  }
+
+  /**
+   * The agent of a running VM is gone (crash, Tailscale down): after
+   * CLOUD_START_TIMEOUT_MINUTES the VM is deallocated anyway, nobody can use it.
+   * True if the machine was put to sleep.
+   */
+  private async agentGone(
+    r: CloudMachineRow,
+    serverId: string,
+    creds: AzureCredentials | null,
+  ): Promise<boolean> {
+    const now = this.deps.now();
+    let since = this.offlineSince.get(r.id);
+    if (since === undefined) {
+      since = this.deps.hub.disconnectedAt(serverId) ?? now;
+      this.offlineSince.set(r.id, since);
+    }
+    if (now - since <= START_TIMEOUT_MS || !creds) return false;
+    if (!this.setState(r.id, 'stopping', { idleSince: null }, 'running')) return true;
+    this.offlineSince.delete(r.id);
+    writeAudit(this.deps.db, now, {
+      actor: 'system',
+      action: 'cloud.machine_agent_lost',
+      target: r.id,
+      details: { name: r.name, minutes: CLOUD_START_TIMEOUT_MINUTES },
+    });
+    this.deps.alerts.raise(
+      `cloud:${r.id}:agent`,
+      'warn',
+      `Cloud-Server ${r.name} ohne Agent schlafen gelegt`,
+      `Der Agent hat sich seit ${CLOUD_START_TIMEOUT_MINUTES} Min nicht gemeldet. Die VM wird freigegeben, damit sie nichts kostet; auf der Seite Cloud neu starten.`,
+      serverId,
+      'system',
+    );
+    await this.deps.azure.deallocate(creds, r.name, this.regionOf(r));
+    return true;
   }
 
   private createPendingGame(r: CloudMachineRow, serverId: string): void {
@@ -1180,16 +1451,16 @@ export class CloudService implements GameCloudHost {
 
   private async idleCheck(r: CloudMachineRow, creds: AzureCredentials): Promise<void> {
     if (r.idleMinutes <= 0 || !this.idleNow(r)) {
-      if (r.idleSince !== null) this.patch(r.id, { idleSince: null });
+      if (r.idleSince !== null) this.patch(r.id, { idleSince: null }, 'running');
       return;
     }
     const now = this.deps.now();
     if (r.idleSince === null) {
-      this.patch(r.id, { idleSince: now });
+      this.patch(r.id, { idleSince: now }, 'running');
       return;
     }
     if (now - r.idleSince < r.idleMinutes * 60_000) return;
-    this.setState(r.id, 'stopping', { idleSince: null });
+    if (!this.setState(r.id, 'stopping', { idleSince: null }, 'running')) return;
     writeAudit(this.deps.db, now, {
       actor: 'system',
       action: 'cloud.machine_idle_stop',
@@ -1211,46 +1482,48 @@ export class CloudService implements GameCloudHost {
     const region = this.regionOf(r);
     const ps = await this.deps.azure.powerState(creds, r.name, region);
     if (ps === 'deallocated' || ps === null) {
+      this.patch(r.id, { vmPowered: false });
+      const fresh = this.still(r.id, 'stopping');
+      if (!fresh) return;
       this.startIssued.delete(r.id);
-      if (this.wantStart.delete(r.id)) {
-        this.setState(r.id, 'starting');
+      if (this.wantStart.has(r.id)) {
+        if (this.setState(r.id, 'starting', {}, 'stopping')) this.wantStart.delete(r.id);
         return;
       }
-      this.setState(r.id, 'deallocated');
-      await this.syncNsg(r, creds);
+      if (this.setState(r.id, 'deallocated', {}, 'stopping')) await this.syncNsg(fresh, creds);
       return;
     }
-    if (ps === 'deallocating') return;
+    if (ps === 'deallocating' || !this.still(r.id, 'stopping')) return;
     await this.deps.azure.deallocate(creds, r.name, region);
   }
 
   private async starting(r: CloudMachineRow, creds: AzureCredentials): Promise<void> {
     const region = this.regionOf(r);
     const now = this.deps.now();
-    if (now - r.stateChangedAt > START_TIMEOUT_MS) {
-      this.fail(r, 'Agent hat sich nicht gemeldet');
-      await this.deps.azure.deallocate(creds, r.name, region).catch(() => undefined);
-      return;
-    }
     if (!this.startIssued.has(r.id)) {
       this.startRequestedAt.set(r.id, this.startRequestedAt.get(r.id) ?? now);
+      // Billed from the start request on (a timed-out POST may have started it).
+      if (!this.patch(r.id, { vmPowered: true, stateText: 'VM startet' }, 'starting')) return;
       await this.deps.azure.start(creds, r.name, region);
-      this.startIssued.add(r.id);
-      this.patch(r.id, { stateText: 'VM startet' });
+      if (this.still(r.id, 'starting')) this.startIssued.add(r.id);
       return;
     }
     const ps = await this.deps.azure.powerState(creds, r.name, region);
-    if (ps !== 'running') return;
-    if (!r.serverId || !this.deps.hub.isConnected(r.serverId)) {
-      if (r.stateText !== 'Wartet auf den Agent')
-        this.patch(r.id, { stateText: 'Wartet auf den Agent' });
+    const fresh = this.still(r.id, 'starting');
+    if (!fresh || ps !== 'running') return;
+    if (!fresh.serverId || !this.deps.hub.isConnected(fresh.serverId)) {
+      if (fresh.stateText !== 'Wartet auf den Agent') {
+        this.patch(r.id, { stateText: 'Wartet auf den Agent' }, 'starting');
+      }
       return;
     }
-    if (!this.ready(r)) return;
+    if (!this.ready(fresh)) return;
+    if (!this.setState(r.id, 'running', { idleSince: null }, 'starting')) return;
     this.startIssued.delete(r.id);
     this.startRequestedAt.delete(r.id);
-    this.setState(r.id, 'running', { idleSince: null });
+    this.offlineSince.delete(r.id);
     this.deps.alerts.resolve(`cloud:${r.id}:failed`);
+    this.deps.alerts.resolve(`cloud:${r.id}:agent`);
     this.resolveWaiters(r.id, true);
   }
 
@@ -1259,12 +1532,18 @@ export class CloudService implements GameCloudHost {
     const region = this.regionOf(r);
     for (const kind of ['vm', 'nic', 'ip', 'nsg', 'disk'] as const) {
       const ps = await az.provisioningState(creds, kind, r.name, region);
-      if (ps === null) continue;
-      this.patch(r.id, { stateText: `${CLOUD_MACHINE_STATE_TEXT.deleting}: ${DELETE_TEXT[kind]}` });
+      if (ps === null) {
+        // The VM is gone: nothing runs any more.
+        if (kind === 'vm') this.patch(r.id, { vmPowered: false });
+        continue;
+      }
+      const stateText = `${CLOUD_MACHINE_STATE_TEXT.deleting}: ${DELETE_TEXT[kind]}`;
+      if (!this.patch(r.id, { stateText }, 'deleting')) return;
       if (ps !== 'InProgress') await az.remove(creds, kind, r.name, region);
       return;
     }
-    this.finishDelete(r);
+    const fresh = this.still(r.id, 'deleting');
+    if (fresh) this.finishDelete(fresh);
   }
 
   private finishDelete(r: CloudMachineRow): void {
@@ -1280,6 +1559,7 @@ export class CloudService implements GameCloudHost {
     this.deps.alerts.resolveAllWithPrefix(`cloud:${r.id}:`);
     this.deps.db.delete(cloudMachines).where(eq(cloudMachines.id, r.id)).run();
     this.appliedNsg.delete(r.id);
+    this.offlineSince.delete(r.id);
     this.startIssued.delete(r.id);
     this.startRequestedAt.delete(r.id);
     this.resolveWaiters(r.id, false);
@@ -1295,7 +1575,7 @@ export class CloudService implements GameCloudHost {
     if (this.rows().length === 0 && !this.deps.alerts.active(BUDGET_ALERT)) return;
     const b = this.budget();
     const month = monthKey(this.deps.now());
-    const body = `${eurFmt.format(b.monthEur)} von ${eurFmt.format(b.limitEur)} im Monat ${month} (Schätzung).`;
+    const body = `${formatEur(b.monthEur)} von ${formatEur(b.limitEur)} im Monat ${month} (Schätzung).`;
     if (b.state === 'over') {
       this.deps.alerts.raise(
         BUDGET_ALERT,

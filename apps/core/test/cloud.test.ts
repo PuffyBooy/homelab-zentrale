@@ -15,12 +15,15 @@ import {
   order,
   orderBody,
   orderedWithGame,
+  pass,
   req,
+  sleepMachine,
   untilState,
   withCloud,
   type CloudSetup,
   type SimAgent,
 } from './cloud-helpers.js';
+import { formatEurHour } from '../src/cloud/service.js';
 import { fakeSecret } from './games-helpers.js';
 import { HOST } from './helpers.js';
 
@@ -37,11 +40,6 @@ afterEach(async () => {
 async function setup(opts: Parameters<typeof withCloud>[0] = {}): Promise<CloudSetup> {
   s = await withCloud(opts);
   return s;
-}
-
-/** Advances the clock in 30 s steps, keeping the agent alive (heartbeat 90 s). */
-async function pass(c: CloudSetup, ms: number, agent?: SimAgent, step = 30_000): Promise<void> {
-  for (let left = ms; left > 0; left -= step) await cloudTick(c, Math.min(step, left), agent);
 }
 
 async function shareLink(c: CloudSetup, gameId: string): Promise<string> {
@@ -68,20 +66,6 @@ function friendStart(c: CloudSetup, token: string) {
     },
     payload: { action: 'start' },
   });
-}
-
-/** Lets the machine fall asleep: game stopped, idle time over, VM deallocated. */
-async function sleepMachine(c: CloudSetup, id: string, gameId: string, agent: SimAgent) {
-  const stop = await req(c, 'POST', `/api/games/${gameId}/stop`);
-  expect(stop.statusCode).toBe(200);
-  await cloudTick(c, 5_000, agent);
-  expect(machineOf(c, id).state).toBe('running');
-  c.azure.onPower = (_vm, state) => {
-    if (state === 'deallocated') void agent.disconnect();
-  };
-  await pass(c, 15 * 60_000, agent);
-  await untilState(c, id, 'deallocated');
-  await until(() => !c.t.app.hzCore.hub.isConnected(agent.serverId));
 }
 
 describe('cloud servers (M22)', { timeout: 60_000 }, () => {
@@ -286,6 +270,7 @@ describe('cloud servers (M22)', { timeout: 60_000 }, () => {
     await cloudTick(c);
     const warn = c.t.app.hzCore.alerts.active('cloud:budget');
     expect(warn?.level).toBe('warn');
+    expect(warn?.body).toMatch(/^0,\d{2} € von 1,00 € im Monat \d{4}-\d{2} \(Schätzung\)\.$/);
     expect(c.t.app.hzCore.cloud.budget().state).toBe('warn');
     setHours(12);
     await cloudTick(c);
@@ -302,7 +287,7 @@ describe('cloud servers (M22)', { timeout: 60_000 }, () => {
     expect(errorResponseSchema.parse(g.json())).toEqual({
       ok: false,
       error: 'over_budget',
-      message: CLOUD_GAME_TEXT.overBudget,
+      message: 'Cloud-Budget aufgebraucht. Auf der Cloud-Seite mit Bestätigung starten.',
     });
     // Machine start and a new order need overBudget.
     expect((await req(c, 'POST', `/api/cloud/machines/${machine.id}/start`)).statusCode).toBe(409);
@@ -333,7 +318,8 @@ describe('cloud servers (M22)', { timeout: 60_000 }, () => {
     const body = errorResponseSchema.parse(res.json());
     expect(body.error).toBe('price_changed');
     expect(body.currentEurPerHour).toBe(B2MS_RUNNING);
-    expect(body.message).toMatch(/^Der Preis hat sich geändert: jetzt €\s0,\d+ pro Stunde$/);
+    expect(body.message).toBe(`Der Preis hat sich geändert: jetzt ${formatEurHour(B2MS_RUNNING)}`);
+    expect(formatEurHour(B2MS_RUNNING)).toMatch(/^0,\d{2,4} €\/Std$/);
     expect(c.t.app.hzCore.cloud.overview().machines).toEqual([]);
     // Within the tolerance: accepted.
     expect(

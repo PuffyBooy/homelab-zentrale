@@ -991,6 +991,8 @@ export const cloudMachines = sqliteTable(
     computeEurPerHour: real('compute_eur_per_hour').notNull(),
     /** 'live' | 'estimate' */
     priceSource: text('price_source').notNull().default('estimate'),
+    /** The VM may be powered at Azure: running time is counted (billing). */
+    vmPowered: integer('vm_powered', { mode: 'boolean' }).notNull().default(false),
     stateChangedAt: integer('state_changed_at').notNull(),
     createdAt: integer('created_at').notNull(),
     /** Last change, also the last usage accounting (restart-safe running time). */

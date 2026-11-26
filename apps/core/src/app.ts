@@ -923,6 +923,7 @@ export async function buildApp(config: Config, deps: AppDeps = {}): Promise<Fast
     tokens,
     metrics,
     alerts,
+    ownedByCloud: (id) => cloud.ownsServer(id),
   });
   await app.register(onboardingRoutes, { prefix: '/api', db: db.db, now, onboarding });
   await app.register(installScriptRoutes, { onboarding });
