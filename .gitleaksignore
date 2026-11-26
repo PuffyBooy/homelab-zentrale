@@ -1,3 +1,5 @@
 # Fake GitHub tokens in tests of the M5 WIP commit (split in later commits).
 5f48a153ca3787d849fce66fa08e077875a0a264:apps/core/test/github.test.ts:github-pat:86
 5f48a153ca3787d849fce66fa08e077875a0a264:apps/core/test/github-helpers.ts:github-pat:21
+# Fake RCON password in an M6 WIP test.
+d9cc83cdcd7febb382e19d26cceaa74d27e06018:apps/agent/test/games.security.test.ts:generic-api-key:37
