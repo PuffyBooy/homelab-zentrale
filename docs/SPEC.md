@@ -82,6 +82,7 @@ Alles aktualisiert sich live über WebSocket. Es gibt kein Neuladen.
 - Updates: Anzahl offener Pakete, davon Sicherheitsupdates, „Neustart nötig“
 - Sicherheit: fehlgeschlagene SSH-Logins (24 h), von fail2ban gesperrte IPs (falls installiert), offene Ports (`ss -tlnp`)
 - Container dieses Servers (Abschnitt 6)
+- Mehr Überwachung und Verwaltung: 5.5; Auto-Update: 5.6
 - Aktionen: „Aufräumen“ (zeigt vorher die frei werdenden GB: apt-Cache, alte Kernel, Journal > 200 MB, ungenutzte Docker-Images) und „Neustart“ (Danger, mit Bestätigung durch Eintippen des Servernamens)
 
 ### 5.3 Server hinzufügen (Enrollment)
@@ -97,6 +98,22 @@ Für Server mit Festplatten, vor allem ein NAS wie das UGREEN NASync (UGOS Pro i
 - **Schlafende Platten** werden nie geweckt: SMART wird mit `--nocheck=standby` gelesen und höchstens alle 10 Min; während die Platte schläft, bleiben die letzten Werte stehen, die Temperatur zeigt „schläft“.
 - Nur lesend: Die Zentrale ändert nichts am RAID und an den Platten.
 - Modul „NAS und Speicher“ (Standard an), unter Einstellungen → Module abschaltbar.
+
+### 5.5 Einzelserver: Überwachung und Verwaltung (M16)
+Das Serverdetail ersetzt für die tägliche Pflege den SSH-Login. Es baut auf 5.2 und 5.4 auf:
+- **Verlauf:** Zeitraum 1 h, 24 h, 7 Tage, 30 Tage für CPU, RAM, Netz ein/aus, Temperatur und die höchste Disk-Belegung, je mit Min, Ø und Max.
+- **Speicher:** Partitionen mit Belegung; **größte Ordner** ab `/` zum Hineinklicken (nur lesend, bleibt auf einem Dateisystem, nie `/proc`, `/sys`, `/dev`, `/run`); **Docker-Belegung** (Images, Container, Volumes, Build-Cache, jeweils wie viel ungenutzt ist). **Aufräumen** zeigt wie bisher vorher die frei werdenden GB und lässt jetzt einzeln wählen: apt-Cache, alte Kernel, Journal über 200 MB, ungenutzte Docker-Images (wie `docker image prune -a`), Build-Cache. Container und Volumes löscht die Zentrale nie, weil schlafende Gameserver gestoppte Container sind und Volumes Daten enthalten.
+- **Dienste:** alle systemd-Dienste mit Zustand, fehlgeschlagene zuerst. Ein fehlgeschlagener Dienst ergibt eine `warn`-Meldung, die sich mit OK erledigt. Starten, Stoppen und Neustarten geht nur für Dienste, die auf dem Server in `HZ_AGENT_SERVICES` stehen (z. B. `HZ_AGENT_SERVICES=nginx.service,smbd.service`), und nie für Dienste, ohne die der Server unerreichbar würde (tailscaled, docker, containerd, ssh, systemd-*, Netzwerk).
+- **Prozesse:** die 25 größten nach CPU oder RAM mit PID, Name, Benutzer, CPU, RAM und Container. Nur Prozessnamen, keine Kommandozeilen (dort stehen oft Passwörter).
+- **Neustart und Herunterfahren:** beide mit Step-up und dem eingetippten Servernamen. Ein heruntergefahrener Server bleibt aus, bis ihn jemand einschaltet (oder per Wake-on-LAN).
+
+### 5.6 Auto-Update (M17)
+- Die Zentrale und jeder Agent aktualisieren sich selbst aus ihrem Image-Tag (Standard: `ghcr.io/<owner>/homelab-core:latest` bzw. `homelab-agent:latest`; wer eine feste Version pinnt, bekommt nur Updates dieses Tags). Optional auch die Betriebssystem-Pakete (apt) und ein Neustart, wenn danach einer nötig ist.
+- **Richtlinie pro Server:** Agent (an), Zentrale (an, nur am Server, auf dem die Zentrale läuft), OS-Pakete (aus), Neustart bei Bedarf (aus, Einschalten mit Step-up), Wartungsfenster (Wochentage, Start, Dauer; Standard täglich 03:00 für 2 Stunden, Zeitzone `HZ_TIMEZONE`).
+- **Ablauf im Fenster:** Server nacheinander, der Server der Zentrale zuletzt; je Server OS-Pakete → Agent → Zentrale → Neustart. Jeder Schritt läuft höchstens einmal pro Fenster und startet nie nach dessen Ende. „Jetzt prüfen“ und „Jetzt aktualisieren“ gehen jederzeit.
+- **Rollback:** Ein neues Image muss binnen 3 Min gesund sein (Zentrale: Docker-Health-Check `/api/health`; Agent: wieder mit der Zentrale verbunden). Sonst läuft automatisch wieder der alte Container. Die Daten (Volumes) bleiben in beiden Fällen unberührt.
+- **Meldungen:** Erfolg als `info` mit alter und neuer Version, Rollback und „keine Rückmeldung nach 15 Min“ als `warn`, „nach dem Fehler läuft nichts mehr“ als `crit`. Unter Einstellungen → Updates stehen alle Server mit Version und die letzten 50 Läufe.
+- Läuft die Zentrale auf keinem Server mit Agent, aktualisiert sie sich nicht selbst; dann gilt `sudo ./deploy/install.sh update`.
 
 ## 6. Container und Gameserver
 
