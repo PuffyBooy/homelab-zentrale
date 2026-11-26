@@ -15,7 +15,6 @@ import {
   type ContainerSummary,
   type GamePriorityRequest,
   type GamePriorityResponse,
-  type InsufficientRamDetails,
   type Priority,
   type ScheduleWindow,
   type ServerThrottleResponse,
@@ -47,7 +46,7 @@ import {
   type GameServerRow,
   type ServerRow,
 } from '../db/schema.js';
-import { GAMES_ROOT, type GameService } from '../games/service.js';
+import { GAMES_ROOT, type GameService, type RamCheckResult } from '../games/service.js';
 import { HttpError } from '../http/errors.js';
 import { activeWindows, tierRule, type TierRule } from './schedule.js';
 import {
@@ -79,7 +78,7 @@ const MIB = 1024 * 1024;
 /**
  * RCON command that saves the world before an automatic stop. Templates have no
  * field for it yet (docs/QUESTIONS.md 2026-11-26); unknown templates are stopped
- * without saving (compose stop lets the game save on SIGTERM anyway).
+ * without saving (compose down lets the game save on SIGTERM anyway).
  */
 const SAVE_COMMANDS: Record<string, string> = {
   'minecraft-java': 'save-all',
@@ -121,6 +120,9 @@ interface ServerConfig {
 
 type Actor = 'admin' | 'system';
 
+type LiftWhy =
+  'recovered' | 'window' | 'priority' | 'disabled' | 'admin' | 'recreated' | 'stopped' | 'removed';
+
 function parseJson(json: string | null): unknown {
   if (json === null) return null;
   try {
@@ -159,6 +161,11 @@ export class ThrottleService {
   private readonly runtime = new Map<string, Runtime>();
   /** Containers the admin unthrottled during a `cpus` window: not limited again until it ends. */
   private readonly scheduleSkip = new Set<string>();
+  /**
+   * RAM held by game starts that passed the check but whose compose up has not
+   * returned yet (the metrics do not show them yet): serverId -> hold -> bytes.
+   */
+  private readonly held = new Map<string, Map<symbol, number>>();
 
   constructor(private readonly deps: ThrottleDeps) {}
 
@@ -460,16 +467,28 @@ export class ThrottleService {
 
   // ---- RAM reserve ---------------------------------------------------------------------
 
+  /** RAM of the server from metrics at most METRICS_FRESH_MS old, else null (unknown). */
   private latestRam(serverId: string): { usedBytes: number; totalBytes: number } | null {
     const st = this.deps.db
-      .select({ m: serverState.metricsJson })
+      .select({ m: serverState.metricsJson, at: serverState.metricsAt })
       .from(serverState)
       .where(eq(serverState.serverId, serverId))
       .get();
-    const m = parseJson(st?.m ?? null) as {
+    if (st?.at == null || this.deps.now() - st.at > METRICS_FRESH_MS) return null;
+    const m = parseJson(st.m ?? null) as {
       ram?: { usedBytes: number; totalBytes: number };
     } | null;
-    return m?.ram ?? null;
+    const ram = m?.ram;
+    if (!ram || typeof ram.usedBytes !== 'number' || typeof ram.totalBytes !== 'number') {
+      return null;
+    }
+    return ram.totalBytes > 0 ? ram : null;
+  }
+
+  private heldBytes(serverId: string): number {
+    let sum = 0;
+    for (const b of this.held.get(serverId)?.values() ?? []) sum += b;
+    return sum;
   }
 
   private containersOf(serverId: string): ContainerRow[] {
@@ -498,17 +517,41 @@ export class ThrottleService {
     return this.reserveBytes(serverId, this.config(serverId).settings, new Set(own));
   }
 
-  ramCheck(
-    serverId: string,
-    neededBytes: number,
-    own: readonly string[],
-  ): InsufficientRamDetails | null {
+  /**
+   * Whether `neededBytes` fit into free RAM minus the reserve minus the RAM held
+   * by starts still in flight on the same server (`holdRam`). `freeBytes` in the
+   * details already has the held RAM taken off.
+   */
+  ramCheck(serverId: string, neededBytes: number, own: readonly string[]): RamCheckResult {
     const ram = this.latestRam(serverId);
-    if (!ram) return null;
-    const freeBytes = Math.max(0, ram.totalBytes - ram.usedBytes);
+    if (!ram) return { kind: 'unknown' };
+    const freeBytes = Math.max(0, ram.totalBytes - ram.usedBytes - this.heldBytes(serverId));
     const reserveBytes = this.reserveBytes(serverId, this.config(serverId).settings, new Set(own));
-    if (freeBytes - reserveBytes >= neededBytes) return null;
-    return { freeBytes, reserveBytes, neededBytes };
+    if (freeBytes - reserveBytes >= neededBytes) return { kind: 'fits' };
+    return { kind: 'insufficient', details: { freeBytes, reserveBytes, neededBytes } };
+  }
+
+  /**
+   * Holds `bytes` for a start in flight; the returned function releases it
+   * (idempotent, after compose up returned or failed). Check and hold run
+   * synchronously one after the other, so two concurrent starts on a server
+   * never both count the same free RAM.
+   */
+  holdRam(serverId: string, bytes: number): () => void {
+    if (bytes <= 0) return () => undefined;
+    const key = Symbol('hold');
+    let m = this.held.get(serverId);
+    if (!m) {
+      m = new Map();
+      this.held.set(serverId, m);
+    }
+    m.set(key, bytes);
+    return () => {
+      const cur = this.held.get(serverId);
+      if (!cur) return;
+      cur.delete(key);
+      if (cur.size === 0) this.held.delete(serverId);
+    };
   }
 
   // ---- top consumers ---------------------------------------------------------------------
@@ -631,15 +674,18 @@ export class ThrottleService {
     this.notify(row);
   }
 
-  /** Removes a throttle and restores the limit from before (when the container still exists). */
-  private async lift(
-    t: ContainerThrottleRow,
-    actor: Actor,
-    why: 'recovered' | 'window' | 'priority' | 'disabled' | 'admin' | 'recreated' | 'stopped',
-  ): Promise<void> {
+  /**
+   * Removes a throttle and restores the limit from before. Skipped only when the
+   * container the limit belonged to is gone: recreated (other docker id) or
+   * removed (deleted from the inventory, or a game stopped via compose down).
+   * A stopped plain container keeps its HostConfig.NanoCpus, so `stopped` does
+   * restore it (docker update works on stopped containers); otherwise it would
+   * start again with the throttle invisibly in place.
+   */
+  private async lift(t: ContainerThrottleRow, actor: Actor, why: LiftWhy): Promise<void> {
     if (t.cpus === null) return;
     const row = this.deps.containers.row(t.containerId);
-    if (row && row.dockerId === t.dockerId && why !== 'recreated' && why !== 'stopped') {
+    if (row && row.dockerId === t.dockerId && why !== 'recreated' && why !== 'removed') {
       await this.setLimit(row, validCpus(t.originalCpus));
     }
     const now = this.deps.now();
@@ -658,7 +704,7 @@ export class ThrottleService {
     });
     if (t.by === 'auto') {
       const key = throttleKey(t.serverId, t.containerName);
-      if (why === 'stopped') {
+      if (why === 'stopped' || why === 'removed') {
         const a = this.deps.alerts.active(key);
         if (a) this.deps.alerts.resolveById(a.id);
       } else {
@@ -696,7 +742,10 @@ export class ThrottleService {
    * that runs again is no longer "automatisch gestoppt".
    */
   onContainerChange(id: string, deleted: boolean): void {
-    if (deleted) return;
+    if (deleted) {
+      this.onContainerDeleted(id);
+      return;
+    }
     const t = this.throttleRow(id);
     if (!t) return;
     const row = this.deps.containers.row(id);
@@ -727,6 +776,29 @@ export class ThrottleService {
       changed = true;
     }
     if (changed) this.notify(row);
+  }
+
+  /**
+   * A container is gone from the inventory: its restart attempts and its throttle
+   * go (the limit belonged to it). A plain container's "automatisch gestoppt"
+   * mark and alert go too (nothing left to start again). A game keeps the mark:
+   * compose down removes its container, "Wieder starten" goes through the game.
+   */
+  private onContainerDeleted(id: string): void {
+    const db = this.deps.db;
+    db.delete(wichtigRestarts).where(eq(wichtigRestarts.containerId, id)).run();
+    this.scheduleSkip.delete(id);
+    const t = this.throttleRow(id);
+    if (!t) return;
+    if (t.cpus !== null) {
+      void this.lift(t, 'system', 'removed').catch((err: unknown) => this.logErr(err, 'lift'));
+    }
+    if (t.gameId !== null) return;
+    db.delete(containerThrottles).where(eq(containerThrottles.containerId, id)).run();
+    if (t.autoStoppedAt !== null) {
+      const a = this.deps.alerts.active(autoStopKey(t.serverId, t.containerName));
+      if (a) this.deps.alerts.resolveById(a.id);
+    }
   }
 
   /** A game was deleted: its rows go. */
@@ -796,17 +868,19 @@ export class ThrottleService {
     }
   }
 
-  /** Scheduler job (every metrics interval): every connected server once. */
+  /**
+   * Scheduler job (every metrics interval): every connected server once, in
+   * parallel, so a hung agent does not delay the rule set (e.g. a wichtig
+   * restart) on the other servers.
+   */
   async tick(): Promise<void> {
-    const list = this.deps.db.select().from(servers).all();
-    for (const s of list) {
-      if (!this.deps.hub.isConnected(s.id)) continue;
-      try {
-        await this.tickServer(s);
-      } catch (err) {
-        this.logErr(err, 'tick');
-      }
-    }
+    const list = this.deps.db
+      .select()
+      .from(servers)
+      .all()
+      .filter((s) => this.deps.hub.isConnected(s.id));
+    const results = await Promise.allSettled(list.map((s) => this.tickServer(s)));
+    for (const r of results) if (r.status === 'rejected') this.logErr(r.reason, 'tick');
   }
 
   private async tickServer(server: ServerRow): Promise<void> {
@@ -921,6 +995,12 @@ export class ThrottleService {
     const reason = loadReason(server.name, rt.load, now - rt.overSince);
     const byCpu = (a: { row: ContainerRow }, b: { row: ContainerRow }) =>
       (b.row.cpu ?? -1) - (a.row.cpu ?? -1);
+    const stopMs = s.stopAfterMinutes * MIN;
+    // The first automatic throttle of this over period is due at overFrom.
+    const overFrom = rt.overSince + forMs;
+    // From forMinutes + stopAfterMinutes on, throttling further candidates does
+    // not postpone the stop branch.
+    const stopDue = now - overFrom >= stopMs;
 
     // Throttle: one niedrig container per forMinutes step, highest CPU first.
     if (rt.lastThrottleAt === null || now - rt.lastThrottleAt >= forMs) {
@@ -940,13 +1020,11 @@ export class ThrottleService {
           this.throttle(cand.row, cand.e, s.throttleCpus, 'auto', reason, 'system'),
         );
         rt.lastThrottleAt = now;
-        return;
+        if (!stopDue) return;
       }
     }
 
     // Stop: throttled niedrig containers with "darf gestoppt werden", still over after stopAfterMinutes.
-    const stopMs = s.stopAfterMinutes * MIN;
-    const overFrom = rt.overSince + forMs;
     const stoppable = items
       .filter(({ row, e }) => {
         if (row.state !== 'running' || e.protected || e.priority !== 'niedrig' || !e.allowStop) {
@@ -967,8 +1045,9 @@ export class ThrottleService {
   private async autoStop(row: ContainerRow, e: Effective, reason: string): Promise<boolean> {
     const game = e.game;
     if (game) {
-      const players = this.deps.games.summary(game.id)?.players?.online ?? 0;
-      if (players > 0 && !e.allowStopWithPlayers) return false;
+      // Unknown player count (no fresh answer) counts as "maybe online".
+      const players = this.deps.games.summary(game.id)?.players?.online;
+      if ((players === undefined || players > 0) && !e.allowStopWithPlayers) return false;
       const save = SAVE_COMMANDS[game.templateId];
       if (save && this.deps.games.hasRcon(game.id)) {
         try {
@@ -1000,7 +1079,11 @@ export class ThrottleService {
     }
     const now = this.deps.now();
     const t = this.throttleRow(row.id);
-    if (t && t.cpus !== null) await this.safe('lift', this.lift(t, 'system', 'stopped'));
+    // A game's compose down removed its container (the limit went with it); a plain
+    // stopped container still has the limit: restore it before it runs again.
+    if (t && t.cpus !== null) {
+      await this.safe('lift', this.lift(t, 'system', game ? 'removed' : 'stopped'));
+    }
     this.upsertThrottle(row, game?.id ?? null, { autoStoppedAt: now });
     writeAudit(this.deps.db, now, {
       actor: 'system',

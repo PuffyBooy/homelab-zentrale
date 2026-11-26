@@ -269,6 +269,11 @@ describe('insufficient_ram error', () => {
     );
     expect(insufficientRamDetailsSchema.safeParse({ ...details, x: 1 }).success).toBe(false);
   });
+
+  it('ram_unknown is an API code only (share links answer it as unavailable)', () => {
+    expect(errorCodeSchema.safeParse('ram_unknown').success).toBe(true);
+    expect(shareErrorCodeSchema.safeParse('ram_unknown').success).toBe(false);
+  });
 });
 
 describe('summaries and audit actions', () => {

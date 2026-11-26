@@ -25,7 +25,7 @@ import {
   type Weekday,
 } from '@hz/shared';
 import { api } from './api.js';
-import { formatBytes, formatNumber, formatTime } from './format.js';
+import { formatBytes, formatGrouped, formatNumber, formatTime } from './format.js';
 
 /**
  * M10 (SPEC 6a): priorities, manual and automatic throttling, per-server
@@ -366,7 +366,7 @@ export function parseSettings(
   else errors.throttleCpus = cpus.error;
   const gb = parseDecimal(d.ramReserveMb);
   if (gb == null || gb > RESERVE_MAX_GB) {
-    errors.ramReserveMb = `Zahl von 0 bis ${RESERVE_MAX_GB} GB.`;
+    errors.ramReserveMb = `Zahl von 0 bis ${formatGrouped(RESERVE_MAX_GB, 0, 0)} GB.`;
   } else out.ramReserveMb = Math.round(gb * 1024);
   if (Object.keys(errors).length) return { ok: false, errors };
   return { ok: true, value: out as ThrottleSettings };

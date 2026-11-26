@@ -146,7 +146,7 @@ Jeder Container und jeder Gameserver hat eine **Priorität**:
 Regel pro Server (Schwellen in den Server-Einstellungen, Standard: CPU über 90 % oder RAM über 90 % für 2 Min):
 
 1. **Drosseln:** Die Zentrale begrenzt die CPU der `niedrig`-Container (zuerst den mit der höchsten CPU) auf einen Anteil (Standard 1 Kern) mit `docker update --cpus`. RAM-Limits werden nie automatisch gesenkt (das würde den Prozess abschießen).
-2. **Stoppen:** Bleibt der Server weitere 5 Min über der Schwelle und ist der Container als „darf gestoppt werden“ markiert, stoppt die Zentrale ihn (Gameserver sauber über `compose stop`, vorher Speichern per RCON, wenn vorhanden). Gameserver mit Spielern online werden nur gestoppt, wenn das ausdrücklich erlaubt ist.
+2. **Stoppen:** Bleibt der Server weitere 5 Min über der Schwelle und ist der Container als „darf gestoppt werden“ markiert, stoppt die Zentrale ihn (Gameserver sauber über `compose down` wie beim Stopp von Hand, vorher Speichern per RCON, wenn vorhanden). Gameserver mit Spielern online werden nur gestoppt, wenn das ausdrücklich erlaubt ist.
 3. **Aufheben:** Ist der Server 10 Min unter der Schwelle minus 10 Prozentpunkte, hebt die Zentrale die Drosselung wieder auf. Automatisch gestoppte Container startet sie nicht von selbst neu (Meldung mit Knopf „Wieder starten“).
 
 Jeder Eingriff ist eine `warn`-Meldung mit Grund („minecraft gedrosselt: heimserver CPU 96 % seit 2 Min“) und steht im Protokoll. Die Zentrale und der Agent (`hz.role`) sind immer `wichtig` und nie Ziel. Ein Schalter pro Server schaltet die Automatik ganz ab.

@@ -15,7 +15,7 @@ import {
 } from '@hz/shared';
 import type { Status } from '@hz/ui';
 import { api } from './api.js';
-import { formatNumber, plural } from './format.js';
+import { formatGrouped, formatNumber, plural } from './format.js';
 import type { StatusSentence } from './servers.js';
 
 // ---------------------------------------------------------------------------
@@ -251,26 +251,14 @@ export function metricText(item: HaItem, lastKnown = false): string {
   return p.unit ? `${p.value} ${p.unit}` : p.value;
 }
 
-/** de-AT with a dot as group separator (Intl uses a narrow space for de-AT). */
-function grouped(v: number, minDigits: number, maxDigits: number): string {
-  return new Intl.NumberFormat('de-AT', {
-    minimumFractionDigits: minDigits,
-    maximumFractionDigits: maxDigits,
-    useGrouping: true,
-  })
-    .formatToParts(v)
-    .map((p) => (p.type === 'group' ? '.' : p.value))
-    .join('');
-}
-
 /** "12,40", "1.234,56" (always two decimals, grouped). */
 export function formatEurAmount(v: number): string {
-  return grouped(Math.abs(v) < 0.005 ? 0 : v, 2, 2);
+  return formatGrouped(Math.abs(v) < 0.005 ? 0 : v, 2, 2);
 }
 
 /** Monthly energy: "123,4", "1.234,5" (one decimal, grouped). */
 export function formatKwh(v: number): string {
-  return grouped(Math.abs(v) < 0.05 ? 0 : v, 0, 1);
+  return formatGrouped(Math.abs(v) < 0.05 ? 0 : v, 0, 1);
 }
 
 /** "12,40 €". */

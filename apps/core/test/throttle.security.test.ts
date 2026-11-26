@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { shareErrorResponseSchema, type ContainerInfo } from '@hz/shared';
+import { errorResponseSchema, shareErrorResponseSchema, type ContainerInfo } from '@hz/shared';
 import { containerPriorities } from '../src/db/schema.js';
-import { metricsMsg, type Received, type WsClient } from './agent-helpers.js';
+import { metricsMsg, withStepUp, type Received, type WsClient } from './agent-helpers.js';
 import {
   containerByName,
   info,
@@ -9,7 +9,15 @@ import {
   withAgent,
   type AgentSetup,
 } from './container-helpers.js';
-import { gameRequest, readyGame, rpcsOf, withGames, type GameSetup } from './games-helpers.js';
+import {
+  createGame,
+  gameRequest,
+  ONLINE,
+  readyGame,
+  rpcsOf,
+  withGames,
+  type GameSetup,
+} from './games-helpers.js';
 import { authHeaders, completeSetup, makeApp, SAME_ORIGIN, type TestApp } from './helpers.js';
 import { createShare, friend } from './share-helpers.js';
 
@@ -301,5 +309,170 @@ describe('M10 security: wichtig restart attempts are capped', () => {
       await s.t.app.hzCore.throttle.tick();
     }
     expect(actions(s, 'container.start')).toHaveLength(0);
+  });
+});
+
+describe('M10 security: RAM reserve on every start path (review fixes)', () => {
+  const GB = 1024 ** 3;
+
+  async function stoppedGame(s: GameSetup, name = 'survival'): Promise<string> {
+    const g = await readyGame(s, { name });
+    expect((await gameRequest(s, 'POST', `/api/games/${g.id}/stop`)).statusCode).toBe(200);
+    return g.id;
+  }
+
+  it('a share link with stale RAM metrics gets 409 unavailable; the admin may start', async () => {
+    const s = await withGames(clients);
+    t = s.t;
+    const id = await stoppedGame(s);
+    const link = await createShare(s, id, { perms: ['power'] });
+    // No metrics for 61 s (agent still connected): the reserve cannot be checked.
+    s.t.clock.advance(61_000);
+    await s.keepAlive();
+    const ups = rpcsOf(s, 'compose.up').length;
+    const res = await friend(s, 'POST', 'action', {
+      token: link.token,
+      payload: { action: 'start' },
+    });
+    expect(res.statusCode).toBe(409);
+    expect(shareErrorResponseSchema.parse(res.json())).toEqual({ ok: false, error: 'unavailable' });
+    expect(rpcsOf(s, 'compose.up')).toHaveLength(ups);
+    // Fresh metrics: the friend can start again.
+    s.t.app.hzCore.servers.ingestMetrics(s.serverId, metricsMsg({ ramPct: 40 }));
+    const ok = await friend(s, 'POST', 'action', {
+      token: link.token,
+      payload: { action: 'start' },
+    });
+    expect(ok.statusCode).toBe(200);
+    // Admin with unknown RAM: allowed (documented in docs/QUESTIONS.md).
+    expect((await gameRequest(s, 'POST', `/api/games/${id}/stop`)).statusCode).toBe(200);
+    s.t.clock.advance(61_000);
+    await s.keepAlive();
+    expect((await gameRequest(s, 'POST', `/api/games/${id}/start`)).statusCode).toBe(200);
+  });
+
+  it('the container route does not start a game container (409, no RPC); stop stays allowed', async () => {
+    const s = await withGames(clients);
+    t = s.t;
+    await readyGame(s);
+    const c = () => s.t.app.hzCore.containers.list().find((x) => x.name === 'game-survival');
+    const id = c()?.id ?? '';
+    const starting = () =>
+      s.rpcs.filter((x) =>
+        ['container.start', 'container.restart', 'container.update', 'compose.pull'].includes(
+          String(x.action),
+        ),
+      ).length;
+    const before = starting();
+    expect((await req(s, 'POST', `/api/containers/${id}/start`)).statusCode).toBe(409);
+    // A stopped game container: restart and update would start it as well.
+    const r = s.running.get('survival');
+    if (!r) throw new Error('no container');
+    s.running.set('survival', { ...r, state: 'exited', exitCode: 0 });
+    await s.sendInventory();
+    expect(c()?.state).toBe('exited');
+    for (const action of ['start', 'restart', 'update']) {
+      const res = await req(s, 'POST', `/api/containers/${id}/${action}`);
+      expect(res.statusCode, action).toBe(409);
+      expect(res.json()).toMatchObject({ error: 'conflict' });
+    }
+    expect(starting()).toBe(before);
+    // Plain containers are unaffected (see containers tests); stopping a game container is fine.
+    expect((await req(s, 'POST', `/api/containers/${id}/stop`)).statusCode).toBe(200);
+  });
+
+  it('unknown player count counts as "maybe online": no auto-stop unless allowed', async () => {
+    const s = await withGames(clients);
+    t = s.t;
+    s.behaviour.status = { ...ONLINE, players: null };
+    const g = await readyGame(s);
+    await gameRequest(s, 'PUT', `/api/games/${g.id}/priority`, {
+      priority: 'niedrig',
+      allowStop: true,
+    });
+    await overFor(s, 15);
+    expect(s.t.app.hzCore.games.summary(g.id)?.throttled?.by).toBe('auto');
+    expect(s.t.app.hzCore.games.summary(g.id)?.players).toBeNull();
+    expect(rpcsOf(s, 'compose.down')).toHaveLength(0);
+    await gameRequest(s, 'PUT', `/api/games/${g.id}/priority`, {
+      priority: 'niedrig',
+      allowStop: true,
+      allowStopWithPlayers: true,
+    });
+    await overFor(s, 1);
+    expect(rpcsOf(s, 'compose.down')).toHaveLength(1);
+  });
+
+  it('two concurrent starts cannot both use the same free RAM', async () => {
+    const s = await withGames(clients);
+    t = s.t;
+    const a = await stoppedGame(s, 'survival');
+    const b = await stoppedGame(s, 'creative');
+    // 16 GB, 40 % used: 9,6 GB free, room for one 6 GB game only.
+    s.t.app.hzCore.servers.ingestMetrics(s.serverId, metricsMsg({ ramPct: 40 }));
+    const ups = rpcsOf(s, 'compose.up').length;
+    const games = s.t.app.hzCore.games;
+    const [ra, rb] = await Promise.allSettled([games.action(a, 'start'), games.action(b, 'start')]);
+    expect(ra.status).toBe('fulfilled');
+    expect(rb.status).toBe('rejected');
+    expect((rb as PromiseRejectedResult).reason).toMatchObject({
+      status: 409,
+      code: 'insufficient_ram',
+      details: { freeBytes: expect.closeTo(3.6 * GB, 0) as unknown, neededBytes: 6 * GB },
+    });
+    expect(rpcsOf(s, 'compose.up')).toHaveLength(ups + 1);
+    // Once the first start returned, its hold is gone (the metrics take over).
+    expect((await gameRequest(s, 'POST', `/api/games/${b}/start`)).statusCode).toBe(200);
+  });
+
+  it('creating a game checks the reserve (409, nothing stored, no agent call)', async () => {
+    const s = await withGames(clients, { ramPct: 80 });
+    t = s.t;
+    const writes = rpcsOf(s, 'compose.write').length;
+    const res = await createGame(s);
+    expect(res.statusCode).toBe(409);
+    expect(errorResponseSchema.parse(res.json())).toMatchObject({
+      error: 'insufficient_ram',
+      details: { neededBytes: 6 * GB },
+    });
+    expect(s.t.app.hzCore.games.list()).toHaveLength(0);
+    expect(rpcsOf(s, 'compose.write')).toHaveLength(writes);
+    // With 40 % used (9,6 GB free) it fits.
+    s.t.app.hzCore.servers.ingestMetrics(s.serverId, metricsMsg({ ramPct: 40 }));
+    expect((await createGame(s)).statusCode).toBe(202);
+  });
+
+  it('settings and ports of a running game: only a larger RAM limit is checked', async () => {
+    const s = await withGames(clients);
+    t = s.t;
+    const g = await readyGame(s);
+    // 9,6 GB free, reserve 8 GB: 1,6 GB left for growth.
+    await gameRequest(s, 'PUT', `/api/servers/${s.serverId}/throttle`, {
+      settings: { ramReserveMb: 8192 },
+    });
+    s.t.app.hzCore.servers.ingestMetrics(s.serverId, metricsMsg({ ramPct: 40 }));
+    const writes = rpcsOf(s, 'compose.write').length;
+    const grow = await gameRequest(s, 'PUT', `/api/games/${g.id}`, { values: { MEMORY: '8G' } });
+    expect(grow.statusCode).toBe(409);
+    expect(errorResponseSchema.parse(grow.json()).details?.neededBytes).toBe(2 * GB);
+    expect(rpcsOf(s, 'compose.write')).toHaveLength(writes);
+    // Shrinking or the same limit (ports) needs nothing.
+    expect(
+      (await gameRequest(s, 'PUT', `/api/games/${g.id}`, { values: { MEMORY: '4G' } })).statusCode,
+    ).toBe(200);
+    const ports = await withStepUp(s.t, () =>
+      gameRequest(s, 'PATCH', `/api/games/${g.id}/ports`, { ports: { game: 25580 } }),
+    );
+    expect(ports.statusCode, ports.body).toBe(200);
+    // Container down while the game should run: a recreate is a full start.
+    const r = s.running.get('survival');
+    if (!r) throw new Error('no container');
+    s.running.set('survival', { ...r, state: 'exited', exitCode: 1 });
+    await s.sendInventory();
+    const down = await withStepUp(s.t, () =>
+      gameRequest(s, 'PATCH', `/api/games/${g.id}/ports`, { ports: { game: 25581 } }),
+    );
+    expect(down.statusCode).toBe(409);
+    expect(errorResponseSchema.parse(down.json()).details?.neededBytes).toBe(4 * GB);
   });
 });

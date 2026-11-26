@@ -88,7 +88,7 @@ export function ContainerThrottleTile({ c }: { c: ContainerSummary }): ReactElem
       )}
       {open ? (
         <ThrottleDialog
-          target={{ id: c.id, name: c.name, serverName: c.serverName }}
+          target={{ id: c.id, name: c.name, serverName: c.serverName, priority: c.priority }}
           initialCpus={t?.cpus ?? 1}
           onClose={() => setOpen(false)}
         />

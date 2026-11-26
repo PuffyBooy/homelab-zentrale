@@ -143,6 +143,18 @@ export function formatNumber(v: number, digits = 1): string {
   return nf(digits).format(r);
 }
 
+/** de-AT with a dot as group separator (Intl uses a narrow space for de-AT): "1.024", "1.234,5". */
+export function formatGrouped(v: number, minDigits: number, maxDigits: number): string {
+  return new Intl.NumberFormat('de-AT', {
+    minimumFractionDigits: minDigits,
+    maximumFractionDigits: maxDigits,
+    useGrouping: true,
+  })
+    .formatToParts(v)
+    .map((p) => (p.type === 'group' ? '.' : p.value))
+    .join('');
+}
+
 /** "23 %", rounded to whole percent. Null-safe: "—". */
 export function formatPercent(v: number | null | undefined): string {
   return v == null ? '—' : `${formatNumber(Math.round(v), 0)} %`;

@@ -1571,7 +1571,7 @@ body,
     border-top: 1px solid var(--line);
   }
 }
-.hz-row-meta .hz-badge {
+.app-throttle-badge {
   vertical-align: middle;
 }
 .app-game-hint {
@@ -1617,6 +1617,6 @@ body,
   gap: var(--space-1);
 }
 .app-days .hz-btn {
-  min-width: 40px;
+  min-width: var(--space-6);
   justify-content: center;
 }
