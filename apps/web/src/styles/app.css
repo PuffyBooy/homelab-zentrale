@@ -1531,3 +1531,15 @@ body,
 .hz-alert .app-alert-meta {
   color: var(--ink-muted);
 }
+
+/* Unavailable toggles (HA offline) stay readable (WCAG contrast): muted ink and a
+   dashed switch instead of the reference's 45 % opacity. */
+.hz-toggle.hz-toggle-disabled {
+  opacity: 1;
+}
+.hz-toggle-disabled .hz-toggle-text {
+  color: var(--ink-muted);
+}
+.hz-toggle-disabled .hz-switch {
+  border-style: dashed;
+}
