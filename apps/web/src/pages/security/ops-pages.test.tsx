@@ -424,11 +424,11 @@ describe('Discord-Bot', () => {
       'Rechtsklick auf den Namen → Benutzer-ID kopieren, Entwicklermodus nötig.',
     );
     const revoked = html(
-      <BindingRow binding={{ ...b, shareState: 'revoked', discordUserId: '323456789012345678' }} />,
+      <BindingRow binding={{ ...b, shareState: 'revoked', discordUserId: '333333333333333333' }} />,
     );
     expect(revoked).toContain('Link widerrufen');
     expect(revoked).toContain('wirkt nicht');
-    expect(revoked).toContain('value="323456789012345678"');
+    expect(revoked).toContain('value="333333333333333333"');
   });
 });
 
