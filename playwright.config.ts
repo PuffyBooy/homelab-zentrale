@@ -34,5 +34,15 @@ export default defineConfig({
       reuseExistingServer: !process.env.CI,
     },
   ],
-  projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
+  // All specs share one core. Milestones 10+ sort before m2 by name, so they run
+  // in a second project after m0-m9 (which expect an empty hub at the start).
+  projects: [
+    { name: 'chromium', testMatch: /m\d-.*\.spec\.ts$/, use: { ...devices['Desktop Chrome'] } },
+    {
+      name: 'chromium-late',
+      testMatch: /m\d{2,}-.*\.spec\.ts$/,
+      dependencies: ['chromium'],
+      use: { ...devices['Desktop Chrome'] },
+    },
+  ],
 });
