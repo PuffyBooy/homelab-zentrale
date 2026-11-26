@@ -7,6 +7,7 @@ import { mergeById } from '../../lib/live.js';
 
 /** Error texts for game routes; `busy` means setup, backup or restart is running. */
 export function gameErrorText(err: unknown): string {
+  if (isApiError(err) && err.hint) return err.hint;
   if (isApiError(err, 'busy')) {
     return 'Auf dem Gameserver läuft gerade etwas (Setup, Backup oder Neustart). Kurz warten.';
   }

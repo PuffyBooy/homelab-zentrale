@@ -15,7 +15,7 @@ export function ForwardHint({ ports, server }: ForwardHintProps): ReactElement {
   const rules = forwardRules(ports);
   const place = forwardPlace(server);
   const list = (
-    <ul className="app-rules">
+    <ul className="app-rules code">
       {rules.map((r) => (
         <li key={r.name}>
           <span className="app-rule-port">

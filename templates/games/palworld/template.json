@@ -36,11 +36,11 @@
     },
     {
       "key": "SERVER_PASSWORD",
-      "label": "Server-Passwort",
+      "label": "Server-Passwort (leer oder mind. 8 Zeichen)",
       "type": "text",
       "default": "",
       "optional": true,
-      "pattern": "[^\\s'\"$\\\\]{0,64}",
+      "pattern": "[^\\s'\"$\\\\]{8,64}",
       "secret": true
     },
     {

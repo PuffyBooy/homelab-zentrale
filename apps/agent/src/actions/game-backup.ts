@@ -15,7 +15,13 @@ import type { RpcParams } from '@hz/shared';
 import type { SpawnHandle } from '../exec.js';
 import type { StreamSink } from '../streams.js';
 import { acquireDirLock } from './dir-lock.js';
-import { readGameEnv, rconFromEnv, resolveGameDir, type GameDir } from './game-common.js';
+import {
+  GAME_NAME,
+  readGameEnv,
+  rconFromEnv,
+  resolveGameDir,
+  type GameDir,
+} from './game-common.js';
 import { LineBuffer, LogChunker, type LogChannel } from './logs.js';
 import { rconRun } from './rcon.js';
 import { ActionError, type ActionContext } from './types.js';
@@ -118,6 +124,54 @@ export async function applyRetention(dir: string, name: string, keep: number): P
     if (!st || st.isDirectory()) continue;
     await unlink(p).catch(() => undefined);
     removed.push(f);
+  }
+  return removed;
+}
+
+/** Temp file name of a running backup of `name` (see runBackup). */
+export function partialFilePattern(name: string): RegExp {
+  return new RegExp(`^\\.${name}-\\d{8}-\\d{6}\\.tar\\.zst\\.[0-9a-f]{8}\\.partial$`);
+}
+
+/**
+ * On agent start: deletes temp archives that a crashed or killed agent left behind in
+ * /opt/homelab/backups/<name>/. No backup can run yet, so every match is stale.
+ *
+ * Never follows a symlink: backups/ and each <name>/ must be real directories (lstat),
+ * and only regular files matching the agent's own temp name are unlinked (unlink never
+ * follows a symlink either). Returns the deleted paths. Never throws.
+ */
+export async function cleanupPartialBackups(homelabRoot: string): Promise<string[]> {
+  const removed: string[] = [];
+  let root: string;
+  try {
+    root = await realpath(homelabRoot);
+  } catch {
+    return removed;
+  }
+  const base = path.join(root, 'backups');
+  const baseSt = await lstat(base).catch(() => null);
+  if (!baseSt?.isDirectory()) return removed;
+  const names = await readdir(base).catch(() => [] as string[]);
+  for (const name of names) {
+    if (!GAME_NAME.test(name)) continue;
+    const dir = path.join(base, name);
+    const st = await lstat(dir).catch(() => null);
+    if (!st?.isDirectory()) continue;
+    const re = partialFilePattern(name);
+    const files = await readdir(dir).catch(() => [] as string[]);
+    for (const f of files) {
+      if (!re.test(f)) continue;
+      const p = path.join(dir, f);
+      const fst = await lstat(p).catch(() => null);
+      if (!fst?.isFile()) continue;
+      try {
+        await unlink(p);
+        removed.push(p);
+      } catch {
+        // Gone or not ours to delete; the next start tries again.
+      }
+    }
   }
   return removed;
 }

@@ -1,8 +1,14 @@
-import { describe, expect, it } from 'vitest';
-import { game, server, template } from '../test-fixtures.js';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { container, game, server, template } from '../test-fixtures.js';
+import { configureApi, isApiError } from './api.js';
 import {
   applyGameEvents,
   consoleLines,
+  dropEntry,
+  findGameContainer,
+  sendRcon,
+  settleEntry,
+  stampedLogLines,
   deleteConfirmed,
   disabledTileActions,
   draftFromValues,
@@ -23,6 +29,7 @@ import {
   pushHistory,
   ramDetail,
   ramRange,
+  settingsDraft,
   setupState,
   sortGames,
   suggestName,
@@ -118,6 +125,24 @@ describe('form generator: validation', () => {
     expect(validateFields(fields, { ...base, MAX_PLAYERS: '' }).errors.MAX_PLAYERS).toBeDefined();
     expect(validateFields(fields, { ...base, MAX_PLAYERS: '12,5' }).values.MAX_PLAYERS).toBe(12.5);
     expect(validateFields(fields, { ...base, MAX_PLAYERS: ' 8 ' }).values.MAX_PLAYERS).toBe(8);
+  });
+
+  it('needs at least 8 characters for a non-empty secret', () => {
+    const f = [
+      {
+        key: 'SERVER_PASS',
+        label: 'Server-Passwort',
+        type: 'text' as const,
+        default: '',
+        secret: true,
+        optional: true,
+      },
+    ];
+    expect(validateFields(f, { SERVER_PASS: '' }).errors).toEqual({});
+    expect(validateFields(f, { SERVER_PASS: 'kurz' }).errors.SERVER_PASS).toBe(
+      'Mindestens 8 Zeichen.',
+    );
+    expect(validateFields(f, { SERVER_PASS: 'lang-genug' }).values.SERVER_PASS).toBe('lang-genug');
   });
 
   it('requires text unless optional and checks the anchored pattern', () => {
@@ -241,10 +266,37 @@ describe('create form', () => {
       fields: fieldDefaults(tpl.fields),
     });
     expect(s.ok && s.body.autoStopMinutes).toBe(30);
-    expect(s.ok && 'externalAddress' in s.body).toBe(false);
+    // Empty is sent, so the address can go back to the Tailscale IP.
+    expect(s.ok && s.body.externalAddress).toBe('');
+    expect(settingsDraft(game({ externalAddress: 'mc.hoebe.at' }), tpl).externalAddress).toBe(
+      'mc.hoebe.at',
+    );
     expect(
       validateSettings(tpl, { autoStopMinutes: '1441', externalAddress: '', fields: {} }).ok,
     ).toBe(false);
+  });
+
+  it('leaves an empty secret field out of the settings, so the stored one stays', () => {
+    const fields = [
+      {
+        key: 'SERVER_PASS',
+        label: 'Passwort',
+        type: 'text' as const,
+        default: '',
+        secret: true,
+        optional: true,
+      },
+      { key: 'MOTD', label: 'MOTD', type: 'text' as const, default: '', optional: true },
+    ];
+    const s = validateSettings(
+      { fields },
+      {
+        autoStopMinutes: '0',
+        externalAddress: '',
+        fields: { SERVER_PASS: '', MOTD: '' },
+      },
+    );
+    expect(s.ok && s.body.values).toEqual({ MOTD: '' });
   });
 
   it('parses numbers strictly', () => {
@@ -501,5 +553,99 @@ describe('console history', () => {
     expect(s).toEqual({ index: 3, value: 'wh' });
     expect(historyStep(h, 3, 'down', 'wh')).toEqual({ index: 3, value: 'wh' });
     expect(historyStep([], 0, 'up', 'wh')).toEqual({ index: 0, value: 'wh' });
+  });
+});
+
+describe('console with the container log', () => {
+  it('finds the game container by name game-<name> or compose project', () => {
+    const g = game({ name: 'survival', serverId: 'srv-a' });
+    const other = container({ serverId: 'srv-b', name: 'game-survival' });
+    const byProject = container({ serverId: 'srv-a', name: 'mc', composeProject: 'survival' });
+    const byName = container({ serverId: 'srv-a', name: 'game-survival' });
+    expect(findGameContainer(g, [other, byProject, byName])).toBe(byName);
+    expect(findGameContainer(g, [other, byProject])).toBe(byProject);
+    expect(findGameContainer(g, [other])).toBeUndefined();
+  });
+
+  it('puts log history first and live log lines between console events', () => {
+    const logs = stampedLogLines({
+      lines: [
+        { seq: 0, stream: 'stdout', text: 'Starting server' },
+        { seq: 1, stream: 'stderr', text: 'Can not bind' },
+        { seq: 2, stream: 'stdout', text: 'Alex joined the game' },
+      ],
+      ended: false,
+      at: { 2: '2026-11-26T22:01:30.000Z' },
+    });
+    const lines = consoleLines(
+      [
+        ev('1', 'console', '> list', '2026-11-26T22:01:00.000Z'),
+        ev('2', 'console', 'There are 0 of 20', '2026-11-26T22:01:00.000Z'),
+      ],
+      [{ id: 'c1', ts: '2026-11-26T22:02:00.000Z', command: 'tps', output: null, error: null }],
+      logs,
+    );
+    expect(lines).toEqual([
+      { text: 'Starting server' },
+      { text: 'Can not bind', kind: 'err' },
+      { text: 'list', kind: 'cmd' },
+      { text: 'There are 0 of 20' },
+      { text: 'Alex joined the game' },
+      { text: 'tps', kind: 'cmd' },
+      { text: '…', kind: 'dim' },
+    ]);
+  });
+});
+
+describe('RCON send and step-up', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  const reply = (status: number, body: unknown): Response =>
+    new Response(JSON.stringify(body), {
+      status,
+      headers: { 'Content-Type': 'application/json' },
+    });
+
+  it('goes through api(), so the global step-up dialog appears and the send repeats', async () => {
+    const onStepUp = vi.fn(() => Promise.resolve(true));
+    const reset = configureApi({ onStepUp });
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(reply(403, { ok: false, error: 'step_up_required' }))
+      .mockResolvedValueOnce(reply(200, { output: 'There are 0 of 20' }));
+    vi.stubGlobal('fetch', fetchMock);
+    try {
+      await expect(sendRcon('game-000001', 'list')).resolves.toBe('There are 0 of 20');
+    } finally {
+      reset();
+    }
+    expect(onStepUp).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls[1]?.[0]).toBe('/api/games/game-000001/rcon');
+  });
+
+  it('a cancelled step-up rejects with step_up_required and the pending line goes away', async () => {
+    const reset = configureApi({ onStepUp: () => Promise.resolve(false) });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn<typeof fetch>().mockResolvedValue(reply(403, { ok: false, error: 'step_up_required' })),
+    );
+    let err: unknown;
+    try {
+      await sendRcon('game-000001', 'list');
+    } catch (e) {
+      err = e;
+    } finally {
+      reset();
+    }
+    expect(isApiError(err, 'step_up_required')).toBe(true);
+
+    const pending = { id: 'c1', ts: '2026-11-26T22:02:00.000Z', command: 'list' };
+    const entries = [{ ...pending, output: null, error: null }];
+    expect(consoleLines([], dropEntry(entries, 'c1'))).toEqual([]);
+    expect(settleEntry(entries, 'c1', { output: 'ok' })[0]).toMatchObject({ output: 'ok' });
+    expect(settleEntry(entries, 'c1', { error: 'Agent offline.' })[0]).toMatchObject({
+      error: 'Agent offline.',
+    });
   });
 });

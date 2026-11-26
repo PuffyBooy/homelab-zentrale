@@ -229,6 +229,13 @@ describe('game templates', () => {
           expect(f.pattern).toBeDefined();
         }
         if (f.type === 'select') expect(f.options).toContain(f.default);
+        if (f.type === 'text' && f.secret && f.pattern) {
+          // The core refuses non-empty secrets under 8 chars (masking); the pattern says so too.
+          const re = new RegExp(`^(?:${f.pattern})$`, 'u');
+          expect(re.test('a'.repeat(7)), `${f.key} accepts 7 chars`).toBe(false);
+          expect(re.test('A'.repeat(8)) || re.test('a'.repeat(8)), `${f.key} 8 chars`).toBe(true);
+          if (f.label.includes('mind.')) expect(f.label).toContain('mind. 8 Zeichen');
+        }
         if (f.type === 'number' && f.min !== undefined && f.max !== undefined) {
           expect(f.default).toBeGreaterThanOrEqual(f.min);
           expect(f.default).toBeLessThanOrEqual(f.max);

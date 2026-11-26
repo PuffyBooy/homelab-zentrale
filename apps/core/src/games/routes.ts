@@ -34,8 +34,8 @@ function asHttp(err: unknown): HttpError {
 }
 
 /**
- * /api/games/* (SPEC 6.2/6.3). Admin session everywhere; deleting a game needs
- * step-up. Responses never contain the RCON password or secret field values.
+ * /api/games/* (SPEC 6.2/6.3). Admin session everywhere; deleting a game and
+ * RCON (the console) need step-up. Responses never contain the RCON password or secret field values.
  */
 export const gameRoutes: FastifyPluginAsync<GameRoutesOptions> = async (app, o) => {
   const stepUp = requireStepUp(o.now);
@@ -113,7 +113,8 @@ export const gameRoutes: FastifyPluginAsync<GameRoutesOptions> = async (app, o) 
     return okResponseSchema.parse({ ok: true });
   });
 
-  app.post('/games/:id/rcon', async (request) => {
+  // RCON is the game console: step-up (docs/SECURITY.md). Checked before anything reaches the agent.
+  app.post('/games/:id/rcon', { preHandler: stepUp }, async (request) => {
     const row = rowOf(request.params);
     const { command } = gameRconRequestSchema.parse(request.body);
     // The command is audited, never the output. Rate-limited attempts are not

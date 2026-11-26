@@ -4,6 +4,7 @@ import { Dispatcher } from './actions/index.js';
 import { ContainerCollector, openDocker } from './collect/docker.js';
 import { DockerEventWatcher } from './collect/docker-events.js';
 import { hiddenDuringUpdate } from './actions/container-update.js';
+import { cleanupPartialBackups } from './actions/game-backup.js';
 import { collectInventory } from './collect/inventory.js';
 import { SystemCollector } from './collect/system.js';
 import { ConfigError, loadConfig } from './config.js';
@@ -118,6 +119,10 @@ async function main(): Promise<void> {
     docker: docker !== null,
     terminal: config.allowTerminal,
   });
+  // Temp archives of backups that died with a previous agent process (no backup runs yet).
+  const stale = await cleanupPartialBackups(config.homelabRoot);
+  if (stale.length > 0) log.info('removed stale backup temp files', { count: stale.length });
+
   await conn.start();
   events?.start();
 

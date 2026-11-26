@@ -143,5 +143,10 @@ export const errorResponseSchema = z.strictObject({
   error: errorCodeSchema,
   /** Seconds until retry is allowed (rate limit). */
   retryAfter: z.number().int().optional(),
+  /**
+   * Optional fixed German hint for the user (e.g. "Server-Passwort: mindestens
+   * 8 Zeichen"). Written by the core, never contains input values or internals.
+   */
+  message: z.string().max(200).optional(),
 });
 export type ErrorResponse = z.infer<typeof errorResponseSchema>;

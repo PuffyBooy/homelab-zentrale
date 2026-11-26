@@ -22,8 +22,11 @@ import {
   checkGamedigType,
   gameRcon,
   gameStatus,
+  gameStatusWith,
   GAMEDIG_TYPES,
   parseTps,
+  TPS_IDLE_MS,
+  TpsCache,
 } from '../src/actions/games.js';
 import { rconRun } from '../src/actions/rcon.js';
 import {
@@ -229,6 +232,49 @@ describe('compose.write .env', () => {
     expect(rec.logs.join('\n')).not.toContain(PASSWORD);
   });
 
+  it.each([
+    ['a homelab folder outside games/', ['apps', 'web']],
+    ['a new folder outside games/', ['apps', 'new-app']],
+    ['games/ itself', ['games']],
+    ['a nested folder below a game', ['games', 'mc', 'nested']],
+    ['a game folder with an invalid name', ['games', 'Bad_Name']],
+  ])('refuses .env in %s (nothing is written)', async (_what, parts) => {
+    const dir = path.join(root, ...parts);
+    const { ctx, rec } = makeCtx(root);
+    await expect(
+      composeWrite(
+        { dir, files: { 'compose.yml': 'services: {}\n', '.env': `RCON_PASSWORD=${PASSWORD}\n` } },
+        ctx,
+      ),
+    ).rejects.toMatchObject({ code: 'bad_path' });
+    await expect(stat(path.join(dir, '.env'))).rejects.toMatchObject({ code: 'ENOENT' });
+    await expect(stat(path.join(dir, 'compose.yml'))).rejects.toMatchObject({ code: 'ENOENT' });
+    expect(rec.logs.join('\n')).not.toContain(PASSWORD);
+  });
+
+  it('refuses .env through a game folder symlink that points outside games/', async () => {
+    const { ctx } = makeCtx(root);
+    // games/to-apps -> apps/web: the resolved dir is not below games/.
+    await expect(
+      composeWrite({ dir: path.join(games, 'to-apps'), files: { '.env': 'X=1\n' } }, ctx),
+    ).rejects.toMatchObject({ code: 'bad_path' });
+    await expect(stat(path.join(root, 'apps', 'web', '.env'))).rejects.toMatchObject({
+      code: 'ENOENT',
+    });
+  });
+
+  it('the dispatcher runs exactly this composeWrite for compose.write', () => {
+    expect(handlers['compose.write']).toBe(composeWrite);
+  });
+
+  it('other files outside games/ are still allowed', async () => {
+    const dir = path.join(root, 'apps', 'plain');
+    const { ctx } = makeCtx(root);
+    await expect(
+      composeWrite({ dir, files: { 'compose.yml': 'services: {}\n' } }, ctx),
+    ).resolves.toEqual({ dir, files: ['compose.yml'] });
+  });
+
   it('the schema allows exactly .env as dotfile', () => {
     const schema = rpcParamsByAction['compose.write'];
     const ok = (name: string) =>
@@ -429,6 +475,79 @@ describe('game.status', () => {
       await mc.close();
       await rcon.close();
     }
+  });
+
+  it('tps: an empty server is asked over RCON at most every TPS_IDLE_MS, with players every poll', async () => {
+    const status = {
+      version: { name: 'Paper 1.21.10', protocol: 773 },
+      players: { online: 0, max: 20, sample: [] as { name: string; id: string }[] },
+      description: { text: 'Homelab' },
+    };
+    const mc = await startFakeJavaStatus(status);
+    let tpsText = '20.0';
+    const rcon = await startFakeRcon({
+      password: PASSWORD,
+      answer: (c) => (c === 'tps' ? `TPS from last 1m, 5m, 15m: ${tpsText}, 20.0, 20.0` : ''),
+    });
+    let now = 1_000_000;
+    const cache = new TpsCache(() => now);
+    try {
+      const dir = await makeGame(
+        'status-idle',
+        `RCON_PASSWORD=${PASSWORD}\nPORT_RCON=${rcon.port}\n`,
+      );
+      const { ctx } = makeCtx(root);
+      const poll = () =>
+        gameStatusWith(
+          { gameDir: dir, method: 'minecraft', port: mc.port, tpsCommand: 'tps', timeoutMs: 3000 },
+          ctx,
+          cache,
+        );
+      // first poll after setup: asked, so the tile shows a TPS at once
+      expect((await poll()).tps).toBe(20);
+      expect(rcon.commands).toEqual(['tps']);
+      // empty server, 30 s later: the last value, no RCON login
+      tpsText = '18.0';
+      now += 30_000;
+      expect((await poll()).tps).toBe(20);
+      expect(rcon.commands).toEqual(['tps']);
+      // still empty, but the value is old: asked again
+      now += TPS_IDLE_MS;
+      expect((await poll()).tps).toBe(18);
+      expect(rcon.commands).toEqual(['tps', 'tps']);
+      // players online: asked every poll
+      status.players = {
+        online: 1,
+        max: 20,
+        sample: [{ name: 'Alex', id: '00000000-0000-0000-0000-000000000001' }],
+      };
+      tpsText = '19.0';
+      now += 1000;
+      expect((await poll()).tps).toBe(19);
+      now += 1000;
+      expect((await poll()).tps).toBe(19);
+      expect(rcon.commands).toEqual(['tps', 'tps', 'tps', 'tps']);
+    } finally {
+      await mc.close();
+      await rcon.close();
+    }
+  });
+
+  it('tps cache: offline or a failed tps answer is not reused', () => {
+    let now = 0;
+    const cache = new TpsCache(() => now);
+    cache.set('a', 20);
+    expect(cache.reuse('a', 0)).toBe(20);
+    expect(cache.reuse('a', 1)).toBeUndefined();
+    expect(cache.reuse('a', null)).toBeUndefined();
+    now = TPS_IDLE_MS;
+    expect(cache.reuse('a', 0)).toBeUndefined();
+    cache.set('a', null);
+    now = 0;
+    expect(cache.reuse('a', 0)).toBeUndefined();
+    cache.set('b', 20);
+    cache.delete('b');
+    expect(cache.reuse('b', 0)).toBeUndefined();
   });
 
   it('an unreachable server is offline, not an error', async () => {

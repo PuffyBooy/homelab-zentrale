@@ -3,7 +3,8 @@ name: Agent
 # Multi-arch agent image (linux/amd64 + linux/arm64 for Oracle and the Pi, built
 # with QEMU, not pushed) and a Docker smoke test: core + agent containers,
 # enrollment, live connection, containers (list, live logs, stop -> alert, image
-# update), agent stopped -> server crit + open alert.
+# update), a real Paper game server (setup, players/TPS, compose config, RCON with
+# step-up, backup, stop, delete), agent stopped -> server crit + open alert.
 
 on:
   push:
@@ -40,9 +41,10 @@ jobs:
           .
 
   smoke:
-    name: docker smoke (core + agent)
+    name: docker smoke (core + agent + game)
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # Image builds ~10 min, Paper download + world generation up to 9 min, rest ~5 min.
+    timeout-minutes: 50
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
@@ -59,11 +61,25 @@ jobs:
           docker build -f apps/agent/Dockerfile -t homelab-zentrale/agent:local .
       - name: Pull smoke images (retry, Docker Hub may rate-limit)
         run: |
-          for img in busybox:1.36 busybox:1.37; do
-            for i in 1 2 3 4; do docker pull -q "$img" && break; sleep $((i * 15)); done
+          # The game image comes from the template, so the smoke always uses the pinned tag.
+          game_image="$(node -p "require('./templates/games/minecraft-java/template.json').image")"
+          for img in busybox:1.36 busybox:1.37 "$game_image"; do
+            ok=0
+            for i in 1 2 3 4; do
+              if docker pull -q "$img"; then ok=1; break; fi
+              sleep $((i * 15))
+            done
+            [ "$ok" = 1 ] || { echo "pulling $img failed"; exit 1; }
           done
       - name: Smoke test
         run: pnpm exec tsx test/docker/agent-smoke.ts
+      - name: Docker state on failure
+        if: failure()
+        run: |
+          docker ps -a
+          docker stats --no-stream || true
+          free -m
+          df -h /
       - name: Trivy image scan (agent)
         run: >
           docker run --rm -v /var/run/docker.sock:/var/run/docker.sock

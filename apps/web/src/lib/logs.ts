@@ -9,6 +9,12 @@ export const containerLogsKey = (id: string) => ['container-logs', id] as const;
 export interface LogBuffer {
   lines: LogLine[];
   ended: boolean;
+  /**
+   * Arrival time (ISO) per `seq` for lines that came after the first snapshot. Lines
+   * of the first snapshot are history and have none. Used by the game console to put
+   * log lines and RCON answers in one order (log lines carry no time of their own).
+   */
+  at?: Record<number, string>;
 }
 
 export const emptyLogBuffer: LogBuffer = { lines: [], ended: false };
@@ -43,6 +49,25 @@ export function appendLogLines(
     out = [...bySeq.values()].sort((a, b) => a.seq - b.seq);
   }
   return out.length > max ? out.slice(-max) : out;
+}
+
+/**
+ * Arrival times for `next`: lines already in `prev` (same seq and text) keep theirs,
+ * new lines get `now`. Without `prev` (first snapshot) everything is history.
+ */
+export function stampArrivals(
+  prev: LogBuffer | undefined,
+  next: readonly LogLine[],
+  now: string,
+): Record<number, string> {
+  const at: Record<number, string> = {};
+  if (!prev) return at;
+  const known = new Map(prev.lines.map((l) => [l.seq, l.text]));
+  for (const l of next) {
+    const t = known.get(l.seq) === l.text ? prev.at?.[l.seq] : now;
+    if (t) at[l.seq] = t;
+  }
+  return at;
 }
 
 /** stderr becomes an `err` line of the Terminal. */

@@ -27,7 +27,13 @@ import { SetupTile } from './SetupTile.js';
 
 const SETUP_PARAM = 'setup';
 
-/** /games/:id (SPEC 6.3): status, actions, setup progress, RCON console, backups, settings. */
+/** The command line, or the log box when the game has no RCON (read only). */
+function focusConsole(input: HTMLInputElement | null, anchor: HTMLElement | null): void {
+  const target = input ?? anchor?.querySelector<HTMLElement>('.hz-term-body') ?? null;
+  target?.focus({ preventScroll: true });
+}
+
+/** /games/:id (SPEC 6.3): status, actions, setup progress, console (RCON + log), backups, settings. */
 export function GameDetailPage(): ReactElement | null {
   useLiveTopic('games');
   const { id = '' } = useParams();
@@ -73,12 +79,12 @@ function Detail({ game }: { game: GameSummary }): ReactElement {
   useEffect(() => {
     if (hash !== '#konsole') return;
     consoleAnchor.current?.scrollIntoView({ block: 'start' });
-    consoleInput.current?.focus({ preventScroll: true });
+    focusConsole(consoleInput.current, consoleAnchor.current);
   }, [hash]);
 
   const toConsole = (): void => {
     consoleAnchor.current?.scrollIntoView({ block: 'start', behavior: 'smooth' });
-    consoleInput.current?.focus({ preventScroll: true });
+    focusConsole(consoleInput.current, consoleAnchor.current);
   };
 
   const closeSetup = (): void =>
@@ -119,7 +125,7 @@ function Detail({ game }: { game: GameSummary }): ReactElement {
           <dt>Auto-Stopp</dt>
           <dd>{autoStopText(game.autoStopMinutes)}</dd>
           <dt>Konsole</dt>
-          <dd>{game.rcon ? 'RCON' : 'nur Ausgabe'}</dd>
+          <dd>{game.rcon ? 'RCON und Log' : 'nur Log (kein RCON)'}</dd>
           <dt>Letztes Backup</dt>
           <dd>
             {game.lastBackupAt

@@ -1102,9 +1102,7 @@ body,
   margin: 0;
   padding: 0;
   display: grid;
-  font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
-  font-size: 13px;
 }
 .app-rules li {
   display: flex;

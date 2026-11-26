@@ -4,7 +4,7 @@ import { Toggle } from '@hz/ui';
 import { Field } from '../../components/Field.js';
 import { SelectField } from '../../components/SelectField.js';
 import { formatNumber } from '../../lib/format.js';
-import type { FieldDraft } from '../../lib/games.js';
+import { MIN_SECRET_LENGTH, type FieldDraft } from '../../lib/games.js';
 
 export interface TemplateFieldsProps {
   fields: readonly TemplateField[];
@@ -93,7 +93,13 @@ export function TemplateFields({
                 type={f.secret ? 'password' : 'text'}
                 value={String(draft[f.key] ?? '')}
                 onChange={(e) => onChange(f.key, e.target.value)}
-                hint={f.optional ? 'optional' : undefined}
+                hint={
+                  f.secret
+                    ? `${f.optional ? 'optional · ' : ''}mindestens ${MIN_SECRET_LENGTH} Zeichen`
+                    : f.optional
+                      ? 'optional'
+                      : undefined
+                }
                 error={err}
                 disabled={disabled}
                 maxLength={200}

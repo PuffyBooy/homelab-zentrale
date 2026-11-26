@@ -25,10 +25,10 @@
     },
     {
       "key": "SERVER_PASS",
-      "label": "Server-Passwort (mind. 5 Zeichen)",
+      "label": "Server-Passwort (mind. 8 Zeichen)",
       "type": "text",
       "default": "",
-      "pattern": "[^\\s'\"$\\\\]{5,64}",
+      "pattern": "[^\\s'\"$\\\\]{8,64}",
       "secret": true
     },
     { "key": "SERVER_PUBLIC", "label": "In der Serverliste zeigen", "type": "boolean", "default": false },

@@ -7,12 +7,14 @@ import {
   gameResponseSchema,
   gameSuggestResponseSchema,
   gameTemplateListResponseSchema,
+  type ContainerSummary,
   type GameSummary,
   type ServerSummary,
   type TemplateField,
 } from '@hz/shared';
 import type { GameServerAction, GameServerProps, Status, TerminalLine } from '@hz/ui';
 import { api } from './api.js';
+import type { LogBuffer } from './logs.js';
 import { formatBytes, formatBytesOf, formatNumber, plural } from './format.js';
 import type { StatusSentence } from './servers.js';
 
@@ -43,8 +45,8 @@ export interface GameCreateBody {
 export interface GameUpdateBody {
   values: Record<string, FieldValue>;
   autoStopMinutes: number;
-  /** Left out: unchanged. */
-  externalAddress?: string;
+  /** Empty: the address uses the Tailscale IP. */
+  externalAddress: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -443,6 +445,9 @@ export function parseNumber(raw: string): number {
  * Validates the draft against the template fields. Only template keys are sent
  * (the core rejects unknown keys). Empty optional numbers are left out.
  */
+/** Minimum length of a non-empty secret field (server password). */
+export const MIN_SECRET_LENGTH = 8;
+
 export function validateFields(
   fields: readonly TemplateField[],
   draft: Readonly<FieldDraft>,
@@ -486,6 +491,11 @@ export function validateFields(
         }
         if (/[\r\n\0]/.test(v)) {
           errors[f.key] = 'Nur eine Zeile.';
+          break;
+        }
+        // Same rule as the core: a secret (server password) is empty or at least 8 long.
+        if (f.secret && v.length < MIN_SECRET_LENGTH) {
+          errors[f.key] = `Mindestens ${MIN_SECRET_LENGTH} Zeichen.`;
           break;
         }
         const re = f.pattern ? anchored(f.pattern) : null;
@@ -633,7 +643,7 @@ export interface SettingsDraft {
 export function settingsDraft(g: GameSummary, tpl: Pick<TemplateInfo, 'fields'>): SettingsDraft {
   return {
     autoStopMinutes: String(g.autoStopMinutes),
-    externalAddress: '',
+    externalAddress: g.externalAddress,
     fields: draftFromValues(tpl.fields, g.values),
   };
 }
@@ -650,13 +660,21 @@ export function validateSettings(
   const fields = validateFields(tpl.fields, draft.fields);
   for (const [k, v] of Object.entries(fields.errors)) errors[`field:${k}`] = v;
   if (Object.keys(errors).length) return { ok: false, errors };
-  const ext = draft.externalAddress.trim();
+  // The summary never contains secret values, so an empty secret field means
+  // "keep the stored one": leave it out, the core keeps the old value.
+  const values = Object.fromEntries(
+    Object.entries(fields.values).filter(
+      ([k, v]) =>
+        !(v === '' && tpl.fields.some((f) => f.key === k && f.type === 'text' && f.secret)),
+    ),
+  );
   return {
     ok: true,
     body: {
-      values: fields.values,
+      values,
       autoStopMinutes: parseNumber(draft.autoStopMinutes || '0'),
-      ...(ext ? { externalAddress: ext } : {}),
+      // Always sent: empty switches back to the Tailscale IP.
+      externalAddress: draft.externalAddress.trim(),
     },
   };
 }
@@ -777,19 +795,71 @@ export interface ConsoleEntry {
   error: string | null;
 }
 
+/** The game's container: `game-<name>` (templates/games) or compose project `<name>`. */
+export function findGameContainer<
+  C extends Pick<ContainerSummary, 'serverId' | 'name' | 'composeProject'>,
+>(game: Pick<GameSummary, 'serverId' | 'name'>, containers: readonly C[]): C | undefined {
+  const own = containers.filter((c) => c.serverId === game.serverId);
+  return (
+    own.find((c) => c.name === `game-${game.name}`) ??
+    own.find((c) => c.composeProject === game.name)
+  );
+}
+
 /**
- * Console events of the topic and own commands, in time order. The core echoes an RCON
- * command as a console event "> <command>" followed by the output; once that echo is
- * there, the local entry is hidden so nothing shows twice. Pending and failed commands
- * stay local.
+ * Container log lines with their arrival time from the live buffer; history from the
+ * first snapshot gets '' and so comes before everything that happened on this page.
+ */
+export function stampedLogLines(buf: LogBuffer | undefined): ConsoleLogLine[] {
+  return (buf?.lines ?? []).map((l) => ({
+    ts: buf?.at?.[l.seq] ?? '',
+    text: l.text,
+    err: l.stream === 'stderr',
+  }));
+}
+
+export interface ConsoleLogLine {
+  /** ISO arrival time, '' for history. */
+  ts: string;
+  text: string;
+  err: boolean;
+}
+
+/** A sent command came back: answer or error. */
+export function settleEntry(
+  entries: readonly ConsoleEntry[],
+  id: string,
+  result: { output: string } | { error: string },
+): ConsoleEntry[] {
+  return entries.map((e) => (e.id === id ? { ...e, ...result } : e));
+}
+
+/** Step-up cancelled: the command never went out, so its "…" line goes away. */
+export function dropEntry(entries: readonly ConsoleEntry[], id: string): ConsoleEntry[] {
+  return entries.filter((e) => e.id !== id);
+}
+
+/**
+ * Console events of the topic, the container log and own commands, in time order. The
+ * core echoes an RCON command as a console event "> <command>" followed by the output;
+ * once that echo is there, the local entry is hidden so nothing shows twice. Pending
+ * and failed commands stay local.
  */
 export function consoleLines(
   events: readonly GameEvent[],
   entries: readonly ConsoleEntry[],
+  logs: readonly ConsoleLogLine[] = [],
 ): TerminalLine[] {
   type Item = { ts: string; order: number; lines: TerminalLine[] };
   const items: Item[] = [];
   let order = 0;
+  for (const l of logs) {
+    items.push({
+      ts: l.ts,
+      order: order++,
+      lines: [l.err ? { text: l.text, kind: 'err' } : { text: l.text }],
+    });
+  }
   const echoes: { ts: string; command: string; used: boolean }[] = [];
   for (const e of events) {
     if (e.kind !== 'console') continue;

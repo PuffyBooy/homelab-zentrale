@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto';
-import { lstat, mkdir, open, rename, unlink } from 'node:fs/promises';
+import { lstat, mkdir, open, realpath, rename, unlink } from 'node:fs/promises';
 import { assertProjectNotProtected, type ProtectDocker } from './protected.js';
 import path from 'node:path';
 import { composeFileNameSchema, type RpcParams } from '@hz/shared';
@@ -216,6 +216,29 @@ export function fileMode(name: string): number {
   return name === ENV_FILE_NAME ? 0o600 : 0o640;
 }
 
+/** Same rule as gameNameSchema in packages/shared (game-common.ts GAME_NAME). */
+const GAME_DIR_NAME = /^[a-z0-9](?:[a-z0-9-]{0,30}[a-z0-9])$/;
+
+/**
+ * `.env` may only be written into a game folder: exactly <root>/games/<name> after
+ * realpath (`resolved` is the already resolved dir). Elsewhere a `.env` would be picked
+ * up by Compose for interpolation of a foreign project, so it is refused.
+ */
+export async function assertEnvAllowed(resolved: string, homelabRoot: string): Promise<void> {
+  let root: string;
+  try {
+    root = await realpath(homelabRoot);
+  } catch {
+    throw new ActionError('bad_path', 'homelab root missing');
+  }
+  if (
+    path.dirname(resolved) !== path.join(root, 'games') ||
+    !GAME_DIR_NAME.test(path.basename(resolved))
+  ) {
+    throw new ActionError('bad_path', '.env only in /opt/homelab/games/<name>');
+  }
+}
+
 /**
  * Writes one file atomically: exclusive temp file (never follows a symlink), fsync, rename.
  * The temp file has its final mode from the start, so a secret is never readable by others.
@@ -264,6 +287,7 @@ export async function composeWrite(
     if (!before.ok || before.path !== params.dir) {
       throw new ActionError('bad_path', before.ok ? 'dir is not canonical' : before.reason);
     }
+    if (names.includes(ENV_FILE_NAME)) await assertEnvAllowed(before.path, ctx.homelabRoot);
     try {
       await mkdir(params.dir, { recursive: true, mode: 0o750 });
     } catch {
@@ -274,6 +298,7 @@ export async function composeWrite(
     if (!check.ok || check.path !== params.dir) {
       throw new ActionError('bad_path', 'dir changed while writing');
     }
+    if (names.includes(ENV_FILE_NAME)) await assertEnvAllowed(check.path, ctx.homelabRoot);
     const st = await lstat(params.dir);
     if (!st.isDirectory()) throw new ActionError('bad_path', 'dir is not a directory');
     for (const name of names) {

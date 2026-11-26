@@ -138,7 +138,8 @@ describe('M6 acceptance: Minecraft Paper from the UI flow', () => {
       source: 'game',
     });
 
-    // 7. RCON.
+    // 7. RCON (the console: step-up, docs/SECURITY.md).
+    await stepUp(s.t, s.secret, s.cookie);
     const rcon = await gameRequest(s, 'POST', `/api/games/${created.id}/rcon`, {
       command: 'list',
     });

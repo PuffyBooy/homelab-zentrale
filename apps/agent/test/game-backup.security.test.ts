@@ -19,7 +19,9 @@ import {
   applyRetention,
   BACKUP_RESULT_PREFIX,
   backupStamp,
+  cleanupPartialBackups,
   gameBackup,
+  partialFilePattern,
   tarArgs,
 } from '../src/actions/game-backup.js';
 import { isDirLocked } from '../src/actions/dir-lock.js';
@@ -312,5 +314,74 @@ describe('game.backup', () => {
     expect((await lstat(file)).isFile()).toBe(true);
     const list = execFileSync('tar', ['--zstd', '-tf', file], { encoding: 'utf8' });
     expect(list).toContain('data/world/level.dat');
+  });
+});
+
+describe('stale .partial files on agent start', () => {
+  it('removes only regular temp archives of the agent, never through a symlink', async () => {
+    const r = path.join(base, 'cleanup-root');
+    const backups = path.join(r, 'backups');
+    const mc = path.join(backups, 'mc');
+    const out = path.join(base, 'cleanup-outside');
+    await mkdir(mc, { recursive: true });
+    await mkdir(out, { recursive: true });
+    const stale = '.mc-20261101-101010.tar.zst.0a1b2c3d.partial';
+    await writeFile(path.join(mc, stale), 'half');
+    // a finished backup and foreign files stay
+    await writeFile(path.join(mc, 'mc-20261101-101010.tar.zst'), 'done');
+    await writeFile(path.join(mc, 'notes.partial'), 'x');
+    await writeFile(path.join(mc, '.other-20261101-101010.tar.zst.0a1b2c3d.partial'), 'x');
+    // a symlink with the temp name (target outside) is not followed and not removed
+    await writeFile(path.join(out, 'victim'), 'keep');
+    const linkName = '.mc-20261101-111111.tar.zst.deadbeef.partial';
+    await symlink(path.join(out, 'victim'), path.join(mc, linkName));
+    // a directory with the temp name stays
+    const dirName = '.mc-20261101-121212.tar.zst.cafebabe.partial';
+    await mkdir(path.join(mc, dirName));
+    // a game folder symlink out of backups/ is not entered
+    const outGame = path.join(out, 'evil');
+    await mkdir(outGame);
+    const outStale = '.evil-20261101-101010.tar.zst.0a1b2c3d.partial';
+    await writeFile(path.join(outGame, outStale), 'outside');
+    await symlink(outGame, path.join(backups, 'evil'));
+
+    const removed = await cleanupPartialBackups(`${r}/`);
+    expect(removed).toEqual([path.join(mc, stale)]);
+    expect((await readdir(mc)).sort()).toEqual(
+      [
+        '.other-20261101-101010.tar.zst.0a1b2c3d.partial',
+        dirName,
+        linkName,
+        'mc-20261101-101010.tar.zst',
+        'notes.partial',
+      ].sort(),
+    );
+    expect(await readFile(path.join(out, 'victim'), 'utf8')).toBe('keep');
+    expect((await lstat(path.join(mc, linkName))).isSymbolicLink()).toBe(true);
+    expect(await readFile(path.join(outGame, outStale), 'utf8')).toBe('outside');
+  });
+
+  it('does not follow a backups/ symlink and copes with a missing folder', async () => {
+    const r = path.join(base, 'cleanup-link-root');
+    const out = path.join(base, 'cleanup-link-outside', 'mc');
+    await mkdir(r, { recursive: true });
+    await mkdir(out, { recursive: true });
+    const stale = '.mc-20261101-101010.tar.zst.0a1b2c3d.partial';
+    await writeFile(path.join(out, stale), 'outside');
+    expect(await cleanupPartialBackups(r)).toEqual([]);
+    await symlink(path.dirname(out), path.join(r, 'backups'));
+    expect(await cleanupPartialBackups(r)).toEqual([]);
+    expect(await readFile(path.join(out, stale), 'utf8')).toBe('outside');
+    expect(await cleanupPartialBackups(path.join(base, 'missing-root'))).toEqual([]);
+  });
+
+  it('the pattern matches the temp name runBackup uses', () => {
+    const re = partialFilePattern('mc');
+    expect(re.test(`.mc-${backupStamp(new Date(0))}.tar.zst.${'ab12'.repeat(2)}.partial`)).toBe(
+      true,
+    );
+    for (const n of ['.mc-1.tar.zst.ab12ab12.partial', 'mc.partial', '.mc-x/../y.partial']) {
+      expect(re.test(n)).toBe(false);
+    }
   });
 });

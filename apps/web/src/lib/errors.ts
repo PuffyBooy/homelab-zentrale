@@ -4,6 +4,8 @@ import { retryMinutes } from './format.js';
 /** User-facing text for an API error, following "Stimme und Text". */
 export function errorText(err: unknown): string {
   if (!isApiError(err)) return 'Unerwarteter Fehler. Seite neu laden und erneut versuchen.';
+  // A fixed hint from the core (e.g. "Server-Passwort: mindestens 8 Zeichen") wins.
+  if (err.hint) return err.hint;
   switch (err.error) {
     case 'rate_limited':
       return `Zu viele Versuche. Wieder möglich in ${retryMinutes(err.retryAfter)} Min.`;

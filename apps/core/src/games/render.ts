@@ -24,11 +24,20 @@ export class ValueError extends Error {
     /** Field key (never the value). */
     readonly key: string,
     readonly reason: string,
+    /** Fixed German hint for the user (template label + rule), never the value. */
+    readonly userMessage?: string,
   ) {
     super(`${key}: ${reason}`);
     this.name = 'ValueError';
   }
 }
+
+/**
+ * Minimum length of a non-empty secret field value. Agent output is scrubbed of
+ * secrets by the core (>= 4 chars) and the agent logger (>= 8 chars); shorter
+ * values would slip through the agent's masking, so they are refused.
+ */
+export const SECRET_MIN_LENGTH = 8;
 
 /** Values inside a larger plain scalar (`game-${X}`). */
 const EMBED_RE = /^(?:[A-Za-z0-9][A-Za-z0-9._-]*)?$/;
@@ -82,6 +91,13 @@ export function validateValues(
           if (v === '' && !f.optional) throw new ValueError(f.key, 'required');
           // Written unquoted into .env: no whitespace, no comment character.
           if (/[\s#]/u.test(v)) throw new ValueError(f.key, 'invalid characters');
+          if (v !== '' && [...v].length < SECRET_MIN_LENGTH) {
+            throw new ValueError(
+              f.key,
+              'secret too short',
+              `${f.label}: mindestens ${SECRET_MIN_LENGTH} Zeichen`,
+            );
+          }
           secrets[f.key] = v;
         } else values[f.key] = v;
         break;

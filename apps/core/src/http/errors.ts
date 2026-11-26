@@ -8,6 +8,8 @@ export class HttpError extends Error {
     public readonly status: number,
     public readonly code: ErrorCode,
     public readonly retryAfter?: number,
+    /** Fixed German hint for the user; never input values or internals. */
+    public readonly userMessage?: string,
   ) {
     super(code);
     this.name = 'HttpError';
@@ -19,12 +21,14 @@ export function sendError(
   status: number,
   code: ErrorCode,
   retryAfter?: number,
+  message?: string,
 ): FastifyReply {
   const body: ErrorResponse = { ok: false, error: code };
   if (retryAfter !== undefined) {
     body.retryAfter = retryAfter;
     void reply.header('retry-after', String(retryAfter));
   }
+  if (message !== undefined) body.message = message;
   return reply.code(status).send(body);
 }
 
@@ -55,7 +59,9 @@ export function errorHandler(
   request: FastifyRequest,
   reply: FastifyReply,
 ): FastifyReply {
-  if (err instanceof HttpError) return sendError(reply, err.status, err.code, err.retryAfter);
+  if (err instanceof HttpError) {
+    return sendError(reply, err.status, err.code, err.retryAfter, err.userMessage);
+  }
   if (err instanceof z.ZodError) {
     request.log.debug({ issues: err.issues.length }, 'invalid input');
     return sendError(reply, 400, 'invalid_input');

@@ -55,7 +55,13 @@ import {
   gameSnapshotToBuffer,
   type GameEventBuffer,
 } from './games.js';
-import { appendLogLines, containerLogsKey, type LogBuffer } from './logs.js';
+import {
+  appendLogLines,
+  containerLogsKey,
+  emptyLogBuffer,
+  stampArrivals,
+  type LogBuffer,
+} from './logs.js';
 import { serverKey, serversKey } from './servers.js';
 
 /**
@@ -293,6 +299,8 @@ export function applyLiveMessage(qc: QueryClient, msg: LiveServerMessage): Apply
   return result;
 }
 
+const nowIso = (): string => new Date().toISOString();
+
 /**
  * Topic `container-logs:<id>`: the snapshot replaces the buffer, updates append lines.
  * An update may also carry a snapshot-shaped item (`{ lines, ended }`) when the
@@ -307,9 +315,9 @@ function applyLogMessage(
   if (msg.type === 'snapshot') {
     const snap = logSnapshotSchema.safeParse(msg.data);
     if (!snap.success) return;
-    qc.setQueryData<LogBuffer>(key, {
-      lines: appendLogLines([], snap.data.lines),
-      ended: snap.data.ended,
+    qc.setQueryData<LogBuffer>(key, (old) => {
+      const lines = appendLogLines([], snap.data.lines);
+      return { lines, ended: snap.data.ended, at: stampArrivals(old, lines, nowIso()) };
     });
     return;
   }
@@ -327,10 +335,14 @@ function applyLogMessage(
       ended = snap.data.ended;
     }
   }
-  qc.setQueryData<LogBuffer>(key, (old) => ({
-    lines: appendLogLines(old?.lines ?? [], add),
-    ended: ended ?? old?.ended ?? false,
-  }));
+  qc.setQueryData<LogBuffer>(key, (old) => {
+    const lines = appendLogLines(old?.lines ?? [], add);
+    return {
+      lines,
+      ended: ended ?? old?.ended ?? false,
+      at: stampArrivals(old ?? emptyLogBuffer, lines, nowIso()),
+    };
+  });
 }
 
 /**

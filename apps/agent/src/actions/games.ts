@@ -66,6 +66,38 @@ const version = (v: unknown): string | null => {
   return s.length > 0 ? s.slice(0, 80) : null;
 };
 
+/**
+ * TPS needs an RCON login. The core polls every 30 s; with nobody online the TPS
+ * barely changes, so it is asked at most every TPS_IDLE_MS while the server is empty
+ * and the last value is reported in between. With players online it is asked every time.
+ */
+export const TPS_IDLE_MS = 150_000;
+
+export class TpsCache {
+  private readonly entries = new Map<string, { tps: number; at: number }>();
+
+  constructor(private readonly now: () => number = Date.now) {}
+
+  /** The cached TPS if it may be reused (server empty, value fresh), else undefined. */
+  reuse(key: string, playersOnline: number | null): number | undefined {
+    const e = this.entries.get(key);
+    if (!e) return undefined;
+    if (playersOnline !== 0 || this.now() - e.at >= TPS_IDLE_MS) return undefined;
+    return e.tps;
+  }
+
+  set(key: string, tps: number | null): void {
+    if (tps === null) this.entries.delete(key);
+    else this.entries.set(key, { tps, at: this.now() });
+  }
+
+  delete(key: string): void {
+    this.entries.delete(key);
+  }
+}
+
+export const tpsCache = new TpsCache();
+
 const OFFLINE: GameStatusData = { online: false, players: null, version: null, tps: null };
 
 function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
@@ -169,9 +201,18 @@ async function rconConfig(dir: string, ctx: ActionContext): Promise<RconConfig |
   return rc;
 }
 
-export async function gameStatus(
+/** game.status handler (the dispatcher passes the rpc id as third argument, so no cache param). */
+export function gameStatus(
   params: RpcParams<'game.status'>,
   ctx: ActionContext,
+): Promise<GameStatusData> {
+  return gameStatusWith(params, ctx, tpsCache);
+}
+
+export async function gameStatusWith(
+  params: RpcParams<'game.status'>,
+  ctx: ActionContext,
+  cache: TpsCache,
 ): Promise<GameStatusData> {
   checkGamedigType(params);
   const game = await resolveGameDir(params.gameDir, ctx.homelabRoot);
@@ -180,14 +221,23 @@ export async function gameStatus(
     (params.method === 'gamedig' && GAMEDIG_TYPES.get(params.gamedigType ?? '')?.password);
   const rcon = needsRcon ? await rconConfig(game.dir, ctx) : null;
 
+  const cacheKey = `${game.dir}:${params.port}`;
   let result: Query;
   try {
     result = await withTimeout(query(params, rcon), params.timeoutMs + 500);
   } catch {
+    cache.delete(cacheKey);
     return OFFLINE;
   }
+  if (!result.online) cache.delete(cacheKey);
   let tps: number | null = null;
-  if (result.online && params.tpsCommand && rcon) {
+  const cached =
+    result.online && params.tpsCommand && rcon
+      ? cache.reuse(cacheKey, result.players?.online ?? null)
+      : undefined;
+  if (cached !== undefined) {
+    tps = cached;
+  } else if (result.online && params.tpsCommand && rcon) {
     try {
       const [out] = await rconRun(
         { port: rcon.port, password: rcon.password, timeoutMs: params.timeoutMs },
@@ -197,6 +247,7 @@ export async function gameStatus(
     } catch {
       tps = null;
     }
+    cache.set(cacheKey, tps);
   }
   return { ...result, tps };
 }

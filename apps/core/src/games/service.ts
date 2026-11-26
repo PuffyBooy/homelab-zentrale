@@ -93,7 +93,8 @@ const DOWN_TIMEOUT_MS = 5 * 60_000;
 const ACTION_TIMEOUT_MS = 2 * 60_000;
 const STATUS_TIMEOUT_MS = 15_000;
 const RCON_TIMEOUT_MS = 15_000;
-const BACKUP_TIMEOUT_MS = 60 * 60_000;
+/** Agent allows 2 h (game-backup.ts); the core waits longer so the agent's timeout reports. */
+export const BACKUP_TIMEOUT_MS = 2 * 60 * 60_000 + 5 * 60_000;
 const REMOVE_TIMEOUT_MS = 5 * 60_000;
 const INTENT_TTL_MS = 5 * 60_000;
 const EVENT_BUFFER = 200;
@@ -658,7 +659,9 @@ export class GameService {
     try {
       return validateValues(t, input, prev);
     } catch (err) {
-      if (err instanceof ValueError) throw new HttpError(400, 'invalid_input');
+      if (err instanceof ValueError) {
+        throw new HttpError(400, 'invalid_input', undefined, err.userMessage);
+      }
       throw err;
     }
   }

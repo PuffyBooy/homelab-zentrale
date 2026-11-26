@@ -312,6 +312,7 @@ describe('games: secrets', () => {
 
     // The agent (or a game) echoes the password: the core scrubs it.
     s.behaviour.rconSuffix = ` password=${pw}`;
+    await stepUp(s.t, s.secret, s.cookie);
     for (const [method, url, payload] of [
       ['GET', '/api/games', undefined],
       ['GET', `/api/games/${game.id}`, undefined],
@@ -379,13 +380,111 @@ describe('games: secrets', () => {
       expect(bad.statusCode).toBe(400);
     }
   });
+
+  it('non-empty secret field values need at least 8 characters (agent log masking)', async () => {
+    const s = await setup();
+    const writes = rpcsOf(s, 'compose.write').length;
+    // 5 to 7 characters match the Valheim pattern but are too short to be masked.
+    for (const v of ['abcde', 'abcdef1', 'Ab12345']) {
+      const bad = await createGame(s, {
+        templateId: 'valheim',
+        name: 'valheim2',
+        values: { SERVER_PASS: v },
+      });
+      expect(bad.statusCode, v).toBe(400);
+      expect(bad.json()).toEqual({
+        ok: false,
+        error: 'invalid_input',
+        message: 'Passwort: mindestens 8 Zeichen',
+      });
+      expect(bad.body).not.toContain(v);
+    }
+    expect(s.t.app.hzCore.games.list()).toHaveLength(0);
+    expect(rpcsOf(s, 'compose.write')).toHaveLength(writes);
+
+    // Exactly 8 characters is fine.
+    const ok = await createGame(s, {
+      templateId: 'valheim',
+      name: 'valheim',
+      values: { SERVER_PASS: 'abcdefgh' },
+    });
+    expect(ok.statusCode).toBe(202);
+    const { game } = gameResponseSchema.parse(ok.json());
+    await s.t.app.hzCore.games.idle();
+
+    // Settings update: a too short new secret is refused, the old one stays.
+    const put = await gameRequest(s, 'PUT', `/api/games/${game.id}`, {
+      values: { SERVER_PASS: 'short12' },
+    });
+    expect(put.statusCode).toBe(400);
+    expect(put.json().message).toBe('Passwort: mindestens 8 Zeichen');
+    const last = rpcsOf(s, 'compose.write').at(-1)?.params as { files: Record<string, string> };
+    expect(last.files['.env']).toContain('SERVER_PASS=abcdefgh');
+  });
+
+  it('secret length check needs a session', async () => {
+    const s = await setup();
+    const res = await s.t.app.inject({
+      method: 'POST',
+      url: '/api/games',
+      headers: { host: HOST, origin: `https://${HOST}` },
+      payload: {
+        templateId: 'valheim',
+        serverId: s.serverId,
+        name: 'valheim',
+        values: { SERVER_PASS: 'abcde' },
+      },
+    });
+    expect(res.statusCode).toBe(401);
+    expect(res.json()).toEqual({ ok: false, error: 'unauthorized' });
+  });
 });
 
 describe('games: rcon', () => {
+  it('needs step-up (the console): refused without, nothing reaches the agent', async () => {
+    const s = await setup();
+    const g = await readyGame(s);
+    const url = `/api/games/${g.id}/rcon`;
+    const before = s.rpcs.length;
+
+    const noStep = await gameRequest(s, 'POST', url, { command: 'list' });
+    expect(noStep.statusCode).toBe(403);
+    expect(noStep.json()).toEqual({ ok: false, error: 'step_up_required' });
+    // Step-up is checked before the body: invalid input does not leak a 400 either.
+    const invalid = await gameRequest(s, 'POST', url, { command: 'a\nb' });
+    expect(invalid.statusCode).toBe(403);
+    expect(invalid.json().error).toBe('step_up_required');
+    await new Promise((r) => setTimeout(r, 30));
+    expect(rpcsOf(s, 'game.rcon')).toHaveLength(0);
+    expect(s.rpcs.length).toBe(before);
+    expect(
+      s.t.db.db
+        .select()
+        .from(auditLog)
+        .all()
+        .filter((a) => a.action === 'game.rcon'),
+    ).toHaveLength(0);
+    expect(s.t.app.hzCore.games.eventsOf(g.id).some((e) => e.kind === 'console')).toBe(false);
+
+    await stepUp(s.t, s.secret, s.cookie);
+    const ok = await gameRequest(s, 'POST', url, { command: 'list' });
+    expect(ok.statusCode).toBe(200);
+    expect(ok.json()).toEqual({ output: 'ran list' });
+    expect(rpcsOf(s, 'game.rcon')).toHaveLength(1);
+
+    // Step-up expires after 15 min.
+    s.t.clock.advance(15 * 60_000 + 1);
+    const expired = await gameRequest(s, 'POST', url, { command: 'list' });
+    expect(expired.statusCode).toBe(403);
+    expect(expired.json().error).toBe('step_up_required');
+    expect(rpcsOf(s, 'game.rcon')).toHaveLength(1);
+  });
+
   it('rate limit: 10 commands per 10 s and game, then 429 with Retry-After', async () => {
     const s = await setup();
     const g = await readyGame(s);
     const url = `/api/games/${g.id}/rcon`;
+    await stepUp(s.t, s.secret, s.cookie);
     for (let i = 0; i < 10; i += 1) {
       expect((await gameRequest(s, 'POST', url, { command: `say ${i}` })).statusCode).toBe(200);
     }
@@ -413,6 +512,7 @@ describe('games: rcon', () => {
   it('refuses multi-line commands and games without RCON', async () => {
     const s = await setup();
     const g = await readyGame(s);
+    await stepUp(s.t, s.secret, s.cookie);
     for (const command of [
       'list\nop evil',
       'a\rb',

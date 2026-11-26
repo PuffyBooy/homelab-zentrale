@@ -6,7 +6,7 @@ import { collectUsed, firstFree, ramCheck, suggestPorts } from '../src/games/por
 import { parseBackupResult, translateProgress } from '../src/games/agent-text.js';
 import { renderCompose, renderEnv, validateValues, ValueError } from '../src/games/render.js';
 import { isSafeText } from '../src/games/safe-text.js';
-import { gameDirOf, scrub, validExternalAddress } from '../src/games/service.js';
+import { BACKUP_TIMEOUT_MS, gameDirOf, scrub, validExternalAddress } from '../src/games/service.js';
 import { gameState } from '../src/games/status.js';
 import {
   loadTemplates,
@@ -354,6 +354,42 @@ describe('rendering', () => {
     expect(() => renderCompose(l, embedded)).toThrow(ValueError);
   });
 
+  it('secret field values: empty only if optional, otherwise at least 8 characters', () => {
+    const t = {
+      ...l.template,
+      fields: [
+        { key: 'PW', label: 'Server-Passwort', type: 'text', default: '', secret: true },
+        {
+          key: 'TOKEN',
+          label: 'Token',
+          type: 'text',
+          default: '',
+          secret: true,
+          optional: true,
+        },
+      ],
+    } as typeof l.template;
+    expect(validateValues(t, { PW: 'abcdefgh' }).secrets).toEqual({ PW: 'abcdefgh', TOKEN: '' });
+    expect(validateValues(t, { PW: 'abcdefgh', TOKEN: '12345678' }).secrets.TOKEN).toBe('12345678');
+    for (const short of ['a', 'abcdefg', 'äöüäöüä']) {
+      let err: unknown;
+      try {
+        validateValues(t, { PW: 'abcdefgh', TOKEN: short });
+      } catch (e) {
+        err = e;
+      }
+      expect(err, short).toBeInstanceOf(ValueError);
+      expect((err as ValueError).userMessage).toBe('Token: mindestens 8 Zeichen');
+      expect((err as ValueError).message).not.toContain(short);
+    }
+    expect(() => validateValues(t, { PW: '' })).toThrow(ValueError);
+    expect(() => validateValues(t, { PW: 'abc' })).toThrow('secret too short');
+    // A short value that was stored before is refused on the next update, too.
+    expect(() => validateValues(t, {}, { values: {}, secrets: { PW: 'abcd', TOKEN: '' } })).toThrow(
+      ValueError,
+    );
+  });
+
   it('validateValues keeps previous values and rejects unknown keys', () => {
     const prev = validateValues(l.template, { MAX_PLAYERS: 3 });
     expect(validateValues(l.template, { TYPE: 'FABRIC' }, prev).values).toMatchObject({
@@ -415,6 +451,10 @@ describe('helpers', () => {
     for (const a of ['http://x', 'x:25565', 'a b', '-x.at', 'x..at', 'a/b', '[::1]']) {
       expect(validExternalAddress(a), a).toBe(false);
     }
+  });
+
+  it('the core waits longer for a backup than the agent (2 h), so the agent reports its timeout', () => {
+    expect(BACKUP_TIMEOUT_MS).toBe(2 * 60 * 60_000 + 5 * 60_000);
   });
 
   it('scrub replaces secrets in agent output', () => {

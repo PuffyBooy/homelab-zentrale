@@ -50,7 +50,7 @@ function SettingsForm({ game, tpl }: { game: GameSummary; tpl: TemplateInfo }): 
     mutationFn: (body: GameUpdateBody) => updateGame(game.id, body),
     onSuccess: (saved) => {
       qc.setQueryData<GameSummary[]>(gamesKey, (old) => (old ? mergeById(old, [saved]) : old));
-      setDraft((d) => ({ ...d, externalAddress: '' }));
+      setDraft((d) => ({ ...d, externalAddress: saved.externalAddress }));
     },
   });
 
@@ -112,8 +112,8 @@ function SettingsForm({ game, tpl }: { game: GameSummary; tpl: TemplateInfo }): 
             setDraft((d) => ({ ...d, externalAddress: v }));
             clear('externalAddress');
           }}
-          placeholder={game.address}
-          hint="Leer lassen: bleibt wie oben."
+          placeholder="mc.hoebe.at"
+          hint="Leer: die Tailscale-IP des Servers. Für Freunde: DDNS-Name oder öffentliche IP."
           error={errors.externalAddress}
           maxLength={253}
           autoComplete="off"

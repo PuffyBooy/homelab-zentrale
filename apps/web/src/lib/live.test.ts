@@ -213,6 +213,10 @@ describe('applyLiveMessage', () => {
       'warn',
       'ready',
     ]);
+    // History from the first snapshot has no arrival time, live lines do.
+    const at = qc.getQueryData<LogBuffer>(key)?.at ?? {};
+    expect(Object.keys(at)).toEqual(['2']);
+    expect(at[2]).toMatch(/^\d{4}-\d{2}-\d{2}T/);
     applyLiveMessage(qc, {
       type: 'update',
       topic,
