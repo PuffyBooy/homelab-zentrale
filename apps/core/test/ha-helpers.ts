@@ -56,6 +56,10 @@ export class FakeHa {
   /** Never answer call_service (timeouts, pending map). */
   ignoreCalls = false;
   connections = 0;
+  /** Called with each command type before it is answered (sync race tests). */
+  onCommand: ((type: string) => void) | null = null;
+  /** get_states answers success:false. */
+  failGetStates = false;
   private readonly subs = new Map<WebSocket, number[]>();
   private http: Server | null = null;
   private wss: WebSocketServer | null = null;
@@ -103,6 +107,24 @@ export class FakeHa {
             event: {
               event_type: 'state_changed',
               data: { entity_id: entityId, old_state: prev ?? null, new_state: next },
+            },
+          }),
+        );
+      }
+    }
+  }
+
+  /** Fires a state_changed event without storing the state (stale/racing events). */
+  sendEvent(newState: FakeState | null, entityId = newState?.entity_id ?? ''): void {
+    for (const [ws, ids] of this.subs) {
+      for (const id of ids) {
+        ws.send(
+          JSON.stringify({
+            id,
+            type: 'event',
+            event: {
+              event_type: 'state_changed',
+              data: { entity_id: entityId, old_state: null, new_state: newState },
             },
           }),
         );
@@ -174,6 +196,7 @@ export class FakeHa {
         return;
       }
       const id = msg.id as number;
+      this.onCommand?.(String(msg.type));
       const ok = (result: unknown) =>
         ws.send(JSON.stringify({ id, type: 'result', success: true, result }));
       const fail = (code: string) =>
@@ -188,6 +211,7 @@ export class FakeHa {
           this.subs.set(ws, [...(this.subs.get(ws) ?? []), id]);
           return ok(null);
         case 'get_states':
+          if (this.failGetStates) return fail('unknown_error');
           return ok([...this.states.values()]);
         case 'config/area_registry/list':
           return ok([

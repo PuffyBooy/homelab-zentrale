@@ -251,13 +251,26 @@ export function metricText(item: HaItem, lastKnown = false): string {
   return p.unit ? `${p.value} ${p.unit}` : p.value;
 }
 
-/** "12,40" (always two decimals). */
-export function formatEurAmount(v: number): string {
+/** de-AT with a dot as group separator (Intl uses a narrow space for de-AT). */
+function grouped(v: number, minDigits: number, maxDigits: number): string {
   return new Intl.NumberFormat('de-AT', {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-    useGrouping: false,
-  }).format(Math.abs(v) < 0.005 ? 0 : v);
+    minimumFractionDigits: minDigits,
+    maximumFractionDigits: maxDigits,
+    useGrouping: true,
+  })
+    .formatToParts(v)
+    .map((p) => (p.type === 'group' ? '.' : p.value))
+    .join('');
+}
+
+/** "12,40", "1.234,56" (always two decimals, grouped). */
+export function formatEurAmount(v: number): string {
+  return grouped(Math.abs(v) < 0.005 ? 0 : v, 2, 2);
+}
+
+/** Monthly energy: "123,4", "1.234,5" (one decimal, grouped). */
+export function formatKwh(v: number): string {
+  return grouped(Math.abs(v) < 0.05 ? 0 : v, 0, 1);
 }
 
 /** "12,40 €". */
@@ -294,7 +307,9 @@ export function toggleHint(state: HaState, item: HaItem): string | undefined {
 export function pressLabel(item: Pick<HaItem, 'entityId' | 'label'>): string {
   if (haDomain(item.entityId) === 'lock') return 'Tür öffnen';
   const text = `${item.entityId} ${item.label}`.toLowerCase();
-  return /t(ü|ue)r|door|(ö|oe)ffner|eingang|haus|gate|tor\b|intercom|gegensprech|klingel/.test(text)
+  return /t(ü|ue)r|door|(ö|oe)ffner|eingang|haus|gate|\btor|tor\b|garage|summer|intercom|gegensprech|klingel/.test(
+    text,
+  )
     ? 'Tür öffnen'
     : 'Auslösen';
 }
@@ -321,7 +336,8 @@ export function haSentence(state: HaState | undefined): StatusSentence {
 export function haTileStatus(state: Pick<HaState, 'status'> | undefined): Status | undefined {
   if (!state) return undefined;
   if (state.status === 'connected') return 'ok';
-  if (state.status === 'unreachable') return 'crit';
+  // Same level as the "Home Assistant nicht erreichbar" alert (warn).
+  if (state.status === 'unreachable') return 'warn';
   if (state.status === 'connecting') return 'busy';
   return 'off';
 }

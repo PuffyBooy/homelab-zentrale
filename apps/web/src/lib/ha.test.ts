@@ -7,7 +7,9 @@ import {
   defaultKind,
   entityFromAvailable,
   formatEur,
+  formatKwh,
   groupByRoom,
+  haTileStatus,
   haSentence,
   haStateKey,
   isEnergySensor,
@@ -115,6 +117,11 @@ describe('metric formatting (Austrian format)', () => {
   it('formats euros and prices', () => {
     expect(formatEur(12.4)).toBe('12,40 €');
     expect(formatEur(0.001)).toBe('0,00 €');
+    expect(formatEur(1234.56)).toBe('1.234,56 €');
+    expect(formatEur(1_234_567.8)).toBe('1.234.567,80 €');
+    expect(formatKwh(123.45)).toBe('123,5');
+    expect(formatKwh(1234.5)).toBe('1.234,5');
+    expect(formatKwh(0.01)).toBe('0');
     expect(priceToText(0.25)).toBe('0,25');
     expect(priceToText(0.2345)).toBe('0,2345');
   });
@@ -168,6 +175,11 @@ describe('grouping and overview', () => {
       rest: '1 von 1 Schalter an.',
     });
   });
+  it('tile tone for unreachable matches the warn alert', () => {
+    expect(haTileStatus({ status: 'unreachable' })).toBe('warn');
+    expect(haTileStatus({ status: 'connected' })).toBe('ok');
+  });
+
   it('hints pending, unreachable and unavailable toggles', () => {
     const s = haState([]);
     expect(toggleHint(s, item({ pending: true }))).toBe('schaltet …');
@@ -203,6 +215,18 @@ describe('kind rules', () => {
     expect(defaultKind({ entityId: 'light.x', name: 'Licht' })).toBe('toggle');
     expect(defaultKind({ entityId: 'switch.deko', name: 'Deko' })).toBe('toggle');
     expect(defaultKind({ entityId: 'switch.shelly', name: 'Türöffner' })).toBe('button');
+    for (const [entityId, name] of [
+      ['switch.shelly_2', 'Garagentor'],
+      ['switch.garage', 'Garage'],
+      ['switch.einfahrt_tor', 'Einfahrt'],
+      ['switch.s1', 'Tor Hof'],
+      ['switch.s2', 'Summer'],
+      ['switch.s3', 'Haus Öffner'],
+      ['switch.front_door', 'Front'],
+      ['switch.gate', 'Gate'],
+    ]) {
+      expect(defaultKind({ entityId: entityId ?? '', name: name ?? '' }), name).toBe('button');
+    }
     expect(defaultKind({ entityId: 'lock.front_door', name: 'Haustür' })).toBe('button');
     expect(defaultKind({ entityId: 'sensor.t', name: 'Temperatur' })).toBe('metric');
     expect(defaultKind({ entityId: 'automation.x', name: 'x' })).toBeNull();

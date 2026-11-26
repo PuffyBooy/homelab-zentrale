@@ -1,3 +1,4 @@
+import type { HaConfig } from '@hz/shared';
 import { afterEach, describe, expect, it } from 'vitest';
 import { PUBLIC_API_ROUTES } from '../src/auth/guard.js';
 import { HaCallError, HaClient, type HaSnapshot } from '../src/homeassistant/client.js';
@@ -6,6 +7,7 @@ import { auditLog, settings } from '../src/db/schema.js';
 import { stepUp, until } from './agent-helpers.js';
 import {
   closeHa,
+  DEMO_CONFIG,
   FakeHa,
   FAST_HA,
   haRequest,
@@ -51,7 +53,6 @@ const ALLOWED_SERVICES = new Set([
   'input_boolean.turn_off',
   'button.press',
   'lock.open',
-  'lock.unlock',
   'script.turn_on',
 ]);
 
@@ -168,6 +169,124 @@ describe('ha step-up', () => {
   });
 });
 
+describe('ha config step-up (switch is toggle and door opener)', () => {
+  const door = {
+    entityId: 'switch.haustuer',
+    kind: 'button' as const,
+    roomId: null,
+    label: 'Haustür',
+    overview: true,
+  };
+  async function withDoor(): Promise<HaSetup> {
+    const h = await withHa();
+    h.ha.put('switch.haustuer', 'off', { friendly_name: 'Haustür' });
+    await until(() => h.t.app.hzCore.ha.available().some((a) => a.entityId === door.entityId));
+    await stepUp(h.t, h.secret, h.cookie);
+    const res = await haRequest(h, 'PUT', '/api/ha/config', {
+      ...DEMO_CONFIG,
+      entities: [...DEMO_CONFIG.entities, door],
+    });
+    expect(res.statusCode).toBe(200);
+    // Step-up expires; the session stays.
+    h.t.clock.advance(16 * 60_000);
+    return h;
+  }
+  const config = (s: HaSetup) => s.t.app.hzCore.ha.config();
+
+  it('the attack: switch.haustuer button -> toggle without step-up is 403, nothing changes, toggle stays refused', async () => {
+    s = await withDoor();
+    const before = JSON.stringify(config(s));
+    const res = await haRequest(s, 'PUT', '/api/ha/config', {
+      ...DEMO_CONFIG,
+      entities: [...DEMO_CONFIG.entities, { ...door, kind: 'toggle' }],
+    });
+    expect(res.statusCode).toBe(403);
+    expect(res.json()).toEqual({ ok: false, error: 'step_up_required' });
+    expect(JSON.stringify(config(s))).toBe(before);
+    const t = await haRequest(s, 'POST', '/api/ha/entities/switch.haustuer/toggle', { on: true });
+    expect(t.statusCode).toBe(400);
+    expect(s.ha.calls).toEqual([]);
+    expect(s.ha.states.get('switch.haustuer')?.state).toBe('off');
+    const audit = s.t.db.db.select().from(auditLog).all();
+    expect(audit.filter((a) => a.action === 'ha.config')).toHaveLength(2);
+  });
+
+  it('remove, then re-add as toggle: the re-add is a new switch and needs step-up', async () => {
+    s = await withDoor();
+    const removed = await haRequest(s, 'PUT', '/api/ha/config', DEMO_CONFIG);
+    expect(removed.statusCode).toBe(200);
+    const res = await haRequest(s, 'PUT', '/api/ha/config', {
+      ...DEMO_CONFIG,
+      entities: [...DEMO_CONFIG.entities, { ...door, kind: 'toggle' }],
+    });
+    expect(res.statusCode).toBe(403);
+    expect(config(s).entities.some((e) => e.entityId === door.entityId)).toBe(false);
+  });
+
+  it('adding a switch as toggle or any button needs step-up; with step-up it works', async () => {
+    s = await withHa();
+    s.t.clock.advance(16 * 60_000);
+    const withSwitch = {
+      ...DEMO_CONFIG,
+      entities: [...DEMO_CONFIG.entities, { ...door, kind: 'toggle' as const }],
+    };
+    expect((await haRequest(s, 'PUT', '/api/ha/config', withSwitch)).statusCode).toBe(403);
+    const withButton = {
+      ...DEMO_CONFIG,
+      entities: [...DEMO_CONFIG.entities, { ...door, entityId: 'script.klingel' }],
+    };
+    expect((await haRequest(s, 'PUT', '/api/ha/config', withButton)).statusCode).toBe(403);
+    expect(config(s)).toEqual(DEMO_CONFIG);
+    await stepUp(s.t, s.secret, s.cookie);
+    expect((await haRequest(s, 'PUT', '/api/ha/config', withSwitch)).statusCode).toBe(200);
+    expect(config(s).entities.at(-1)).toMatchObject({ entityId: door.entityId, kind: 'toggle' });
+  });
+
+  it('renames, rooms, order, overview flags, removals and non-switch toggles need no step-up', async () => {
+    s = await withDoor();
+    const entities: HaConfig['entities'] = [...DEMO_CONFIG.entities, door]
+      .filter((e) => e.entityId !== 'climate.hvac')
+      .map((e) => ({
+        ...e,
+        label: `${e.entityId.split('.')[1] ?? 'x'}-neu`,
+        overview: !e.overview,
+      }))
+      .reverse();
+    entities.push({
+      entityId: 'light.kitchen',
+      kind: 'toggle',
+      roomId: 'kueche',
+      label: null,
+      overview: false,
+    });
+    const res = await haRequest(s, 'PUT', '/api/ha/config', {
+      rooms: [...DEMO_CONFIG.rooms, { id: 'kueche', name: 'Küche' }],
+      entities,
+    });
+    expect(res.statusCode).toBe(200);
+    expect(config(s).entities.find((e) => e.entityId === door.entityId)).toMatchObject({
+      kind: 'button',
+      label: 'haustuer-neu',
+    });
+  });
+
+  it('an invalid config is 400 before the step-up check, without a session 401', async () => {
+    s = await withDoor();
+    const bad = await haRequest(s, 'PUT', '/api/ha/config', {
+      rooms: [],
+      entities: [{ ...door, kind: 'metric' }],
+    });
+    expect(bad.statusCode).toBe(400);
+    const anon = await s.t.app.inject({
+      method: 'PUT',
+      url: '/api/ha/config',
+      headers: { host: HOST, origin: `https://${HOST}`, 'content-type': 'application/json' },
+      payload: DEMO_CONFIG,
+    });
+    expect(anon.statusCode).toBe(401);
+  });
+});
+
 describe('ha allowlist', () => {
   it('entities that are not configured cannot be controlled', async () => {
     s = await withHa();
@@ -266,7 +385,9 @@ describe('ha allowlist', () => {
     expect(pressCall('script.klingel', 0)).toEqual({ domain: 'script', service: 'turn_on' });
     expect(pressCall('switch.shelly', 0)).toEqual({ domain: 'switch', service: 'turn_on' });
     expect(pressCall('lock.a', 1)).toEqual({ domain: 'lock', service: 'open' });
-    expect(pressCall('lock.a', 2)).toEqual({ domain: 'lock', service: 'unlock' });
+    // No OPEN feature: no fallback to unlock.
+    expect(pressCall('lock.a', 2)).toBeNull();
+    expect(pressCall('lock.a', 0)).toBeNull();
   });
 });
 
@@ -366,6 +487,108 @@ describe('ha client limits', () => {
     await stepUp(s.t, s.secret, s.cookie);
     const res = await haRequest(s, 'PUT', '/api/ha/settings', { url: s.ha.url, token: HA_TOKEN });
     expect(res.json()).toMatchObject({ status: 'unreachable', error: 'Antwort zu groß' });
+  });
+
+  it('auth ok but get_states fails or is too large: the backoff still grows', async () => {
+    for (const mode of ['error', 'oversize'] as const) {
+      extra = new FakeHa();
+      await extra.start();
+      if (mode === 'error') extra.failGetStates = true;
+      else extra.put('sensor.big', '1', { friendly_name: 'x'.repeat(100 * 1024) });
+      const at: number[] = [];
+      let ready = false;
+      client = new HaClient(
+        extra.url,
+        HA_TOKEN,
+        {
+          ...events(() => {
+            ready = true;
+          }),
+          connecting: () => at.push(Date.now()),
+        },
+        { ...FAST_HA, backoffBaseMs: 40, backoffMaxMs: 200, maxPayloadBytes: 64 * 1024 },
+      );
+      client.start();
+      await until(() => at.length >= 5, 5000);
+      client.stop();
+      client = undefined;
+      // Delays 40, 80, 160, 200: without the fix every retry waits 40 ms.
+      const gaps = at.slice(1).map((t, i) => t - (at[i] ?? 0));
+      expect(gaps[2], `${mode} ${gaps.join(',')}`).toBeGreaterThanOrEqual(150);
+      expect(gaps[3], `${mode} ${gaps.join(',')}`).toBeGreaterThanOrEqual(190);
+      expect(
+        extra.frames.filter((f) => (f as { type?: string }).type === 'auth').length,
+      ).toBeGreaterThanOrEqual(4);
+      expect(ready).toBe(false);
+      await extra.stop();
+      extra = undefined;
+    }
+  });
+
+  it('state changes during the initial sync are not lost; newer last_changed wins', async () => {
+    extra = new FakeHa();
+    await extra.start();
+    const fake = extra;
+    const old = '2026-11-25T10:00:00.000000+00:00';
+    const newer = '2026-11-25T12:00:00.000000+00:00';
+    fake.onCommand = (type) => {
+      if (type === 'get_states') {
+        // Before the snapshot: stale event (older) loses, newer event wins.
+        fake.sendEvent({
+          entity_id: 'light.kitchen',
+          state: 'off',
+          attributes: {},
+          last_changed: old,
+        });
+        fake.sendEvent({
+          entity_id: 'sensor.outside_temperature',
+          state: '16.2',
+          attributes: { unit_of_measurement: '°C' },
+          last_changed: newer,
+        });
+      } else if (type === 'config/area_registry/list') {
+        // After the snapshot, while the registries load: always newer.
+        fake.put('light.bed_light', 'on');
+        fake.sendEvent(null, 'automation.night');
+      }
+    };
+    let snap: HaSnapshot | null = null;
+    const changed: string[] = [];
+    client = new HaClient(
+      fake.url,
+      HA_TOKEN,
+      {
+        ...events((x) => {
+          snap = x;
+        }),
+        stateChanged: (id) => changed.push(id),
+      },
+      { ...FAST_HA, pingIntervalMs: 60_000 },
+    );
+    client.start();
+    await until(() => snap !== null);
+    const byId = new Map((snap as unknown as HaSnapshot).states.map((x) => [x.entityId, x.state]));
+    expect(byId.get('light.bed_light')).toBe('on');
+    expect(byId.get('light.kitchen')).toBe('on');
+    expect(byId.get('sensor.outside_temperature')).toBe('16.2');
+    expect(byId.has('automation.night')).toBe(false);
+    // Buffered events are part of the snapshot, not replayed; later ones flow live.
+    expect(changed).toEqual([]);
+    fake.onCommand = null;
+    fake.put('light.kitchen', 'off');
+    await until(() => changed.includes('light.kitchen'));
+  });
+
+  it('HA URLs to link-local addresses (cloud metadata) are refused; loopback works', async () => {
+    s = await withHa({ connect: false });
+    await stepUp(s.t, s.secret, s.cookie);
+    for (const url of ['http://169.254.169.254', 'http://[fe80::1]:8123']) {
+      const res = await haRequest(s, 'PUT', '/api/ha/settings', { url, token: HA_TOKEN });
+      expect(res.statusCode, url).toBe(400);
+    }
+    expect(s.t.app.hzCore.ha.settings()).toMatchObject({ url: null, tokenSet: false });
+    const ok = await haRequest(s, 'PUT', '/api/ha/settings', { url: s.ha.url, token: HA_TOKEN });
+    expect(ok.json()).toMatchObject({ status: 'connected' });
   });
 
   it('commands are refused while disconnected', async () => {

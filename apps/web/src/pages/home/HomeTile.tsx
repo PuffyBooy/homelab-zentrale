@@ -4,7 +4,7 @@ import { Link } from 'react-router';
 import { Metric, Tile, cx } from '@hz/ui';
 import { FormError } from '../../components/FormError.js';
 import { formatNumber } from '../../lib/format.js';
-import { STATUS_TEXT, formatEur, haTileStatus, overviewItems } from '../../lib/ha.js';
+import { STATUS_TEXT, formatEur, formatKwh, haTileStatus, overviewItems } from '../../lib/ha.js';
 import { HaControl, useHaToggle } from './HaControls.js';
 
 /**
@@ -51,7 +51,7 @@ export function HomeTile({ state }: { state: HaState }): ReactElement {
           {e ? (
             <Metric
               label="Im Monat"
-              value={e.monthKwh === null ? '—' : formatNumber(e.monthKwh, 1)}
+              value={e.monthKwh === null ? '—' : formatKwh(e.monthKwh)}
               unit={e.monthKwh === null ? undefined : 'kWh'}
               hint={e.monthEur === null ? undefined : `≈ ${formatEur(e.monthEur)}`}
               className={cx(stale && 'app-ha-stale')}

@@ -96,7 +96,11 @@ test.beforeAll(async ({ browser }) => {
     viewport: { width: 1280, height: 900 },
   });
   page = await admin.newPage();
+  const t0 = Date.now();
+  const step = (what: string): void =>
+    console.warn(`beforeAll ${what} after ${Date.now() - t0} ms`);
   totp = await signIn(page);
+  step('signIn');
 
   const enroll = await apiCall<{ token: string }>('POST', '/api/servers/enroll', {
     name: AGENT_NAME,
@@ -105,6 +109,7 @@ test.beforeAll(async ({ browser }) => {
   expect(enroll.status).toBe(200);
   agent = new SimAgent({ url: AGENT_URL, name: AGENT_NAME, token: enroll.data.token, games: true });
   await agent.connect();
+  step('agent.connect');
 
   const created = await apiCall<{ game: { id: string } }>('POST', '/api/games', {
     templateId: 'minecraft-java',
@@ -115,6 +120,7 @@ test.beforeAll(async ({ browser }) => {
   });
   expect(created.status).toBe(202);
   gameId = created.data.game.id;
+  step('game created');
   // Setup: write, pull, up, then game.status every 5 s until online.
   await expect.poll(gameStatus, { timeout: 90_000, intervals: [1000] }).toBe('ok');
   const stop = await apiCall('POST', `/api/games/${gameId}/stop`);

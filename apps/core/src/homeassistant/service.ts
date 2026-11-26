@@ -3,6 +3,7 @@ import type { FastifyBaseLogger } from 'fastify';
 import { z } from 'zod';
 import {
   HA_TOGGLE_DOMAINS,
+  haConfigNeedsStepUp,
   haConfigSchema,
   haDomain,
   haEntityIdSchema,
@@ -34,7 +35,7 @@ import {
   type HaDownReason,
   type HaSnapshot,
 } from './client.js';
-import { EnergyStore, toKwh, toWatts } from './energy.js';
+import { EnergyStore, HA_ENERGY_UNITS, HA_POWER_UNITS, toKwh, toWatts } from './energy.js';
 import type { HaEntityState } from './protocol.js';
 
 type HaItem = z.infer<typeof haItemSchema>;
@@ -105,19 +106,22 @@ export function toggleCall(entityId: string, on: boolean): HaServiceCall | null 
   return { domain, service: on ? 'turn_on' : 'turn_off' };
 }
 
+/** A lock that can release the latch (`lock.open`); others only lock and unlock. */
+export function lockCanOpen(supportedFeatures: number): boolean {
+  return (supportedFeatures & LOCK_FEATURE_OPEN) !== 0;
+}
+
 /**
- * Fixed service per button domain. lock: `open` (releases the latch) if the
- * lock supports it, else `unlock`. switch: `turn_on` (Shelly with auto-off).
+ * Fixed service per button domain. lock: `open` (releases the latch), only for
+ * locks with the OPEN feature (null otherwise: never `unlock` as a fallback).
+ * switch: `turn_on` (Shelly with auto-off).
  */
 export function pressCall(entityId: string, supportedFeatures: number): HaServiceCall | null {
   switch (haDomain(entityId)) {
     case 'button':
       return { domain: 'button', service: 'press' };
     case 'lock':
-      return {
-        domain: 'lock',
-        service: (supportedFeatures & LOCK_FEATURE_OPEN) !== 0 ? 'open' : 'unlock',
-      };
+      return lockCanOpen(supportedFeatures) ? { domain: 'lock', service: 'open' } : null;
     case 'switch':
       return { domain: 'switch', service: 'turn_on' };
     case 'script':
@@ -173,6 +177,10 @@ export class HaService {
   private readonly energy: EnergyStore;
   private readonly pressLimiter: WindowLimiter;
   private changedAt: number;
+  /** Parsed `ha.config` / `ha.settings`; only setConfig/updateSettings write them. */
+  private configCache: HaConfig | null = null;
+  private configIds: Set<string> | null = null;
+  private settingsCache: StoredSettings | null = null;
 
   constructor(private readonly deps: HaServiceDeps) {
     this.energy = new EnergyStore(deps.db);
@@ -202,8 +210,10 @@ export class HaService {
   // ---- stored settings -------------------------------------------------------------
 
   private stored(): StoredSettings {
+    if (this.settingsCache) return this.settingsCache;
     const p = storedSettingsSchema.safeParse(readSetting(this.deps.db, SETTINGS_KEY) ?? {});
-    return p.success ? p.data : DEFAULT_SETTINGS;
+    this.settingsCache = p.success ? p.data : DEFAULT_SETTINGS;
+    return this.settingsCache;
   }
 
   private tokenSet(): boolean {
@@ -248,10 +258,31 @@ export class HaService {
     return body.token !== undefined || (body.url !== undefined && body.url !== this.stored().url);
   }
 
+  /**
+   * A sensor HA knows must have a matching unit (Wh/kWh/MWh, W/kW). Unknown
+   * entities pass (HA may be offline); without a usable unit they show no value.
+   */
+  private checkSensorUnits(body: SettingsRequest): void {
+    const check = (id: string | null | undefined, units: readonly string[], msg: string): void => {
+      if (id === null || id === undefined) return;
+      const c = this.cache.get(id);
+      if (c && (c.unit === null || !units.includes(c.unit))) {
+        throw new HttpError(400, 'invalid_input', undefined, msg);
+      }
+    };
+    check(
+      body.energyEntityId,
+      HA_ENERGY_UNITS,
+      'Energiesensor braucht die Einheit Wh, kWh oder MWh',
+    );
+    check(body.powerEntityId, HA_POWER_UNITS, 'Leistungssensor braucht die Einheit W oder kW');
+  }
+
   /** Stores the settings; a new URL or token reconnects and waits briefly for the result. */
   async updateSettings(
     body: SettingsRequest,
   ): Promise<{ settings: HaSettings; urlChanged: boolean; tokenChanged: boolean }> {
+    this.checkSensorUnits(body);
     const prev = this.stored();
     const next: StoredSettings = {
       url: body.url ?? prev.url,
@@ -261,6 +292,7 @@ export class HaService {
     };
     const now = this.deps.now();
     writeSetting(this.deps.db, SETTINGS_KEY, next, now);
+    this.settingsCache = null;
     const tokenChanged = body.token !== undefined;
     if (body.token !== undefined) {
       writeSetting(this.deps.db, TOKEN_KEY, this.deps.box.encrypt(body.token, TOKEN_AAD), now);
@@ -378,7 +410,7 @@ export class HaService {
       wasPending ||
       entityId === st.energyEntityId ||
       entityId === st.powerEntityId ||
-      this.config().entities.some((e) => e.entityId === entityId)
+      this.configuredIds().has(entityId)
     ) {
       this.emit();
     }
@@ -457,8 +489,8 @@ export class HaService {
     if (
       this.status === 'connected' &&
       energyId !== null &&
-      this.energy.monthKwh(energyId, now) === null &&
-      this.cache.has(energyId)
+      this.cache.has(energyId) &&
+      (this.energy.hasSuspect(energyId) || this.energy.monthKwh(energyId, now) === null)
     ) {
       this.recordEnergy();
       changed = true;
@@ -469,12 +501,31 @@ export class HaService {
   // ---- entity selection --------------------------------------------------------------
 
   config(): HaConfig {
+    if (this.configCache) return this.configCache;
     const p = haConfigSchema.safeParse(readSetting(this.deps.db, CONFIG_KEY));
-    return p.success ? p.data : { rooms: [], entities: [] };
+    this.configCache = p.success ? p.data : { rooms: [], entities: [] };
+    this.configIds = null;
+    return this.configCache;
+  }
+
+  private configuredIds(): Set<string> {
+    const c = this.config();
+    this.configIds ??= new Set(c.entities.map((e) => e.entityId));
+    return this.configIds;
+  }
+
+  /**
+   * New `switch.*` or `button` entity, or a changed kind: needs step-up
+   * (`switch` is both toggle and door opener, see haConfigNeedsStepUp).
+   */
+  configNeedsStepUp(next: HaConfig): boolean {
+    return haConfigNeedsStepUp(this.config(), next);
   }
 
   setConfig(c: HaConfig): HaConfig {
     writeSetting(this.deps.db, CONFIG_KEY, c, this.deps.now());
+    this.configCache = null;
+    this.configIds = null;
     this.emit();
     return this.config();
   }
@@ -628,6 +679,9 @@ export class HaService {
   async press(entityId: string): Promise<{ item: HaItem; call: HaServiceCall }> {
     const e = this.configured(entityId, 'button');
     const c = this.requireUsable(entityId);
+    if (haDomain(entityId) === 'lock' && !lockCanOpen(c.supportedFeatures)) {
+      throw new HttpError(409, 'conflict', undefined, 'Schloss kann nur auf-/zusperren');
+    }
     const call = pressCall(entityId, c.supportedFeatures);
     if (!call) throw new HttpError(400, 'invalid_input');
     const wait = this.pressLimiter.hit('press');

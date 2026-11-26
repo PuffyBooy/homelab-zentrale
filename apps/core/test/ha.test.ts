@@ -18,7 +18,15 @@ import {
   type HaSetup,
 } from './ha-helpers.js';
 import { HA_ALERT_AFTER_MS, HA_PENDING_MS } from '../src/homeassistant/service.js';
-import { EnergyStore, toKwh, toWatts, viennaMonth } from '../src/homeassistant/energy.js';
+import {
+  CONFIRM_AFTER_MS,
+  EnergyStore,
+  MAX_JUMP_KWH,
+  MAX_POWER_KW,
+  toKwh,
+  toWatts,
+  viennaMonth,
+} from '../src/homeassistant/energy.js';
 import { haWebSocketUrl } from '../src/homeassistant/protocol.js';
 import { openDatabase } from '../src/db/index.js';
 import { auditLog } from '../src/db/schema.js';
@@ -274,16 +282,15 @@ describe('ha actions', () => {
     expect(s.ha.calls).toEqual([]);
   });
 
-  it('press maps lock (open if supported, else unlock) and button, with step-up', async () => {
+  it('press maps lock (open) and button, with step-up', async () => {
     s = await withHa();
     await stepUp(s.t, s.secret, s.cookie);
-    for (const id of ['lock.front_door', 'lock.cellar', 'button.intercom']) {
+    for (const id of ['lock.front_door', 'button.intercom']) {
       const res = await haRequest(s, 'POST', `/api/ha/entities/${id}/press`, { confirm: true });
       expect(res.statusCode, id).toBe(200);
     }
     expect(s.ha.calls.map((c) => `${c.domain}.${c.service}`)).toEqual([
       'lock.open',
-      'lock.unlock',
       'button.press',
     ]);
     const audit = s.t.db.db.select().from(auditLog).all();
@@ -291,9 +298,28 @@ describe('ha actions', () => {
       audit.filter((a) => a.action === 'ha.press').map((a) => [a.target, a.detailsJson]),
     ).toEqual([
       ['lock.front_door', '{"service":"lock.open"}'],
-      ['lock.cellar', '{"service":"lock.unlock"}'],
       ['button.intercom', '{"service":"button.press"}'],
     ]);
+  });
+
+  it('a lock without the OPEN feature is refused (409), never unlocked instead', async () => {
+    s = await withHa();
+    await stepUp(s.t, s.secret, s.cookie);
+    const res = await haRequest(s, 'POST', '/api/ha/entities/lock.cellar/press', { confirm: true });
+    expect(res.statusCode).toBe(409);
+    expect(res.json()).toMatchObject({
+      ok: false,
+      error: 'conflict',
+      message: 'Schloss kann nur auf-/zusperren',
+    });
+    expect(s.ha.calls).toEqual([]);
+    expect(
+      s.t.db.db
+        .select()
+        .from(auditLog)
+        .all()
+        .some((a) => a.action === 'ha.press'),
+    ).toBe(false);
   });
 });
 
@@ -379,6 +405,13 @@ describe('ha energy', () => {
     expect(toKwh('unavailable', 'kWh')).toBeNull();
     expect(toKwh('', 'kWh')).toBeNull();
     expect(toWatts('0.4', 'kW')).toBe(400);
+    expect(toWatts('400', 'W')).toBe(400);
+    // Unknown unit: no value instead of guessing kWh / W.
+    expect(toKwh('12', null)).toBeNull();
+    expect(toKwh('12', 'm³')).toBeNull();
+    expect(toKwh('12', 'kwh')).toBeNull();
+    expect(toWatts('12', null)).toBeNull();
+    expect(toWatts('12', 'VA')).toBeNull();
   });
 
   it('baseline per Vienna month, rollover and meter reset', () => {
@@ -402,13 +435,18 @@ describe('ha energy', () => {
       // A small dip is noise.
       e.record('sensor.energy', 134.9, dec + 500);
       expect(e.monthKwh('sensor.energy', dec)).toBe(5);
-      // Meter reset (to 0, now at 2): the 5 kWh stay and the 2 count.
+      // Meter reset (to 0, now at 2): a suspect until the next reading confirms it,
+      // then the 5 kWh stay and the 4 count.
       e.record('sensor.energy', 2, dec + 1000);
-      expect(e.monthKwh('sensor.energy', dec)).toBe(7);
+      expect(e.monthKwh('sensor.energy', dec)).toBe(5);
+      expect(e.hasSuspect('sensor.energy')).toBe(true);
       e.record('sensor.energy', 4, dec + 2000);
       expect(e.monthKwh('sensor.energy', dec)).toBe(9);
+      expect(e.hasSuspect('sensor.energy')).toBe(false);
+      e.record('sensor.energy', 5, dec + 3000);
+      expect(e.monthKwh('sensor.energy', dec)).toBe(10);
       // Another sensor: new baseline.
-      e.record('sensor.other', 500, dec + 3000);
+      e.record('sensor.other', 500, dec + 4000);
       expect(e.monthKwh('sensor.other', dec)).toBe(0);
       expect(e.monthKwh('sensor.energy', dec)).toBeNull();
       expect(EnergyStore.euro(9.005, 0.25)).toBe(2.25);
@@ -416,6 +454,90 @@ describe('ha energy', () => {
     } finally {
       h.close();
     }
+  });
+
+  it('a brief 0 (meter reboot) and back is a glitch: the month keeps its baseline', () => {
+    const h = openDatabase(':memory:');
+    try {
+      const e = new EnergyStore(h.db);
+      const t0 = Date.UTC(2026, 10, 10, 12, 0);
+      e.record('sensor.energy', 1000, t0);
+      e.record('sensor.energy', 1010, t0 + 60_000);
+      e.record('sensor.energy', 0, t0 + 120_000);
+      expect(e.monthKwh('sensor.energy', t0)).toBe(10);
+      e.record('sensor.energy', 1010.5, t0 + 180_000);
+      expect(e.monthKwh('sensor.energy', t0)).toBe(10.5);
+      expect(e.hasSuspect('sensor.energy')).toBe(false);
+      // Two zeros in a row with the same value: confirmed only after 5 min.
+      e.record('sensor.energy', 0, t0 + 240_000);
+      e.record('sensor.energy', 0, t0 + 250_000);
+      expect(e.monthKwh('sensor.energy', t0)).toBe(10.5);
+      e.record('sensor.energy', 0, t0 + 240_000 + CONFIRM_AFTER_MS);
+      expect(e.monthKwh('sensor.energy', t0)).toBe(10.5);
+      e.record('sensor.energy', 0.5, t0 + 250_000 + CONFIRM_AFTER_MS);
+      expect(e.monthKwh('sensor.energy', t0)).toBe(11);
+    } finally {
+      h.close();
+    }
+  });
+
+  it(`a single implausible jump (> ${MAX_JUMP_KWH} kWh + ${MAX_POWER_KW} kW × time) is ignored`, () => {
+    const h = openDatabase(':memory:');
+    try {
+      const e = new EnergyStore(h.db);
+      const t0 = Date.UTC(2026, 10, 10, 12, 0);
+      e.record('sensor.energy', 1000, t0);
+      // Unit flip for one reading (Wh reported as kWh): ignored.
+      e.record('sensor.energy', 1_000_500, t0 + 60_000);
+      expect(e.monthKwh('sensor.energy', t0)).toBe(0);
+      e.record('sensor.energy', 1001, t0 + 120_000);
+      expect(e.monthKwh('sensor.energy', t0)).toBe(1);
+      // 60 kWh in a minute is within the 100 kWh allowance (rare reporting).
+      e.record('sensor.energy', 1061, t0 + 180_000);
+      expect(e.monthKwh('sensor.energy', t0)).toBe(61);
+      // 10 h without a reading: 100 + 500 kWh are plausible.
+      e.record('sensor.energy', 1561, t0 + 180_000 + 10 * 3_600_000);
+      expect(e.monthKwh('sensor.energy', t0)).toBe(561);
+      // A new meter that stays high: confirmed, counting goes on from there.
+      const t1 = t0 + 11 * 3_600_000;
+      e.record('sensor.energy', 50_000, t1);
+      expect(e.monthKwh('sensor.energy', t1)).toBe(561);
+      e.record('sensor.energy', 50_002, t1 + 60_000);
+      expect(e.monthKwh('sensor.energy', t1)).toBe(563);
+    } finally {
+      h.close();
+    }
+  });
+
+  it('energy sensors need a matching unit; unknown sensors are accepted', async () => {
+    s = await withHa();
+    s.ha.put('sensor.water', '12', { unit_of_measurement: 'm³' });
+    s.ha.put('sensor.no_unit', '12', {});
+    await until(
+      () => s?.t.app.hzCore.ha.available().some((a) => a.entityId === 'sensor.no_unit') === true,
+    );
+    for (const [payload, msg] of [
+      [{ energyEntityId: 'sensor.water' }, 'Energiesensor braucht die Einheit Wh, kWh oder MWh'],
+      [{ energyEntityId: 'sensor.no_unit' }, 'Energiesensor braucht die Einheit Wh, kWh oder MWh'],
+      [{ energyEntityId: 'sensor.power' }, 'Energiesensor braucht die Einheit Wh, kWh oder MWh'],
+      [{ powerEntityId: 'sensor.energy' }, 'Leistungssensor braucht die Einheit W oder kW'],
+    ] as const) {
+      const res = await haRequest(s, 'PUT', '/api/ha/settings', payload);
+      expect(res.statusCode, JSON.stringify(payload)).toBe(400);
+      expect(res.json()).toMatchObject({ ok: false, error: 'invalid_input', message: msg });
+    }
+    expect(s.t.app.hzCore.ha.settings()).toMatchObject({
+      energyEntityId: 'sensor.energy',
+      powerEntityId: 'sensor.power',
+    });
+    const ok = await haRequest(s, 'PUT', '/api/ha/settings', {
+      energyEntityId: 'sensor.not_yet_in_ha',
+      powerEntityId: 'sensor.power',
+    });
+    expect(ok.statusCode).toBe(200);
+    // A sensor whose unit is unknown shows no value instead of assuming kWh.
+    s.ha.put('sensor.power', '300', { unit_of_measurement: 'VA' });
+    await until(() => s?.t.app.hzCore.ha.state().energy?.powerW === null);
   });
 
   it('a new month starts on the tick even without a new reading', async () => {

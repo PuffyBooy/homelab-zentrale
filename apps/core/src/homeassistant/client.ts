@@ -100,6 +100,40 @@ function socketReason(err: unknown): HaDownReason {
   return 'unreachable';
 }
 
+function changedMs(s: HaEntityState): number | null {
+  if (s.lastChanged === null) return null;
+  const ms = Date.parse(s.lastChanged);
+  return Number.isFinite(ms) ? ms : null;
+}
+
+/**
+ * Lays the events buffered during the initial sync over the get_states snapshot.
+ * Events received after the get_states result are newer and always win. Earlier
+ * ones win only with a newer `last_changed` than the snapshot (the snapshot was
+ * taken after them, so it normally already contains them).
+ */
+export function mergeBuffered(
+  snapshot: Map<string, HaEntityState>,
+  buffered: ReadonlyMap<string, { state: HaEntityState | null; afterStates: boolean }>,
+): void {
+  for (const [id, b] of buffered) {
+    if (b.state === null) {
+      if (b.afterStates) snapshot.delete(id);
+      continue;
+    }
+    if (b.afterStates) {
+      snapshot.set(id, b.state);
+      continue;
+    }
+    // Not in the snapshot taken later: it was removed meanwhile.
+    const cur = snapshot.get(id);
+    if (!cur) continue;
+    const a = changedMs(b.state);
+    const c = changedMs(cur);
+    if (a !== null && (c === null || a > c)) snapshot.set(id, b.state);
+  }
+}
+
 /**
  * One connection to Home Assistant with reconnect (exponential backoff, at most
  * 60 s), HA-level ping/pong heartbeat, a frame size cap, a bounded pending map
@@ -115,6 +149,15 @@ export class HaClient {
   private attempt = 0;
   private nextId = 1;
   private stateSubId: number | null = null;
+  /** Subscribed, states loaded and handed to `ready`. */
+  private synced = false;
+  /**
+   * state_changed events received while the initial sync runs (latest per
+   * entity, bounded); `afterStates` marks events that came after the get_states
+   * result and are therefore newer than the snapshot.
+   */
+  private buffered = new Map<string, { state: HaEntityState | null; afterStates: boolean }>();
+  private statesLoaded = false;
   private reason: HaDownReason | null = null;
   private readonly pending = new Map<number, Pending>();
   private connectTimer: NodeJS.Timeout | null = null;
@@ -132,7 +175,7 @@ export class HaClient {
   }
 
   get connected(): boolean {
-    return this.authed && this.stateSubId !== null && this.ws?.readyState === WebSocket.OPEN;
+    return this.authed && this.synced && this.ws?.readyState === WebSocket.OPEN;
   }
 
   start(): void {
@@ -186,6 +229,9 @@ export class HaClient {
     this.reason = null;
     this.authed = false;
     this.stateSubId = null;
+    this.synced = false;
+    this.statesLoaded = false;
+    this.buffered = new Map();
     this.events.connecting();
     let ws: WebSocket;
     try {
@@ -233,8 +279,9 @@ export class HaClient {
       } else if (m.data.type === 'auth_invalid') {
         this.fail('auth_invalid');
       } else {
+        // The backoff is reset only once the sync is ready (see sync()), so an HA
+        // that accepts the token but fails get_states does not cause a reconnect storm.
         this.authed = true;
-        this.attempt = 0;
         void this.sync(ws, m.data.ha_version ?? null);
       }
       return;
@@ -263,35 +310,48 @@ export class HaClient {
       const ev = haStateChangedEventSchema.safeParse(e.data.event);
       if (!ev.success) return;
       const next = ev.data.data.new_state;
-      if (next === null || next === undefined) {
-        this.events.stateChanged(ev.data.data.entity_id, null);
+      const entityId = ev.data.data.entity_id;
+      const s = next === null || next === undefined ? null : parseHaState(next);
+      if (s === null && next !== null && next !== undefined) return;
+      if (!this.synced) {
+        if (this.buffered.has(entityId) || this.buffered.size < MAX_STATES) {
+          this.buffered.set(entityId, { state: s, afterStates: this.statesLoaded });
+        }
         return;
       }
-      const s = parseHaState(next);
-      if (s) this.events.stateChanged(s.entityId, s);
+      this.events.stateChanged(s?.entityId ?? entityId, s);
     }
   }
 
-  /** subscribe state_changed first (no gap), then all states, then area names. */
+  /**
+   * subscribe state_changed first (no gap), then all states, then area names.
+   * Events that arrive meanwhile are buffered and laid over the snapshot.
+   */
   private async sync(ws: WebSocket, haVersion: string | null): Promise<void> {
     try {
       const subId = this.nextId;
       await this.request('subscribe_events', { event_type: 'state_changed' });
+      if (this.ws !== ws) return;
+      this.stateSubId = subId;
       const raw = await this.request('get_states');
       if (this.ws !== ws) return;
       if (!Array.isArray(raw)) return this.fail('protocol');
-      const states: HaEntityState[] = [];
+      this.statesLoaded = true;
+      const byId = new Map<string, HaEntityState>();
       for (const r of raw.slice(0, MAX_STATES)) {
         const s = parseHaState(r);
-        if (s) states.push(s);
+        if (s) byId.set(s.entityId, s);
       }
       const areas = await this.areas();
       if (this.ws !== ws) return;
-      this.stateSubId = subId;
+      mergeBuffered(byId, this.buffered);
+      this.buffered = new Map();
+      this.synced = true;
+      this.attempt = 0;
       if (this.connectTimer) clearTimeout(this.connectTimer);
       this.connectTimer = null;
       this.schedulePing(ws);
-      this.events.ready({ haVersion, states, areas });
+      this.events.ready({ haVersion, states: [...byId.values()].slice(0, MAX_STATES), areas });
     } catch (err) {
       if (this.ws !== ws) return;
       this.fail(err instanceof HaCallError && err.kind === 'timeout' ? 'timeout' : 'protocol');
@@ -387,6 +447,9 @@ export class HaClient {
     this.ws = null;
     this.authed = false;
     this.stateSubId = null;
+    this.synced = false;
+    this.statesLoaded = false;
+    this.buffered = new Map();
     if (ws) {
       ws.removeAllListeners('message');
       ws.on('error', () => undefined);

@@ -5,7 +5,13 @@ import { Alert, Metric, Tile, cx } from '@hz/ui';
 import { FormError } from '../../components/FormError.js';
 import { errorText } from '../../lib/errors.js';
 import { formatNumber, formatTime } from '../../lib/format.js';
-import { formatEurAmount, groupByRoom, priceToText, type RoomGroup } from '../../lib/ha.js';
+import {
+  formatEurAmount,
+  formatKwh,
+  groupByRoom,
+  priceToText,
+  type RoomGroup,
+} from '../../lib/ha.js';
 import { useHaView } from '../../lib/haActions.js';
 import { useLiveTopic } from '../../lib/live.js';
 import { HaControl, useHaToggle } from './HaControls.js';
@@ -135,7 +141,7 @@ export function EnergyTile({ state }: { state: HaState }): ReactElement | null {
         />
         <Metric
           label="Im Monat"
-          value={e.monthKwh === null ? '—' : formatNumber(e.monthKwh, 1)}
+          value={e.monthKwh === null ? '—' : formatKwh(e.monthKwh)}
           unit={e.monthKwh === null ? undefined : 'kWh'}
           hint="seit dem 1., 00:00"
           className={cx(state.status !== 'connected' && 'app-ha-stale')}

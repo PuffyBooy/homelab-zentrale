@@ -12,8 +12,15 @@ import { z } from 'zod';
  * - button: door opener / intercom (BTicino, Shelly). Never a toggle. Needs
  *   `confirm: true` in the request and a step-up session (a stolen session
  *   must not open the front door). button → `button.press`, lock → `lock.open`
- *   (falls back to `lock.unlock` if open is not supported), switch →
- *   `switch.turn_on` (Shelly with auto-off), script → `script.turn_on`.
+ *   (only locks with the OPEN feature, `supported_features & 1`; others are
+ *   refused with 409 "Schloss kann nur auf-/zusperren", never `lock.unlock`),
+ *   switch → `switch.turn_on` (Shelly with auto-off), script → `script.turn_on`.
+ *
+ * `switch` is both a toggle and a button domain, so the kind itself is
+ * security relevant: PUT /api/ha/config needs step-up when it adds a `switch.*`
+ * entity, adds a `button` entity or changes the kind of any entity
+ * (`haConfigNeedsStepUp`). Otherwise a stolen session could turn the door
+ * opener `switch.haustuer` into a toggle and open the door without step-up.
  */
 
 /** "light.wohnzimmer", "sensor.strom_leistung". */
@@ -77,6 +84,29 @@ export const haSettingsSchema = z.strictObject({
 });
 export type HaSettings = z.infer<typeof haSettingsSchema>;
 
+/**
+ * Link-local addresses (169.254.0.0/16, fe80::/10, also IPv4-mapped) are cloud
+ * metadata endpoints, never Home Assistant. Loopback stays allowed (HA may run
+ * on the same host). The URL parser already normalises odd IPv4 forms
+ * ("2852039166", "0xa9.254.169.254") to dotted decimal.
+ */
+export function haUrlIsLinkLocal(url: string): boolean {
+  let host: string;
+  try {
+    host = new URL(url).hostname.toLowerCase();
+  } catch {
+    return false;
+  }
+  if (/^169\.254\.\d+\.\d+$/.test(host)) return true;
+  if (host.startsWith('[') && host.endsWith(']')) {
+    const v6 = host.slice(1, -1);
+    if (/^fe[89ab][0-9a-f]:/.test(v6)) return true;
+    // ::ffff:169.254.x.x is normalised to ::ffff:a9fe:xxxx.
+    if (v6.startsWith('::ffff:a9fe:')) return true;
+  }
+  return false;
+}
+
 /** Plain http is fine for HA in the LAN or tailnet; no credentials in the URL. */
 export const haUrlSchema = z
   .url({ protocol: /^https?$/ })
@@ -87,7 +117,8 @@ export const haUrlSchema = z
       return p.username === '' && p.password === '' && p.search === '' && p.hash === '';
     },
     { message: 'URL ohne Benutzer, Query oder Anker' },
-  );
+  )
+  .refine((u) => !haUrlIsLinkLocal(u), { message: 'Link-lokale Adressen sind nicht erlaubt' });
 
 // PUT /api/ha/settings (step-up when url or token changes) -> haSettingsSchema
 export const haSettingsRequestSchema = z.strictObject({
@@ -168,6 +199,27 @@ export const haConfigSchema = z
     }
   });
 export type HaConfig = z.infer<typeof haConfigSchema>;
+
+/**
+ * Whether replacing `prev` by `next` needs a step-up session: a new `switch.*`
+ * entity, a new `button` entity, or any entity whose kind changes. Renames,
+ * rooms, order, overview flags and removals stay without step-up.
+ */
+export function haConfigNeedsStepUp(
+  prev: Pick<HaConfig, 'entities'>,
+  next: Pick<HaConfig, 'entities'>,
+): boolean {
+  const before = new Map(prev.entities.map((e) => [e.entityId, e.kind]));
+  for (const e of next.entities) {
+    const kind = before.get(e.entityId);
+    if (kind === undefined) {
+      if (e.kind === 'button' || haDomain(e.entityId) === 'switch') return true;
+    } else if (kind !== e.kind) {
+      return true;
+    }
+  }
+  return false;
+}
 
 // ---- live state (topic `ha`) and actions ------------------------------------------------
 

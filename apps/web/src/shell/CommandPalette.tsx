@@ -5,6 +5,8 @@ import { Icon, type IconName } from '@hz/ui';
 import { Dialog } from '../components/Dialog.js';
 import { haStateKey, isOn, itemUsable, withPending } from '../lib/ha.js';
 import { pendingToggles, runToggle } from '../lib/haActions.js';
+import { errorText } from '../lib/errors.js';
+import { showErrorToast } from './AlertToasts.js';
 import { navItems, settingsItem, shortcutLabel } from '../nav.js';
 
 export interface PaletteCommand {
@@ -47,8 +49,11 @@ export function haCommands(qc: QueryClient, state: HaState | undefined): Palette
         to: '/home',
         icon: 'power' as const,
         hint: on ? 'AN' : 'AUS',
-        // Errors revert the switch; the Wohnung page shows the real state.
-        run: () => void runToggle(qc, i.entityId, !on).catch(() => undefined),
+        // Errors revert the switch and show a short toast.
+        run: () =>
+          void runToggle(qc, i.entityId, !on).catch((err: unknown) =>
+            showErrorToast(`${i.label} nicht geschaltet`, errorText(err)),
+          ),
       };
     });
 }

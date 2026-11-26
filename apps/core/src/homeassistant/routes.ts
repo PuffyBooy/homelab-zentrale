@@ -26,7 +26,8 @@ export interface HaRoutesOptions {
 
 /**
  * /api/ha/* (SPEC 10). Admin session everywhere. Step-up: changing URL or token,
- * deleting the token and pressing a door opener. Only configured entities can be
+ * deleting the token, pressing a door opener and a config that adds a switch or
+ * button entity or changes a kind. Only configured entities can be
  * controlled, and only through the fixed service map of their kind.
  */
 export const haRoutes: FastifyPluginAsync<HaRoutesOptions> = async (app, o) => {
@@ -67,6 +68,11 @@ export const haRoutes: FastifyPluginAsync<HaRoutesOptions> = async (app, o) => {
 
   app.put('/ha/config', async (request) => {
     const body = haConfigSchema.parse(request.body);
+    // switch is both toggle and door opener: a new switch/button or a changed kind
+    // needs step-up, or a stolen session could turn the door opener into a toggle.
+    if (ha.configNeedsStepUp(body) && !hasStepUp(request, o.now)) {
+      throw new HttpError(403, 'step_up_required');
+    }
     const saved = ha.setConfig(body);
     audit('ha.config', null, { rooms: saved.rooms.length, entities: saved.entities.length });
     return haConfigSchema.parse(saved);
