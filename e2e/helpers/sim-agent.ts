@@ -5,7 +5,8 @@ import { WebSocket } from 'ws';
  * Simulated agent for e2e: speaks the protocol from packages/shared/src/agent-protocol.ts
  * (hello -> enrolled/welcome -> metrics + inventory) and answers the RPCs the web UI can
  * trigger: cleanup preview and cleanup (M2), container.* and compose.* with a fresh
- * inventory, and container.logs as a stream (M3). Nothing here runs a real command.
+ * inventory, container.logs as a stream (M3) and container.limit (M10). Nothing here
+ * runs a real command.
  */
 
 /** Same shape as containerInfoSchema in packages/shared (kept local, e2e has no deps). */
@@ -26,6 +27,10 @@ export interface SimContainer {
   cpu?: number;
   memBytes?: number;
   restartCount?: number;
+  /** Label hz.role (core/agent): never a throttle target, container.limit is refused. */
+  role?: 'core' | 'agent';
+  /** Current docker --cpus limit, null without a limit (container.limit). */
+  cpuLimit?: number | null;
 }
 
 export function hexId(): string {
@@ -45,6 +50,8 @@ interface LogStream {
 
 const PROTOCOL_VERSION = 1;
 const GB = 1024 ** 3;
+/** cpuCores in the sim inventory; container.limit caps at this. */
+const SIM_CPU_CORES = 4;
 
 export interface SimAgentOptions {
   url: string;
@@ -269,7 +276,7 @@ export class SimAgent {
         kernel: '6.1.0-28-amd64',
         arch: 'x64',
         cpuModel: 'Intel N100',
-        cpuCores: 4,
+        cpuCores: SIM_CPU_CORES,
         tailscaleIp: this.o.tailscaleIp ?? '100.64.0.20',
       },
       containers: this.containers,
@@ -407,6 +414,10 @@ export class SimAgent {
     }
     if (this.answerPty(id, action, params)) return;
     if (this.o.games && this.answerGame(id, action, params)) return;
+    if (action === 'container.limit') {
+      this.answerLimit(id, params);
+      return;
+    }
     if (action.startsWith('container.') || action.startsWith('compose.')) {
       if (!this.act(action, params)) {
         this.send({
@@ -446,6 +457,40 @@ export class SimAgent {
         error: { code: 'not_allowed', message: 'not simulated' },
       });
     }
+  }
+
+  /**
+   * `docker update --cpus` (M10): refuses hz.role containers like the real agent,
+   * caps at the CPU count, null removes the limit. Answers { cpus }.
+   */
+  private answerLimit(id: string, params: Record<string, unknown>): void {
+    const c = this.containers.find((x) => x.dockerId === params.id || x.name === params.id);
+    if (!c) {
+      this.send({
+        type: 'rpc.result',
+        id,
+        ok: false,
+        error: { code: 'not_found', message: 'no such container' },
+      });
+      return;
+    }
+    if (c.role) {
+      this.send({
+        type: 'rpc.result',
+        id,
+        ok: false,
+        error: { code: 'not_allowed', message: 'protected container' },
+      });
+      return;
+    }
+    const raw = params.cpus;
+    const cpus =
+      typeof raw === 'number' && Number.isFinite(raw) && raw > 0
+        ? Math.min(raw, SIM_CPU_CORES)
+        : null;
+    c.cpuLimit = cpus;
+    this.sendInventory();
+    this.send({ type: 'rpc.result', id, ok: true, data: { cpus } });
   }
 
   /** Game server actions (only with `games`); false when the action is not one of them. */

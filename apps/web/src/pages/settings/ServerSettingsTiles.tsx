@@ -34,7 +34,7 @@ type ServerDialog =
   | { kind: 'delete'; server: ServerSummary }
   | { kind: 'revoke'; server: ServerSummary };
 
-/** Settings → Server (SPEC 13): thresholds, console allowed, remove. */
+/** Settings → Server (SPEC 13): thresholds, console allowed, remove; Automatik (M10) on the server page. */
 export function ServersSettingsTile(): ReactElement {
   const servers = useServers();
   const [dialog, setDialog] = useState<ServerDialog | null>(null);
@@ -62,6 +62,13 @@ export function ServersSettingsTile(): ReactElement {
               </span>
             </div>
             <div className="hz-row-actions">
+              <Link
+                className="hz-btn hz-btn-ghost hz-btn-sm"
+                to={`/servers/${s.id}#automatik`}
+                aria-label={`Automatik von ${s.name}`}
+              >
+                Automatik
+              </Link>
               <Button
                 size="sm"
                 variant="ghost"

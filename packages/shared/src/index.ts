@@ -13,3 +13,4 @@ export * from './api/share.js';
 export * from './api/ha.js';
 export * from './api/console-wall.js';
 export * from './api/modules.js';
+export * from './api/throttle.js';

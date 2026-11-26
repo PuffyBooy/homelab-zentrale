@@ -84,7 +84,8 @@ export type ShareErrorCode =
   | 'rate_limited'
   | 'invalid_input'
   | 'busy'
-  | 'unavailable';
+  | 'unavailable'
+  | 'insufficient_ram';
 export type ShareAuditAction = z.infer<typeof shareAuditEntrySchema>['action'];
 export type ShareLinkView = z.infer<typeof shareLinkSchema>;
 type ConsoleLine = z.infer<typeof shareConsoleLineSchema>;
@@ -828,6 +829,12 @@ export function shareErrorOf(err: unknown): ShareError {
     switch (err.code) {
       case 'busy':
         return new ShareError(409, 'busy');
+      case 'insufficient_ram':
+        // Friends get the code only, never the server's RAM figures.
+        return new ShareError(409, 'insufficient_ram');
+      case 'ram_unknown':
+        // RAM reserve not checkable (stale metrics): a friend's start is refused.
+        return new ShareError(409, 'unavailable');
       case 'rate_limited':
         return new ShareError(
           429,

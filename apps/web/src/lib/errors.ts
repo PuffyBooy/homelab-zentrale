@@ -1,9 +1,12 @@
 import { isApiError } from './api.js';
 import { retryMinutes } from './format.js';
+import { insufficientRamText } from './throttle.js';
 
 /** User-facing text for an API error, following "Stimme und Text". */
 export function errorText(err: unknown): string {
   if (!isApiError(err)) return 'Unerwarteter Fehler. Seite neu laden und erneut versuchen.';
+  // The numbers from the core make the better text (SPEC 6a, ROADMAP M10).
+  if (err.error === 'insufficient_ram') return insufficientRamText(err.details);
   // A fixed hint from the core (e.g. "Server-Passwort: mindestens 8 Zeichen") wins.
   if (err.hint) return err.hint;
   switch (err.error) {

@@ -113,6 +113,12 @@ export function container(over: Partial<ContainerSummary> = {}): ContainerSummar
     memBytes: 312 * 1024 ** 2,
     restartCount: 0,
     updatedAt: '2026-11-25T22:04:00.000Z',
+    priority: 'normal',
+    allowStop: false,
+    protected: false,
+    gameId: null,
+    throttled: null,
+    autoStopped: false,
     ...over,
   };
 }
@@ -247,6 +253,11 @@ export function game(over: Partial<GameSummary> = {}): GameSummary {
     values: { TYPE: 'PAPER', MAX_PLAYERS: 20 },
     lastBackupAt: null,
     createdAt: '2026-11-20T18:00:00.000Z',
+    priority: 'normal',
+    allowStop: false,
+    allowStopWithPlayers: false,
+    throttled: null,
+    autoStopped: false,
     ...over,
   };
 }

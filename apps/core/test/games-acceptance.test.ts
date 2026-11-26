@@ -11,7 +11,7 @@ import {
 } from '@hz/shared';
 import { createSecretBox } from '../src/crypto.js';
 import { auditLog, gameServers } from '../src/db/schema.js';
-import { stepUp, until, WsClient } from './agent-helpers.js';
+import { metricsMsg, stepUp, until, WsClient } from './agent-helpers.js';
 import {
   createGame,
   fakeSecret,
@@ -62,7 +62,9 @@ describe('M6 acceptance: Minecraft Paper from the UI flow', () => {
     expect(sug.ports).toEqual({ game: 25566 });
     expect(sug.ramWarning).toBe('Zu wenig RAM frei (3,2 GB frei, 6 GB empfohlen)');
 
-    // 3. Create.
+    // 3. Create. Since M10 the RAM reserve applies to creation (it starts the game):
+    // the admin freed RAM in the meantime (40 % used, 9,6 GB free).
+    s.t.app.hzCore.servers.ingestMetrics(s.serverId, metricsMsg({ ramPct: 40 }));
     const res = await createGame(s, { values: { TYPE: 'PAPER', MAX_PLAYERS: 10 } });
     expect(res.statusCode).toBe(202);
     const created = gameResponseSchema.parse(res.json()).game;

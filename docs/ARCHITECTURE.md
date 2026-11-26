@@ -87,8 +87,12 @@ design/                   Designsystem (nicht von Hand ändern, siehe design/REA
 | `enroll_tokens` | id, name, location, token_hash (SHA-256 von `enroll:<token>`), created_at, expires_at (15 Min), used_at, server_id |
 | `metrics_raw` | server_id, ts (Empfangszeit im Core), cpu, ram, swap (Prozent), disk_max, disk_json (`[{mount, pct}]`), temp, net_in, net_out (Byte/s), 48 h |
 | `metrics_5m`, `metrics_1h` | server_id, ts (Bucket-Start), cpu, ram, swap, disk_max, temp, net_in, net_out (gemittelt, 1h gewichtet nach samples), samples; 30 Tage bzw. 1 Jahr. Pro Disk wird nur roh gespeichert. |
-| `containers` | id, server_id, docker_id (unique je Server), name, image, compose_project, state, health, ports_json, info_json (ganzes `ContainerInfo`), updated_at |
-| `game_servers` | id, server_id, template_id, name, settings_json, ports_json, rcon_secret_enc, external_address, auto_stop_minutes, created_at |
+| `containers` | id, server_id, docker_id (unique je Server), name, image, compose_project, state, health, ports_json, info_json (ganzes `ContainerInfo`, mit `role` aus `hz.role` und `cpuLimit`), last_mem_bytes (zuletzt bekannter Speicher, für die RAM-Reserve), updated_at |
+| `game_servers` | id, server_id, template_id, name, settings_json, ports_json, rcon_secret_enc, external_address, auto_stop_minutes, created_at, priority (`wichtig`/`normal`/`niedrig`), allow_stop, allow_stop_with_players |
+| `container_priorities` | container_id (Core-ID aus Server + Name, übersteht ein Neuerzeugen), server_id, container_name, priority, allow_stop, updated_at. Gameserver-Container nehmen die Priorität des Gameservers. |
+| `server_throttle` | server_id, settings_json (`ThrottleSettings`: Automatik, Schwellen, Minuten, `throttleCpus`, `ramReserveMb`), schedules_json (Zeitfenster pro Stufe), updated_at. Fehlt die Zeile: Standardwerte. |
+| `container_throttles` | container_id, server_id, container_name, game_id, docker_id (das Limit gehört zu diesem Docker-Container), cpus, original_cpus (wird beim Aufheben wiederhergestellt), by (`auto`/`admin`/`schedule`), reason, since, auto_stopped_at |
+| `wichtig_restarts` | id, container_id, server_id, ts, ok (Startversuche gestoppter `wichtig`-Container, 10 Min) |
 | `game_backups` | id, game_id, path, size, created_at |
 | `share_links` | id, game_id, person, token_hash (SHA-256 von `share:<token>`), pin_hash (argon2id), perms_json, expires_at, revoked_at, last_used_at, pin_failures, locked_until, created_at |
 | `share_audit` | id, share_id (ohne Fremdschlüssel, bleibt nach Löschen des Links), game_id, person, action, detail, ts, ip, via (`tailnet`/`gateway`); 90 Tage |
@@ -124,6 +128,7 @@ Die erste Nachricht muss innerhalb von 10 s ein gültiges `hello` sein. Danach a
 | action | params |
 | --- | --- |
 | `container.start` / `stop` / `restart` | `{id}` |
+| `container.limit` | `{id, cpus}`: nur `docker update --cpus` (0,1–64, höchstens die CPU-Zahl des Hosts; `cpus: null` hebt das Limit auf) → `{cpus}`. Nie für Container mit dem Label `hz.role` (core, agent) und nie für den Agent selbst (`not_allowed`). RAM-Limits werden nie geändert. |
 | `container.logs` | `{id, tail, follow}` → Stream |
 | `compose.up` / `down` / `pull` | `{dir}` (nur unter `/opt/homelab/`) |
 | `compose.write` | `{dir, files: {name: text}}` (nur unter `/opt/homelab/`) |
@@ -156,6 +161,7 @@ Ein Scheduler im Core (kein externes Cron):
 - Messwert-Verdichtung alle 5 Min bzw. stündlich
 - Wochenbericht sonntags 19:00 (Europe/Vienna)
 - Auto-Stopp leerer Gameserver jede Minute
+- Drossel-Regelwerk (M10) alle 10 s, im Takt der Messwerte (`throttle.tick`): Zeitfenster in `HZ_TIMEZONE`, Drosseln/Stoppen/Aufheben, Neustart gestoppter `wichtig`-Container
 
 ## Konfiguration
 

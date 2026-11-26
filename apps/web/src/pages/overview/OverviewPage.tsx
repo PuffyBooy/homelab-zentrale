@@ -1,3 +1,4 @@
+import { useQuery } from '@tanstack/react-query';
 import type { ReactElement } from 'react';
 import { Link, useNavigate } from 'react-router';
 import { Alert, Button } from '@hz/ui';
@@ -20,18 +21,21 @@ import { useHaView } from '../../lib/haActions.js';
 import { useLiveTopic } from '../../lib/live.js';
 import { useModules } from '../../lib/useModules.js';
 import { ALL_SERVERS } from '../../lib/servers.js';
+import { consumersOf, fetchTopConsumers, topConsumersKey } from '../../lib/throttle.js';
 import { ContainersTile } from '../containers/ContainersTile.js';
 import { GamesTile } from '../games/GamesTile.js';
 import { GithubTile } from '../github/GithubTile.js';
 import { HomeTile } from '../home/HomeTile.js';
 import { NoServers, ServerListTile } from '../servers/ServerListTile.js';
+import { TopConsumersTile } from '../throttle/TopConsumersTile.js';
 import { ChecksTile } from '../websites/ChecksTile.js';
 
 const MAX_ALERTS = 3;
 
 /**
  * Overview after design/reference/previews/Dashboard.html: Statussatz (shell header),
- * open crit alerts, ServerList over the full width, then the pairs (SPEC 4):
+ * open crit alerts, ServerList over the full width, "Wer frisst gerade?" (M10) under it
+ * because it explains the server load, then the pairs (SPEC 4):
  * Gameserver/Websites and GitHub/Container, then "Wohnung" when Home Assistant is set up.
  * Tiles of switched-off modules (Einstellungen → Module) are left out.
  */
@@ -56,6 +60,12 @@ export function OverviewPage(): ReactElement | null {
   const ha = { view: modules.homeassistant ? haQuery.view : undefined };
   const [filter] = useServerFilter();
   const navigate = useNavigate();
+  // No live topic: polled while the overview is open.
+  const top = useQuery({
+    queryKey: topConsumersKey,
+    queryFn: ({ signal }) => fetchTopConsumers(signal),
+    refetchInterval: 15_000,
+  });
 
   if (!servers.data) return null;
   if (servers.data.length === 0) return <NoServers />;
@@ -96,6 +106,11 @@ export function OverviewPage(): ReactElement | null {
         </div>
       ) : null}
       <ServerListTile servers={list} active={one} />
+      {top.data ? (
+        <div className="hz-grid app-grid">
+          <TopConsumersTile data={consumersOf(top.data, one)} error={top.error} />
+        </div>
+      ) : null}
       {games.data || checks.data ? (
         <div className="hz-grid app-grid">
           {games.data ? (

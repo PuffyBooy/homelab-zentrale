@@ -36,6 +36,7 @@ describe('agent protocol allowlist', () => {
         'compose.pull',
         'compose.up',
         'compose.write',
+        'container.limit',
         'container.logs',
         'container.restart',
         'container.start',

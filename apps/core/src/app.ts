@@ -59,6 +59,8 @@ import { ConsoleService, type ConsoleOptions } from './terminal/service.js';
 import { wallRoutes } from './wall/routes.js';
 import { WallService } from './wall/service.js';
 import { setTimeZone } from './timezone.js';
+import { throttleRoutes } from './throttle/routes.js';
+import { ThrottleService } from './throttle/service.js';
 import { moduleRoutes } from './modules/routes.js';
 import { installModuleGate, ModuleService } from './modules/service.js';
 
@@ -117,6 +119,7 @@ export interface CoreServices {
   consoles: ConsoleService;
   wall: WallService;
   modules: ModuleService;
+  throttle: ThrottleService;
   db: DbHandle;
 }
 
@@ -450,6 +453,31 @@ export async function buildApp(config: Config, deps: AppDeps = {}): Promise<Fast
     else games.queueRefresh();
   });
 
+  // ---- M10: priorities and automatic throttling ------------------------------------
+  const throttle = new ThrottleService({
+    db: db.db,
+    now,
+    hub,
+    alerts,
+    containers,
+    games,
+    log: app.log.child({ mod: 'throttle' }),
+  });
+  containers.setControl((row) => throttle.control(row));
+  games.setControl({
+    throttleOf: (gameId) => throttle.throttleOf(gameId),
+    ramCheck: (serverId, needed, own) => throttle.ramCheck(serverId, needed, own),
+    holdRam: (serverId, bytes) => throttle.holdRam(serverId, bytes),
+    reserveOf: (serverId, own) => throttle.reserveOf(serverId, own),
+  });
+  containers.onChange((id, deleted) => throttle.onContainerChange(id, deleted));
+  games.onChange((id, deleted) => {
+    if (deleted) throttle.forgetGame(id);
+  });
+  servers.onChange((id, deleted) => {
+    if (deleted) throttle.forgetServer(id);
+  });
+
   // ---- M7: share links ----------------------------------------------------------
   const shares = new ShareService({
     db: db.db,
@@ -520,6 +548,7 @@ export async function buildApp(config: Config, deps: AppDeps = {}): Promise<Fast
     consoles,
     wall,
     modules,
+    throttle,
     db,
   });
 
@@ -535,6 +564,8 @@ export async function buildApp(config: Config, deps: AppDeps = {}): Promise<Fast
     shares.prune();
   });
   scheduler.every('logs.leases', 30_000, () => logs.expireLeases());
+  // Rule set of M10 on the metrics interval (agents send metrics every 10 s).
+  scheduler.every('throttle.tick', 10_000, () => throttle.tick());
   // Module switches: stop/start pollers, connections and jobs without restart.
   const topicModule = (topic: string): ModuleId | null => {
     if (topic === 'github' || github.deployer.matches(topic)) return 'github';
@@ -639,7 +670,23 @@ export async function buildApp(config: Config, deps: AppDeps = {}): Promise<Fast
   });
   await app.register(moduleRoutes, { prefix: '/api', db: db.db, now, modules });
   await app.register(alertRoutes, { prefix: '/api', db: db.db, now, alerts });
-  await app.register(containerRoutes, { prefix: '/api', db: db.db, now, containers, servers, hub });
+  await app.register(containerRoutes, {
+    prefix: '/api',
+    db: db.db,
+    now,
+    containers,
+    servers,
+    hub,
+    gameIdOf: (row) => throttle.control(row).gameId,
+  });
+  await app.register(throttleRoutes, {
+    prefix: '/api',
+    db: db.db,
+    now,
+    throttle,
+    containers,
+    servers,
+  });
   await app.register(checkRoutes, { prefix: '/api', db: db.db, now, checks });
   await app.register(pushRoutes, { prefix: '/api', db: db.db, now, push });
   await app.register(githubRoutes, { prefix: '/api', db: db.db, now, github });

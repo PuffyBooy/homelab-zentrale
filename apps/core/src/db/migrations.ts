@@ -558,4 +558,70 @@ INSERT OR IGNORE INTO settings (key, value_json, updated_at)
   ), CAST(strftime('%s', 'now') AS INTEGER) * 1000;
 `,
   },
+  {
+    version: 11,
+    name: 'throttle',
+    // M10 priorities and automatic throttling (SPEC 6a).
+    // container_priorities: keyed by the core container id (derived from server id +
+    // container name, so it survives a recreate); server_id/container_name for display
+    // and cleanup. Game containers take their priority from game_servers instead.
+    // server_throttle: per-server settings (only the merged ThrottleSettings) and the
+    // schedule windows; missing row = defaults, no windows.
+    // container_throttles: current throttle (cpus, since, by auto/admin/schedule, German
+    // reason, the --cpus limit to restore) and the auto-stop mark. docker_id: the limit
+    // belongs to this docker container (a recreate drops it). game_id: set for game
+    // containers, so a game shows its state even after compose down removed the container.
+    // wichtig_restarts: restart attempts of stopped `wichtig` containers (max 3 in 10 min).
+    // containers.last_mem_bytes: last known memory, for the derived RAM reserve.
+    sql: `
+CREATE TABLE container_priorities (
+  container_id TEXT PRIMARY KEY,
+  server_id TEXT NOT NULL REFERENCES servers(id) ON DELETE CASCADE,
+  container_name TEXT NOT NULL,
+  priority TEXT NOT NULL,
+  allow_stop INTEGER NOT NULL DEFAULT 0,
+  updated_at INTEGER NOT NULL
+);
+CREATE INDEX container_priorities_server ON container_priorities(server_id);
+
+ALTER TABLE game_servers ADD COLUMN priority TEXT NOT NULL DEFAULT 'normal';
+ALTER TABLE game_servers ADD COLUMN allow_stop INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE game_servers ADD COLUMN allow_stop_with_players INTEGER NOT NULL DEFAULT 0;
+
+CREATE TABLE server_throttle (
+  server_id TEXT PRIMARY KEY REFERENCES servers(id) ON DELETE CASCADE,
+  settings_json TEXT NOT NULL DEFAULT '{}',
+  schedules_json TEXT NOT NULL DEFAULT '[]',
+  updated_at INTEGER NOT NULL
+);
+
+CREATE TABLE container_throttles (
+  container_id TEXT PRIMARY KEY,
+  server_id TEXT NOT NULL REFERENCES servers(id) ON DELETE CASCADE,
+  container_name TEXT NOT NULL,
+  game_id TEXT,
+  docker_id TEXT,
+  cpus REAL,
+  original_cpus REAL,
+  by TEXT,
+  reason TEXT,
+  since INTEGER,
+  auto_stopped_at INTEGER,
+  updated_at INTEGER NOT NULL
+);
+CREATE INDEX container_throttles_server ON container_throttles(server_id);
+CREATE INDEX container_throttles_game ON container_throttles(game_id);
+
+CREATE TABLE wichtig_restarts (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  container_id TEXT NOT NULL,
+  server_id TEXT NOT NULL REFERENCES servers(id) ON DELETE CASCADE,
+  ts INTEGER NOT NULL,
+  ok INTEGER NOT NULL
+);
+CREATE INDEX wichtig_restarts_container_ts ON wichtig_restarts(container_id, ts);
+
+ALTER TABLE containers ADD COLUMN last_mem_bytes REAL;
+`,
+  },
 ];

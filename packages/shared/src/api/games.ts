@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { prioritySchema, throttledSchema } from './throttle.js';
 
 /**
  * Game servers (SPEC 6.2/6.3). Templates live in templates/games/<id>/ with a
@@ -139,6 +140,11 @@ export const gameSuggestResponseSchema = z.strictObject({
   freeRamBytes: z.number().nullable(),
   /** German warning, e.g. "Zu wenig RAM frei (2,1 GB frei, 4 GB empfohlen)". */
   ramWarning: z.string().nullable(),
+  /**
+   * M10: RAM kept free for `wichtig` containers on the server (bytes), null while
+   * RAM is unknown. A start needs RAM limit <= freeRamBytes - ramReserveBytes.
+   */
+  ramReserveBytes: z.number().nonnegative().nullable().optional(),
 });
 
 const fieldValueSchema = z.union([z.string().max(200), z.number(), z.boolean()]);
@@ -196,6 +202,14 @@ export const gameSummarySchema = z.strictObject({
   values: z.record(z.string(), fieldValueSchema),
   lastBackupAt: z.iso.datetime().nullable(),
   createdAt: z.iso.datetime(),
+  /** M10 (api/throttle.ts): set with PUT /api/games/:id/priority. */
+  priority: prioritySchema,
+  allowStop: z.boolean(),
+  allowStopWithPlayers: z.boolean(),
+  /** Throttle of the game's container, null when not throttled. */
+  throttled: throttledSchema.nullable(),
+  /** Stopped by the rule set (not restarted automatically). */
+  autoStopped: z.boolean(),
 });
 export type GameSummary = z.infer<typeof gameSummarySchema>;
 
