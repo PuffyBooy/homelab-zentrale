@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { cpusSchema } from '../agent-protocol.js';
+import { serverIdSchema } from './servers.js';
 
 /**
  * Priorities and automatic throttling (SPEC 6a, ROADMAP M10).
@@ -280,12 +281,15 @@ export const serverThrottleUpdateRequestSchema = z.strictObject({
 export type ServerThrottleUpdateRequest = z.infer<typeof serverThrottleUpdateRequestSchema>;
 
 // ---------------------------------------------------------------------------
-// GET /api/overview/top-consumers (admin) -> TopConsumersResponse
-// "Wer frisst gerade?": top 3 running containers over all servers by CPU and by
-// RAM. Actions: POST /api/containers/:id/stop (the web asks first),
+// GET /api/overview/top-consumers[?serverId=] (admin) -> TopConsumersResponse
+// "Wer frisst gerade?": top 3 running containers by CPU and by RAM, over all
+// servers or (serverId, the overview's server switch) over one server. Actions: POST /api/containers/:id/stop (the web asks first),
 // POST /api/containers/:id/throttle, POST /api/containers/:id/unthrottle.
 
 export const TOP_CONSUMERS_LIMIT = 3;
+
+export const topConsumersQuerySchema = z.strictObject({ serverId: serverIdSchema.optional() });
+export type TopConsumersQuery = z.infer<typeof topConsumersQuerySchema>;
 
 export const topConsumerSchema = z.strictObject({
   /** Core container id (for the container action routes). */

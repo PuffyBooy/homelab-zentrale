@@ -560,8 +560,11 @@ export class ThrottleService {
 
   // ---- top consumers ---------------------------------------------------------------------
 
-  topConsumers(): TopConsumersResponse {
-    const running = this.deps.containers.list().filter((c) => c.state === 'running');
+  /** Top 3 by CPU and RAM over all servers, or over one server (the overview's switch). */
+  topConsumers(serverId?: string): TopConsumersResponse {
+    const running = this.deps.containers
+      .list()
+      .filter((c) => c.state === 'running' && (serverId === undefined || c.serverId === serverId));
     const toItem = (c: ContainerSummary): TopConsumer => ({
       containerId: c.id,
       containerName: c.name,

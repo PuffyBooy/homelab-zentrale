@@ -8,7 +8,6 @@ import { gameAction } from './games.js';
 import {
   changedSettings,
   consumerActions,
-  consumersOf,
   daysText,
   fetchServerThrottle,
   fetchTopConsumers,
@@ -265,18 +264,18 @@ describe('top consumers', () => {
     ).toEqual({ throttle: false, unthrottle: true, stop: true });
   });
 
-  it('filters by server and fetches the route', async () => {
+  it('fetches the route for all servers or one server', async () => {
     const res = {
       byCpu: [entry, { ...entry, containerId: 'ctr-000002', serverId: 'srv-2' }],
       byRam: [entry],
       updatedAt: '2026-11-26T22:04:00.000Z',
     };
-    expect(consumersOf(res, 'srv-2').byCpu.map((c) => c.containerId)).toEqual(['ctr-000002']);
-    expect(consumersOf(res, 'srv-2').byRam).toEqual([]);
-    expect(consumersOf(res)).toBe(res);
     const fn = mockFetch(reply(200, res));
     await expect(fetchTopConsumers()).resolves.toEqual(res);
     expect(sent(fn).url).toBe('/api/overview/top-consumers');
+    const one = mockFetch(reply(200, res));
+    await expect(fetchTopConsumers('srv-2')).resolves.toEqual(res);
+    expect(sent(one).url).toBe('/api/overview/top-consumers?serverId=srv-2');
   });
 });
 

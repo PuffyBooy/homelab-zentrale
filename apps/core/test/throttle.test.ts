@@ -306,6 +306,17 @@ describe('top consumers', () => {
       isGame: false,
       gameId: null,
     });
+    // One server (overview server switch): its own top 3, other servers count for nothing.
+    const one = topConsumersResponseSchema.parse(
+      (await req(s, 'GET', `/api/overview/top-consumers?serverId=${s.serverId}`)).json(),
+    );
+    expect(one.byCpu.map((c) => c.containerName)).toEqual(['b', 'c', 'd']);
+    const other = topConsumersResponseSchema.parse(
+      (await req(s, 'GET', '/api/overview/top-consumers?serverId=srv-other-0001')).json(),
+    );
+    expect(other).toMatchObject({ byCpu: [], byRam: [] });
+    const bad = await req(s, 'GET', '/api/overview/top-consumers?serverId=../x');
+    expect(bad.statusCode).toBe(400);
   });
 });
 

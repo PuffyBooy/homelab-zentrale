@@ -35,14 +35,22 @@ import { formatBytes, formatGrouped, formatNumber, formatTime } from './format.j
 
 const enc = encodeURIComponent;
 
+/** Prefix key; invalidating it refreshes the tile for every server filter. */
 export const topConsumersKey = ['overview', 'top-consumers'] as const;
+export const topConsumersKeyOf = (serverId?: string) =>
+  [...topConsumersKey, serverId ?? 'all'] as const;
 export const serverThrottleKey = (serverId: string) => ['servers', serverId, 'throttle'] as const;
 
 // ---------------------------------------------------------------------------
 // Fetchers
 
-export function fetchTopConsumers(signal?: AbortSignal): Promise<TopConsumersResponse> {
-  return api('/api/overview/top-consumers', { schema: topConsumersResponseSchema, signal });
+/** Top 3 over all servers, or over one server (ServerSwitch) so it always shows its own top 3. */
+export function fetchTopConsumers(
+  serverId?: string,
+  signal?: AbortSignal,
+): Promise<TopConsumersResponse> {
+  const q = serverId ? `?serverId=${enc(serverId)}` : '';
+  return api(`/api/overview/top-consumers${q}`, { schema: topConsumersResponseSchema, signal });
 }
 
 export function fetchServerThrottle(
@@ -227,16 +235,6 @@ export function consumerActions(c: Pick<TopConsumer, 'protected' | 'throttled'>)
 } {
   if (c.protected) return { throttle: false, unthrottle: false, stop: false };
   return { throttle: !c.throttled, unthrottle: !!c.throttled, stop: true };
-}
-
-/** Keeps only the entries of one server (ServerSwitch), or all. */
-export function consumersOf(res: TopConsumersResponse, serverId?: string): TopConsumersResponse {
-  if (!serverId) return res;
-  return {
-    ...res,
-    byCpu: res.byCpu.filter((c) => c.serverId === serverId),
-    byRam: res.byRam.filter((c) => c.serverId === serverId),
-  };
 }
 
 // ---------------------------------------------------------------------------

@@ -24,7 +24,7 @@ import { internetState, useNetworkView } from '../../lib/network.js';
 import { StorageOverviewTile } from '../storage/StorageOverviewTile.js';
 import { useModules } from '../../lib/useModules.js';
 import { ALL_SERVERS } from '../../lib/servers.js';
-import { consumersOf, fetchTopConsumers, topConsumersKey } from '../../lib/throttle.js';
+import { fetchTopConsumers, topConsumersKeyOf } from '../../lib/throttle.js';
 import { ContainersTile } from '../containers/ContainersTile.js';
 import { GamesTile } from '../games/GamesTile.js';
 import { GithubTile } from '../github/GithubTile.js';
@@ -67,9 +67,10 @@ export function OverviewPage(): ReactElement | null {
   const [filter] = useServerFilter();
   const navigate = useNavigate();
   // No live topic: polled while the overview is open.
+  const oneServer = filter !== ALL_SERVERS ? filter : undefined;
   const top = useQuery({
-    queryKey: topConsumersKey,
-    queryFn: ({ signal }) => fetchTopConsumers(signal),
+    queryKey: topConsumersKeyOf(oneServer),
+    queryFn: ({ signal }) => fetchTopConsumers(oneServer, signal),
     refetchInterval: 15_000,
   });
 
@@ -126,7 +127,7 @@ export function OverviewPage(): ReactElement | null {
       <ServerListTile servers={list} active={one} />
       {top.data ? (
         <div className="hz-grid app-grid">
-          <TopConsumersTile data={consumersOf(top.data, one)} error={top.error} />
+          <TopConsumersTile data={top.data} error={top.error} />
         </div>
       ) : null}
       {modules.storage ? <StorageOverviewTile serverId={one} /> : null}
