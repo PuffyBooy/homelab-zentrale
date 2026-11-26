@@ -14,6 +14,10 @@ export const MODULES = [
   'github',
   'homeassistant',
   'games',
+  'proxmox',
+  'dnsfilter',
+  'fritzbox',
+  'uptimekuma',
   'storage',
   'logsearch',
   'vulnscan',
@@ -28,6 +32,11 @@ export const modulesSchema = z.strictObject({
   github: z.boolean(),
   homeassistant: z.boolean(),
   games: z.boolean(),
+  /** M14 Anbindungen (packages/shared/src/api/integrations.ts), all off by default. */
+  proxmox: z.boolean(),
+  dnsfilter: z.boolean(),
+  fritzbox: z.boolean(),
+  uptimekuma: z.boolean(),
   /** M13: NAS und Speicher (RAID, volumes, disks, SMART). Read only, on by default. */
   storage: z.boolean(),
   /** Operations modules (api/ops.ts), all off by default. */
@@ -43,6 +52,10 @@ export const MODULE_DEFAULTS: Modules = {
   github: false,
   homeassistant: false,
   games: true,
+  proxmox: false,
+  dnsfilter: false,
+  fritzbox: false,
+  uptimekuma: false,
   storage: true,
   logsearch: false,
   vulnscan: false,
@@ -55,6 +68,10 @@ export const MODULE_DEFAULTS: Modules = {
 export const MODULES_ENABLE_STEP_UP: readonly ModuleId[] = [
   'github',
   'homeassistant',
+  'proxmox',
+  'dnsfilter',
+  'fritzbox',
+  'uptimekuma',
   // Control from outside the hub (Discord, Home Assistant / Alexa).
   'discordbot',
   'voice',

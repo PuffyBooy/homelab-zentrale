@@ -3,6 +3,8 @@
 5f48a153ca3787d849fce66fa08e077875a0a264:apps/core/test/github-helpers.ts:github-pat:21
 # Fake RCON password in an M6 WIP test.
 d9cc83cdcd7febb382e19d26cceaa74d27e06018:apps/agent/test/games.security.test.ts:generic-api-key:37
+# HA1 of the fake FRITZ!Box in the M14 e2e helper (test value, split in later commits).
+52f127885e4e76cdd50e5d780989004d64a72dc2:e2e/helpers/fake-integrations.ts:generic-api-key:223
 # Fake GitHub token and fake Discord interaction token in M18 tests (split in a later commit).
 e244cfe96c610e61b0d360f9ad8cdfae644de8d0:apps/core/test/ops.security.test.ts:generic-api-key:58
 e244cfe96c610e61b0d360f9ad8cdfae644de8d0:apps/core/test/discord-helpers.ts:generic-api-key:223

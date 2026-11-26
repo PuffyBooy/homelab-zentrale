@@ -91,10 +91,48 @@ export function digestPayload(
   };
 }
 
+/**
+ * Level that extra alert channels (Discord, Telegram, ntfy) compare with their
+ * minimum level. Differs from `payload.level` for OK entries: the OK of a
+ * recovered crit counts as crit, the OK of a recovered warn as warn (it is only
+ * news to someone who got the warn).
+ */
+export type FilterLevel = 'info' | 'warn' | 'crit';
+
+/** Filter level of a single event (see FilterLevel). */
+export function filterLevelOf(event: AlertEvent): FilterLevel {
+  if (event.kind === 'recovered') return okFilterLevel(event.resolved.level);
+  return okFilterLevel(event.alert.level);
+}
+
+/** ok/info -> info, except that an OK in a bundle or digest is a recovered warn. */
+function okFilterLevel(level: string, okAs: FilterLevel = 'warn'): FilterLevel {
+  if (level === 'crit') return 'crit';
+  if (level === 'warn') return 'warn';
+  return level === 'ok' ? okAs : 'info';
+}
+
+const RANK: Record<FilterLevel, number> = { info: 0, warn: 1, crit: 2 };
+
+/** Highest filter level of bundled or digested entries (an OK there is a recovered warn). */
+export function maxFilterLevel(levels: readonly string[]): FilterLevel {
+  let max: FilterLevel = 'info';
+  for (const l of levels) {
+    const f = okFilterLevel(l);
+    if (RANK[f] > RANK[max]) max = f;
+  }
+  return max;
+}
+
+export function filterRank(level: FilterLevel): number {
+  return RANK[level];
+}
+
 export interface PushSink {
-  sendAll(payload: PushPayload): Promise<number>;
+  /** `level`: see FilterLevel; the phone push ignores it. */
+  sendAll(payload: PushPayload, level?: FilterLevel): Promise<number>;
   /** Sends only to these devices (ids that no longer exist are skipped). */
-  sendTo(deviceIds: readonly string[], payload: PushPayload): Promise<number>;
+  sendTo(deviceIds: readonly string[], payload: PushPayload, level?: FilterLevel): Promise<number>;
   /** Ids of the devices that currently receive pushes. */
   deviceIds(): string[];
 }
@@ -118,7 +156,7 @@ export class Notifier {
 
   handle(event: AlertEvent): void {
     const d = decide(event, this.deps.settings(), this.deps.now());
-    if (d === 'now') this.send(payloadOf(event.alert));
+    if (d === 'now') this.send(payloadOf(event.alert), filterLevelOf(event));
     else if (d === 'defer') this.defer([event.alert]);
     else if (d === 'bundle') {
       this.queue.push(event.alert);
@@ -191,7 +229,8 @@ export class Notifier {
       }
     }
     if (devices.size === 0) return;
-    void this.deps.push.sendTo([...devices], payload).catch(() => {
+    const level = maxFilterLevel(rows.map((r) => r.level));
+    void this.deps.push.sendTo([...devices], payload, level).catch(() => {
       this.deps.log.warn('push delivery failed');
     });
   }
@@ -224,11 +263,11 @@ export class Notifier {
     const payload = bundlePayload(items);
     if (!payload) return;
     this.lastBundleAt = now;
-    this.send(payload);
+    this.send(payload, maxFilterLevel(items.map((a) => a.level)));
   }
 
-  private send(payload: PushPayload): void {
-    void this.deps.push.sendAll(payload).catch(() => {
+  private send(payload: PushPayload, level: FilterLevel): void {
+    void this.deps.push.sendAll(payload, level).catch(() => {
       this.deps.log.warn('push delivery failed');
     });
   }

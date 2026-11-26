@@ -33,6 +33,7 @@ import { gameRcon, gameStatus } from './games.js';
 import { ptyClose, ptyInput, ptyOpen, ptyResize } from './pty.js';
 import { cleanup, cleanupPreview } from './system-cleanup.js';
 import { systemReboot } from './system-reboot.js';
+import { wolSend } from './wol-send.js';
 import {
   ActionError,
   type ActionContext,
@@ -65,6 +66,7 @@ export const handlers: ActionHandlers = {
   'system.cleanupPreview': cleanupPreview,
   'system.cleanup': cleanup,
   'system.reboot': systemReboot,
+  'wol.send': wolSend,
   'check.http': checkHttp,
   'check.tcp': checkTcp,
   'check.ping': checkPing,

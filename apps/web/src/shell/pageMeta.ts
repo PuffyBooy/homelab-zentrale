@@ -2,6 +2,8 @@ import type {
   Alert,
   CheckSummary,
   ContainerSummary,
+  DnsFilterStatus,
+  FritzStatus,
   GameSummary,
   HaState,
   Modules,
@@ -15,7 +17,16 @@ import { gameSentence, gamesSentence, isGameRunning, playersOnline } from '../li
 import { STATUS_TEXT, groupByRoom, haSentence } from '../lib/ha.js';
 import { githubSentence, repoOnServer, repoSentence } from '../lib/github.js';
 import type { LiveState } from '../lib/live.js';
-import { anyModuleOn, MODULE_PAGE, moduleLabels, modulesOfPath } from '../lib/modules.js';
+import {
+  anyModuleOn,
+  isModuleOn,
+  isNetworkOn,
+  MODULE_PAGE,
+  moduleLabels,
+  modulesOfPath,
+} from '../lib/modules.js';
+import { networkSentence, networkSub } from '../lib/network.js';
+import { proxmoxSentence, PROXMOX_REFRESH_MS, type ProxmoxGuests } from '../lib/proxmox.js';
 import {
   ALL_SERVERS,
   serverSentence,
@@ -45,6 +56,11 @@ export interface PageData {
   games?: GameSummary[] | undefined;
   /** Only read on the Wohnung page. */
   ha?: HaState | undefined;
+  /** Only read on /vms. */
+  proxmox?: ProxmoxGuests | undefined;
+  /** Only read on /network. */
+  fritz?: FritzStatus | undefined;
+  dns?: DnsFilterStatus | undefined;
   /** Server filter from the ServerSwitch, or the id of the detail page. */
   filter?: string | undefined;
   live?: LiveState | undefined;
@@ -103,6 +119,16 @@ export function needsGames(pathname: string): boolean {
 /** Pages that read the Home Assistant state in the shell header. */
 export function needsHa(pathname: string): boolean {
   return pathname === '/home';
+}
+
+/** Pages that read the Proxmox guests in the shell header. */
+export function needsProxmox(pathname: string): boolean {
+  return pathname === '/vms';
+}
+
+/** Pages that read FRITZ!Box and DNS filter in the shell header. */
+export function needsNetwork(pathname: string): boolean {
+  return pathname === '/network';
 }
 
 /** Pages that read the repo list in the shell header. */
@@ -279,6 +305,36 @@ export function pageMeta(pathname: string, data: PageData = {}): PageMeta {
     if (data.ha.status === 'connected')
       parts.push(`live · ${formatTime(new Date(data.ha.updatedAt))}`);
     return { title: haSentence(data.ha), sub: parts.join(' · '), serverSwitch: false };
+  }
+
+  if (pathname === '/vms') {
+    if (data.proxmox === undefined)
+      return { title: plain('VMs'), sub: 'VMs · Proxmox', serverSwitch: false };
+    const guests = data.proxmox.guests.filter((g) => !g.template).length;
+    const parts = [
+      'VMs',
+      plural(data.proxmox.nodes.length, 'Knoten', 'Knoten'),
+      plural(guests, 'Gast', 'Gäste'),
+      `alle ${PROXMOX_REFRESH_MS / 1000} s aktualisiert`,
+    ];
+    return { title: proxmoxSentence(data.proxmox), sub: parts.join(' · '), serverSwitch: false };
+  }
+
+  if (pathname === '/network') {
+    if (!isNetworkOn(data.modules)) {
+      return {
+        title: plain('Netzwerk ist ausgeschaltet.'),
+        sub: 'Netzwerk · Modul FRITZ!Box oder DNS-Filter einschalten unter Einstellungen → Module',
+        serverSwitch: false,
+      };
+    }
+    const net = {
+      fritz: data.fritz,
+      dns: data.dns,
+      fritzOn: isModuleOn(data.modules, 'fritzbox'),
+      dnsOn: isModuleOn(data.modules, 'dnsfilter'),
+    };
+    return { title: networkSentence(net), sub: networkSub(net), serverSwitch: false };
   }
 
   if (pathname === settingsItem.href) {

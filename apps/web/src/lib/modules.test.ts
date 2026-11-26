@@ -15,6 +15,10 @@ const off = {
   github: false,
   homeassistant: false,
   games: false,
+  proxmox: false,
+  dnsfilter: false,
+  fritzbox: false,
+  uptimekuma: false,
   storage: false,
   logsearch: false,
   vulnscan: false,
@@ -29,6 +33,8 @@ describe('modules', () => {
     expect(moduleOfPath('/github/abcdefgh')).toBe('github');
     expect(moduleOfPath('/home')).toBe('homeassistant');
     expect(moduleOfPath('/games/new')).toBe('games');
+    expect(moduleOfPath('/vms')).toBe('proxmox');
+    expect(moduleOfPath('/network')).toBeUndefined();
     expect(moduleOfPath('/servers')).toBeUndefined();
     expect(moduleOfPath('/homeassistant')).toBeUndefined();
     expect(moduleOfPath('/logs')).toBe('logsearch');
@@ -62,6 +68,8 @@ describe('modules', () => {
     expect(ids).not.toContain('github');
     expect(ids).not.toContain('home');
     expect(ids).not.toContain('games');
+    expect(ids).not.toContain('vms');
+    expect(ids).not.toContain('network');
     const pages = pageCommands(off).map((c) => c.id);
     expect(pages).toEqual([...ids, 'settings']);
     expect(pageCommands().map((c) => c.id)).toContain('github');
