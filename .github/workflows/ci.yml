@@ -167,3 +167,13 @@ jobs:
       - name: Stop
         if: always()
         run: docker rm -f hz-share || true
+
+  images:
+    name: publish images
+    # Only a green push to main becomes :latest (never a pull request or another branch).
+    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+    needs: [check, audit, docker, ha-smoke, share-image]
+    permissions:
+      contents: read
+      packages: write
+    uses: ./.github/workflows/images.yml
