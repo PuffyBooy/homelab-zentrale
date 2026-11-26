@@ -42,10 +42,16 @@ umask 022
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-# Overridable for tests only (test/install.security.test.ts).
-CONF_DIR="${HZ_CONF_DIR:-/etc/homelab-zentrale}"
-SHARE_DIR="${HZ_SHARE_CONF_DIR:-/etc/homelab-share}"
-CADDY_FILE="${HZ_CADDY_FILE:-/etc/caddy/Caddyfile}"
+CONF_DIR=/etc/homelab-zentrale
+SHARE_DIR=/etc/homelab-share
+CADDY_FILE=/etc/caddy/Caddyfile
+# Paths are overridable in test mode only (test/install.security.test.ts), so a stray
+# variable can never point --purge at another directory.
+if [[ "${HZ_INSTALL_ALLOW_NONROOT:-0}" == 1 ]]; then
+  CONF_DIR="${HZ_CONF_DIR:-$CONF_DIR}"
+  SHARE_DIR="${HZ_SHARE_CONF_DIR:-$SHARE_DIR}"
+  CADDY_FILE="${HZ_CADDY_FILE:-$CADDY_FILE}"
+fi
 HEALTH_TIMEOUT="${HZ_HEALTH_TIMEOUT:-90}"
 
 CORE_ENV="$CONF_DIR/core.env"
@@ -93,19 +99,21 @@ domain=""
 core_url_arg=""
 token_stdin=0
 
+need_value() { [[ $# -ge 2 && -n "$2" ]] || die "$1 braucht einen Wert"; }
+
 positional=()
 while [[ $# -gt 0 ]]; do
   case "$1" in
     -y | --yes) yes=1; shift ;;
     --build-local) build_local=1; shift ;;
-    --image) image="${2:-}"; shift 2 ;;
-    --modules) modules_arg="${2:-}"; shift 2 ;;
-    --timezone) timezone_arg="${2:-}"; shift 2 ;;
-    --base-url) base_url_arg="${2:-}"; shift 2 ;;
+    --image) need_value "$@"; image="$2"; shift 2 ;;
+    --modules) need_value "$@"; modules_arg="$2"; shift 2 ;;
+    --timezone) need_value "$@"; timezone_arg="$2"; shift 2 ;;
+    --base-url) need_value "$@"; base_url_arg="$2"; shift 2 ;;
     --no-serve) serve=0; shift ;;
     --purge) purge=1; shift ;;
-    --domain) domain="${2:-}"; shift 2 ;;
-    --core-url) core_url_arg="${2:-}"; shift 2 ;;
+    --domain) need_value "$@"; domain="$2"; shift 2 ;;
+    --core-url) need_value "$@"; core_url_arg="$2"; shift 2 ;;
     --token-stdin) token_stdin=1; shift ;;
     --token | --token=* | --auth-key | --auth-key=* | --secret-key | --secret-key=*)
       die "Secrets nie als Argument übergeben (Shell-History, ps), siehe --help" ;;
@@ -147,6 +155,7 @@ valid_ts_url() {
 
 valid_modules() {
   local part
+  local -a parts
   [[ -n "$1" ]] || return 1
   IFS=',' read -r -a parts <<<"$1"
   for part in "${parts[@]}"; do
@@ -187,14 +196,17 @@ ask() {
   printf '%s' "${answer:-$2}"
 }
 
-# confirm <question> <default j|n>
+# confirm <question> <default j|n>: default on Enter or with --yes; "no" without a terminal.
 confirm() {
   local def="$2" hint answer
   if [[ "$def" == j ]]; then hint="J/n"; else hint="j/N"; fi
   if [[ $interactive -eq 1 ]]; then
     read -r -p "    $1 [$hint] " answer || true
-  else
+  elif [[ $yes -eq 1 ]]; then
     answer=""
+  else
+    # No terminal and no --yes: never assume consent.
+    answer=n
   fi
   answer="${answer:-$def}"
   [[ "$answer" =~ ^[jJyY] ]]
@@ -339,6 +351,7 @@ tailscale_up() {
   local keyfile
   if [[ -n "${HZ_TS_AUTHKEY:-}" ]]; then
     keyfile="$(umask 077 && mktemp)"
+    trap 'rm -f -- "$keyfile"' EXIT
     printf '%s' "$HZ_TS_AUTHKEY" >"$keyfile"
     unset HZ_TS_AUTHKEY
     tailscale up --auth-key="file:$keyfile" || { rm -f "$keyfile"; die "tailscale up ist fehlgeschlagen"; }
@@ -369,10 +382,14 @@ need_tailscale() {
 no_funnel() {
   local status
   status="$(tailscale serve status --json 2>/dev/null || true)"
-  if grep -q '"AllowFunnel"' <<<"$status" && grep -q ':443": *true' <<<"$status"; then
-    warn "tailscale funnel ist auf Port 443 an. Das würde die Zentrale öffentlich machen, ich schalte es aus."
-    tailscale funnel --https=443 off || die "funnel ließ sich nicht ausschalten: sudo tailscale funnel --https=443 off"
-  fi
+  grep -q '"AllowFunnel"' <<<"$status" || return 0
+  local port
+  # "AllowFunnel": {"<host>:<port>": true, ...}: every port with funnel on is switched off.
+  while IFS= read -r port; do
+    [[ "$port" =~ ^[0-9]{1,5}$ ]] || continue
+    warn "tailscale funnel ist auf Port $port an. Das würde Dienste öffentlich machen, ich schalte es aus."
+    tailscale funnel --https="$port" off || die "funnel ließ sich nicht ausschalten: sudo tailscale funnel --https=$port off"
+  done < <(grep -oE '"[^"]+:[0-9]{1,5}": *true' <<<"$status" | sed -E 's/.*:([0-9]+)".*/\1/' | sort -u)
 }
 
 setup_serve() {
@@ -455,6 +472,10 @@ ensure_secret_key() {
   fi
   # A manual install from the repo (.env in the checkout) keeps its key.
   repo_key="$(env_get "$REPO_DIR/.env" HZ_SECRET_KEY)"
+  if [[ -n "$repo_key" && ! "$repo_key" =~ ^[A-Za-z0-9+/]{43}=$ ]]; then
+    warn "HZ_SECRET_KEY in $REPO_DIR/.env hat nicht das erwartete Format (32 Byte Base64), wird nicht übernommen"
+    repo_key=""
+  fi
   if [[ -n "$repo_key" ]] && confirm "HZ_SECRET_KEY aus $REPO_DIR/.env übernehmen (bestehende Installation)?" j; then
     env_set "$CORE_ENV" HZ_SECRET_KEY "$repo_key"
     ok "HZ_SECRET_KEY aus der bisherigen .env übernommen"
@@ -463,7 +484,9 @@ ensure_secret_key() {
   if docker volume inspect "$VOLUME" >/dev/null 2>&1; then
     die "Es gibt schon Daten (Volume $VOLUME), aber keinen HZ_SECRET_KEY. Mit einem neuen Schlüssel wären gespeicherte Tokens unlesbar. Alten Schlüssel als HZ_SECRET_KEY=... in $CORE_ENV eintragen (0600) und erneut starten, oder das Volume bewusst löschen: docker volume rm $VOLUME"
   fi
-  env_set "$CORE_ENV" HZ_SECRET_KEY "$(new_secret_key)"
+  key="$(new_secret_key)" || exit 1
+  env_set "$CORE_ENV" HZ_SECRET_KEY "$key"
+  key=""
   new_key=1
   ok "HZ_SECRET_KEY neu erzeugt (32 Byte, zufällig)"
 }
@@ -495,9 +518,10 @@ configure_core() {
 
   local host base tz mods
   host="$(ts_self_dns)"
+  # --base-url, then the saved value, then the name from `tailscale status`.
   base="$base_url_arg"
-  if [[ -z "$base" && "$host" =~ $ts_host_re ]]; then base="https://$host"; fi
   if [[ -z "$base" ]]; then base="$(env_get "$CORE_ENV" HZ_BASE_URL)"; fi
+  if [[ -z "$base" && "$host" =~ $ts_host_re ]]; then base="https://$host"; fi
   valid_ts_url "$base" || die "keine ts.net-Adresse gefunden. MagicDNS im Tailnet einschalten oder --base-url https://<name>.ts.net angeben"
   env_set "$CORE_ENV" HZ_BASE_URL "$base"
   ok "HZ_BASE_URL=$base"
@@ -653,7 +677,8 @@ core_uninstall() {
   printf '%sHomelab-Zentrale entfernen%s\n' "$B" "$R"
   if [[ $purge -eq 1 ]]; then
     warn "--purge löscht die Datenbank (Volume $VOLUME) und HZ_SECRET_KEY. Das lässt sich nicht rückgängig machen."
-    if [[ $interactive -eq 1 ]]; then
+    if [[ -t 0 ]]; then
+      # On a terminal always typed, even with --yes.
       local answer=""
       read -r -p "    Zum Bestätigen LOESCHEN eingeben: " answer || true
       [[ "$answer" == LOESCHEN ]] || die "abgebrochen, nichts gelöscht"
@@ -672,7 +697,9 @@ core_uninstall() {
     if [[ $purge -eq 1 ]]; then compose down -v --remove-orphans; else compose down --remove-orphans; fi
   fi
   if [[ $purge -eq 1 ]]; then
-    docker volume rm "$VOLUME" >/dev/null 2>&1 || true
+    if docker volume inspect "$VOLUME" >/dev/null 2>&1; then
+      docker volume rm "$VOLUME" >/dev/null || die "Volume $VOLUME ließ sich nicht löschen; Schlüssel bleibt in $CORE_ENV"
+    fi
     rm -rf -- "$CONF_DIR"
     ok "alles gelöscht"
   else
@@ -690,18 +717,8 @@ share_compose() { (cd "$SHARE_DIR" && docker compose "$@"); }
 share_install() {
   printf '%sShare-Gateway einrichten (öffentlicher Server)%s\n' "$B" "$R"
   info "Öffentlich ist danach nur Caddy mit /s/*. Die Zentrale selbst bleibt nur im Tailnet."
-  need_docker
-  need_tailscale
-
-  step "Konfiguration ($SHARE_ENV)"
-  install -d -m 0700 "$SHARE_DIR"
+  # Token first: before apt/curl could read stdin or inherit the variable.
   local url token
-  url="$core_url_arg"
-  if [[ -z "$url" ]]; then url="$(env_get "$SHARE_ENV" HZ_SHARE_CORE_URL)"; fi
-  if [[ -z "$url" ]]; then url="$(ask "Adresse der Zentrale (https://<name>.ts.net)" "")"; fi
-  url="${url%/}"
-  valid_ts_url "$url" || die "die Adresse der Zentrale muss https://<name>.ts.net sein (--core-url)"
-
   token="${HZ_SHARE_GATEWAY_TOKEN:-}"
   unset HZ_SHARE_GATEWAY_TOKEN
   if [[ -z "$token" && $token_stdin -eq 1 ]]; then
@@ -711,11 +728,24 @@ share_install() {
     IFS= read -r -s -p "    Gateway-Token (leer = bisheriges behalten): " token || true
     echo
   fi
+  if [[ -n "$token" && ! "$token" =~ $gateway_token_re ]]; then
+    die "das Gateway-Token hat ein ungültiges Format (43 Zeichen)"
+  fi
+  need_docker
+  need_tailscale
+
+  step "Konfiguration ($SHARE_ENV)"
+  install -d -m 0700 "$SHARE_DIR"
+  url="$core_url_arg"
+  if [[ -z "$url" ]]; then url="$(env_get "$SHARE_ENV" HZ_SHARE_CORE_URL)"; fi
+  if [[ -z "$url" ]]; then url="$(ask "Adresse der Zentrale (https://<name>.ts.net)" "")"; fi
+  url="${url%/}"
+  valid_ts_url "$url" || die "die Adresse der Zentrale muss https://<name>.ts.net sein (--core-url)"
+
   if [[ -z "$token" ]]; then
     [[ -n "$(env_get "$SHARE_ENV" HZ_SHARE_GATEWAY_TOKEN)" ]] || die "Gateway-Token fehlt (HZ_SHARE_GATEWAY_TOKEN, --token-stdin oder Eingabe)"
     ok "Gateway-Token vorhanden (bleibt)"
   else
-    [[ "$token" =~ $gateway_token_re ]] || die "das Gateway-Token hat ein ungültiges Format (43 Zeichen)"
     env_set "$SHARE_ENV" HZ_SHARE_GATEWAY_TOKEN "$token"
     ok "Gateway-Token gespeichert"
   fi
@@ -783,6 +813,11 @@ share_caddy() {
     cp -p "$CADDY_FILE" "$CADDY_FILE.bak-$(date +%Y%m%d%H%M%S)"
     info "bisheriges Caddyfile gesichert ($CADDY_FILE.bak-…)"
   fi
+  if ! caddy validate --adapter caddyfile --config "$tmp" >/dev/null 2>&1; then
+    rm -f "$tmp"
+    die "das erzeugte Caddyfile ist ungültig (caddy validate), nichts geändert"
+  fi
+  warn "$CADDY_FILE wird ersetzt (nur die Share-Site). Andere Sites daraus aus der Sicherung übernehmen."
   install -m 0644 "$tmp" "$CADDY_FILE"
   rm -f "$tmp"
   systemctl reload caddy || warn "systemctl reload caddy ist fehlgeschlagen"

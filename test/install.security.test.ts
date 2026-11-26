@@ -49,7 +49,7 @@ if [[ "$1 $2" == "status --json" ]]; then
 fi
 if [[ "$1 $2 $3" == "serve status --json" ]]; then
   if [[ "\${STUB_FUNNEL:-0}" == 1 ]]; then
-    echo '{"AllowFunnel": {"heimserver.tail1234.ts.net:443": true}}'
+    echo '{"AllowFunnel": {"heimserver.tail1234.ts.net:443": true, "heimserver.tail1234.ts.net:8443": true, "heimserver.tail1234.ts.net:10000": false}}'
   else
     echo '{}'
   fi
@@ -167,6 +167,29 @@ describe('deploy/install.sh (core)', () => {
     const r = run(['--yes', '--timezone', 'UTC'], { STUB_FUNNEL: '1' });
     expect(r.code, r.out).toBe(0);
     expect(r.calls).toContain('tailscale funnel --https=443 off');
+    expect(r.calls).toContain('tailscale funnel --https=8443 off');
+    expect(r.calls).not.toContain('--https=10000');
+  });
+
+  it('without a terminal and without --yes nothing is assumed', () => {
+    expect(run(['--yes', '--timezone', 'UTC']).code).toBe(0);
+    const r = run(['uninstall']);
+    expect(r.code).not.toBe(0);
+    expect(r.calls).not.toContain('compose down');
+    expect(existsSync(join(env.conf, 'docker-compose.yml'))).toBe(true);
+  });
+
+  it('options without a value fail with a message', () => {
+    const r = run(['--yes', '--timezone']);
+    expect(r.code).not.toBe(0);
+    expect(r.out).toContain('--timezone braucht einen Wert');
+  });
+
+  it('keeps a saved base URL over the detected name', () => {
+    const custom = 'https://zentrale.tail1234.ts.net';
+    expect(run(['--yes', '--timezone', 'UTC', '--base-url', custom]).code).toBe(0);
+    expect(run(['--yes']).code).toBe(0);
+    expect(coreEnv()).toContain(`HZ_BASE_URL=${custom}\n`);
   });
 
   it('is idempotent: a second run keeps the key, --modules updates the wizard choice', () => {

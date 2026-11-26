@@ -220,13 +220,16 @@ jobs:
           sudo env "PATH=/tmp/hz-stub:$PATH" ./deploy/install.sh uninstall --yes
           docker volume inspect homelab-zentrale_hz-data > /dev/null
           sudo test -f /etc/homelab-zentrale/core.env
-          sudo env "PATH=/tmp/hz-stub:$PATH" ./deploy/install.sh uninstall --purge --yes
+          # Reinstall from the kept key and data, then purge a running install (compose down -v).
+          sudo env "PATH=/tmp/hz-stub:$PATH" HZ_HEALTH_TIMEOUT=120 ./deploy/install.sh --yes --image homelab-zentrale/core:local > reinstall.log 2>&1
+          sudo sed -n 's/^HZ_SECRET_KEY=//p' /etc/homelab-zentrale/core.env | sha256sum | diff - key.sha
+          sudo env "PATH=/tmp/hz-stub:$PATH" ./deploy/install.sh uninstall --purge --yes < /dev/null
           if docker volume inspect homelab-zentrale_hz-data > /dev/null 2>&1; then echo "volume left"; exit 1; fi
           sudo test ! -e /etc/homelab-zentrale
       - name: Logs on failure
         if: failure()
         run: |
-          cat install.log update.log 2>/dev/null | sed 's/setup#token=[A-Za-z0-9_-]*/setup#token=[redacted]/' || true
+          cat install.log update.log reinstall.log 2>/dev/null | sed 's/setup#token=[A-Za-z0-9_-]*/setup#token=[redacted]/' || true
           docker ps -a
 
   images:
