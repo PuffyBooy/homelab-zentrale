@@ -160,13 +160,15 @@ export const gameRoutes: FastifyPluginAsync<GameRoutesOptions> = async (app, o) 
     return gameBackupListResponseSchema.parse({ backups: g.backups(row.id) });
   });
 
-  app.post('/games/:id/:action', async (request) => {
+  app.post('/games/:id/:action', async (request, reply) => {
     const { id, action } = gameActionParamsSchema.parse(request.params);
     const row = g.row(id);
     if (!row) throw new HttpError(404, 'not_found');
     try {
       const game = await g.action(id, action);
       if (action === 'backup') audit('game.backup', id, { name: row.name });
+      // M22: the cloud VM starts first; the game follows in the background.
+      if (g.waitsForCloud(id)) return reply.code(202).send(gameResponseSchema.parse({ game }));
       return gameResponseSchema.parse({ game });
     } catch (err) {
       const e = asHttp(err);
