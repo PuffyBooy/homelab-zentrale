@@ -17,6 +17,8 @@ export const navItems: NavItem[] = [
   // digits 1–9 keep their places (docs/QUESTIONS.md).
   { id: 'logs', label: 'Log-Suche', icon: 'terminal', href: '/logs', key: 'l' },
   { id: 'security', label: 'Sicherheit', icon: 'lock', href: '/security', key: 's' },
+  // M22, module cloud (off by default).
+  { id: 'cloud', label: 'Cloud', icon: 'cloud', href: '/cloud', key: 'c' },
 ];
 
 /** No gear icon in the design set yet (docs/QUESTIONS.md), so settings is text only. */
