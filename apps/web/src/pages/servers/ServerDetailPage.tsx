@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { useEffect, useRef, useState, type ReactElement } from 'react';
 import { Link, useLocation, useParams } from 'react-router';
 import { Alert, Button, Metric, StatusDot, Tile, UsageBar } from '@hz/ui';
+import { FormError } from '../../components/FormError.js';
 import { isApiError } from '../../lib/api.js';
 import { errorText } from '../../lib/errors.js';
 import {
@@ -31,6 +32,8 @@ import { RebootDialog } from './RebootDialog.js';
 import { ServerSectionNav } from './ServerSectionNav.js';
 import { ServicesTile } from './ServicesTile.js';
 import { ShutdownDialog } from './ShutdownDialog.js';
+import { viaText } from '../../lib/wol.js';
+import { WolTile, useWake, useWol, wakeErrorOf } from './WolTile.js';
 
 function pctOf(used: number, total: number): number {
   return total > 0 ? (used / total) * 100 : 0;
@@ -84,6 +87,12 @@ function Detail({ d }: { d: ServerDetail }) {
   }, [hash]);
   const offline = !s.connected;
   const diskIssue = s.reasons.some((r) => r.code === 'disk_warn' || r.code === 'disk_crit');
+  const servers = useServers();
+  const wol = useWol(s.id);
+  const wake = useWake(s.id);
+  // SPEC 16: a server that is off and has a MAC shows "Aufwecken" as the main action.
+  const canWake = offline && !!wol.data?.mac;
+  const wakeError = wakeErrorOf(wake.error);
 
   return (
     <>
@@ -92,6 +101,33 @@ function Detail({ d }: { d: ServerDetail }) {
           {s.reasons.map((r) => (
             <Alert key={r.code} tone={r.level} title={r.text} />
           ))}
+        </div>
+      ) : null}
+
+      {canWake ? (
+        <div className="app-stack" aria-label="Aufwecken">
+          <Alert
+            tone="info"
+            title={`${s.name} ist aus.`}
+            action={
+              <Button
+                variant="primary"
+                icon="power"
+                disabled={wake.isPending}
+                onClick={() => wake.mutate()}
+              >
+                Aufwecken
+              </Button>
+            }
+          >
+            {wake.isSuccess && !wake.isPending
+              ? 'Magic Packet gesendet. Der Server braucht meist 30–90 s, bis sich der Agent wieder meldet.'
+              : `Wake-on-LAN an ${wol.data?.mac ?? ''} über ${viaText(
+                  wol.data?.via ?? 'core',
+                  new Map((servers.data ?? []).map((x) => [x.id, x.name])),
+                )}.`}
+          </Alert>
+          {wakeError ? <FormError title={wakeError} /> : null}
         </div>
       ) : null}
 
@@ -291,11 +327,13 @@ function Detail({ d }: { d: ServerDetail }) {
           <AutomatikTile serverId={s.id} serverName={s.name} />
         </div>
 
+        <WolTile serverId={s.id} serverName={s.name} servers={servers.data ?? []} />
+
         <Tile title="Aktionen" icon="power" span={4}>
           <div className="app-actions">
             <span id="aktionen" className="app-anchor app-anchor-in" />
             <Button
-              variant={diskIssue ? 'primary' : 'secondary'}
+              variant={diskIssue && !offline ? 'primary' : 'secondary'}
               icon="refresh"
               disabled={offline}
               onClick={() => setDialog('cleanup')}

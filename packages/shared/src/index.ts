@@ -21,3 +21,4 @@ export * from './api/storage.js';
 export * from './api/game-features.js';
 export * from './api/server-admin.js';
 export * from './api/updates.js';
+export * from './api/integrations.js';

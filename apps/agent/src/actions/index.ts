@@ -37,6 +37,7 @@ import { systemService, systemServices } from './system-services.js';
 import { systemShutdown } from './system-shutdown.js';
 import { systemUpgrade } from './system-upgrade.js';
 import { updateApply, updateCheck } from './update.js';
+import { wolSend } from './wol-send.js';
 import {
   ActionError,
   type ActionContext,
@@ -69,6 +70,7 @@ export const handlers: ActionHandlers = {
   'system.cleanupPreview': cleanupPreview,
   'system.cleanup': cleanup,
   'system.reboot': systemReboot,
+  'wol.send': wolSend,
   'check.http': checkHttp,
   'check.tcp': checkTcp,
   'check.ping': checkPing,

@@ -73,6 +73,7 @@ describe('agent protocol allowlist', () => {
         'system.upgrade',
         'update.check',
         'update.apply',
+        'wol.send',
       ].sort(),
     );
   });

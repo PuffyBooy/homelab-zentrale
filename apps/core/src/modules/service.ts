@@ -74,6 +74,10 @@ const MODULE_PREFIXES: Record<ModuleId, readonly string[]> = {
     '/api/share-gateway',
     '/s',
   ],
+  proxmox: ['/api/proxmox'],
+  dnsfilter: ['/api/dnsfilter'],
+  fritzbox: ['/api/fritzbox'],
+  uptimekuma: ['/api/uptimekuma'],
   storage: ['/api/storage'],
 };
 
