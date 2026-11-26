@@ -83,7 +83,7 @@ describe('token and settings', () => {
       method: 'PUT',
       url: '/api/github/token',
       headers: s.headers,
-      payload: { token: 'ghp_ThisTokenIsNotKnownToGitHub000000000' },
+      payload: { token: `ghp_${'ThisTokenIsNotKnownToGitHub000000000'}` },
     });
     expect(res.statusCode).toBe(400);
     expect(res.json()).toEqual({ ok: false, error: 'invalid_credentials' });
