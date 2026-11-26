@@ -55,6 +55,13 @@ Die Zentrale hat Root-ähnliche Macht über alle Server. Diese Regeln sind **nic
 - **Discord-Bot:** Bot-Token AES-256-GCM verschlüsselt, nur schreibbar, nie in Antwort, Log oder Fehlermeldung, nur an `https://discord.com/api/v10` gesendet; Gateway nur `wss://*.discord.gg` ohne Zugangsdaten oder Port. Kein öffentlicher Endpunkt (keine Interactions-URL). Befehle nur aus der eingestellten Guild, nur von Discord-Usern, die der Admin mit Step-up an einen aktiven Benutzerlink gebunden hat; Rechte, Ablauf, Widerruf, RAM-Reserve und `share_audit` (`via: discord`) wie beim Link. Die Bindung ersetzt den PIN des Links. Antworten nur für den Fragenden sichtbar, ohne Erwähnungen, Rate-Limit pro User und Abklingzeit pro Spiel.
 - **Sprachsteuerung:** Wer in Home Assistant den zugeordneten `input_boolean` schalten kann (HA-Benutzer, Automationen, Alexa und damit jeder, der mit der Echo spricht), kann das Spiel starten und mit „Stoppen erlauben“ auch stoppen, ohne Benutzerlink. Deshalb: Step-up für einen neuen Schalter, einen neuen Statustext und für „Stoppen erlauben“; nur Domänen `input_boolean`/`input_text`; Abklingzeit 60 s; RAM-Reserve gilt (unbekannter RAM = kein Start); jeder Auslöser im `audit_log` (`voice:ha`).
 
+## Cloud-Server (M22)
+- Azure-Zugang (Client-Secret der App-Registrierung) und Tailscale-Auth-Key AES-256-GCM verschlüsselt (AAD pro Feld), nur schreibbar, nie in Antwort, Log oder Fehlermeldung. Ändern verlangt Step-up; wechseln Tenant, App oder Abo ohne neues Secret, wird das gespeicherte verworfen.
+- Die App-Registrierung hat nur die Rolle *Contributor* auf einer eigenen Ressourcengruppe, nicht auf dem Abo.
+- Anfragen nur an `login.microsoftonline.com`, `management.azure.com` und `prices.azure.com`, ohne Weiterleitungen, mit Zeitlimit und Größengrenze. Jeder Pfadteil kommt aus einer geprüften Liste oder einem Schema. Andere Hosts nur mit `HZ_DEMO=1` und nur `http://127.0.0.1:<port>` (Tests).
+- Nichts wird ohne Bestätigung des geschätzten Preises bestellt; Budget-Warnung ab 80 %, ab 100 % keine automatischen Starts mehr. Löschen nur mit Step-up und Namensbestätigung.
+- Die VM bekommt kein Passwort und einen SSH-Schlüssel, dessen privater Teil sofort verworfen wird. Die Netzwerk-Sicherheitsgruppe lässt nur die öffentlichen Spielports der Gameserver darauf herein (kein SSH, kein RCON); Verwaltung nur über Tailscale. cloud-init enthält nur geprüfte, gequotete Werte; der Auth-Key liegt nur kurz in einer 0600-Datei und wird nach `tailscale up` gelöscht.
+
 ## Allgemein
 - Jede Eingabe wird mit zod geprüft (Body, Query, Params, WebSocket-Nachrichten, Agent-Nachrichten).
 - Sicherheits-Header über `@fastify/helmet` mit strenger CSP (keine Inline-Skripte, `connect-src 'self'`).
