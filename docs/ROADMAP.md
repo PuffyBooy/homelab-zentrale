@@ -253,6 +253,11 @@ Wunsch des Admins vom 27.11.2026. Modul `ai` (Standard aus, Einschalten mit Step
 
 ---
 
+## M25: GitHub-Ausbau
+Wunsch des Admins vom 27.11.2026. Modul `github` bleibt optional. Lesen ist Standard, Schreiben wird pro Repo mit Step-up freigeschaltet, der Client ruft nur Aufrufe aus `GITHUB_CALLS` auf (nie Repos/Secrets/Rechte ändern, Branches nur unter `hz/`). Rechte-Bericht des Tokens, PR-Übersicht mit Mergen, Actions mit Logs/Re-run/Workflow starten, Preview-Deploys pro PR, Releases mit Rollback, Deploy-Status nach GitHub, Update-PRs für Images, Meldung als Issue, Sicherheitsfunde, adaptives Polling statt Webhooks. Arbeitspakete, Token-Empfehlung, Abnahme und Sicherheitstests: `docs/M25-GITHUB-PLAN.md`.
+
+---
+
 ## Definition of Done (für jeden PR)
 - Code, Tests und Doku sind aktuell (`docs/` mitpflegen, wenn sich etwas ändert)
 - Keine `any`, keine auskommentierten Blöcke, keine TODOs ohne Issue
