@@ -248,6 +248,11 @@ Wunsch des Admins vom 26.11.2026: Azure-Konto einmal verknüpfen, dann bestellt 
 
 ---
 
+## M24: KI-Vorschläge, schneller Docker-Wechsel, interaktive Gameserver
+Wunsch des Admins vom 27.11.2026. Modul `ai` (Standard aus, Einschalten mit Step-up), anbieterneutral (Anthropic, OpenAI, Ollama im Tailnet). Feste Regeln liefern Vorschläge auch ohne Key, das Sprachmodell sortiert und erklärt nur. Vorschläge sind nie Aktionen: „Anwenden“ ruft nur Aktionen aus `SUGGESTION_ACTIONS` über bestehende Routen mit deren Step-up auf. Dazu Stack-Versionen mit Wechsel und automatischem Rollback, Bauplan-Assistent für neue Server, Gameserver-Einstellungen als Formular mit Live-Änderung per RCON und automatische Vorschläge für RAM, Schlafzeit, Version, Mods und Host (inkl. Azure). Voraussetzung: M23 und M11b gemergt. Arbeitspakete, Abnahme und Sicherheitstests: `docs/M24-KI-PLAN.md`.
+
+---
+
 ## Definition of Done (für jeden PR)
 - Code, Tests und Doku sind aktuell (`docs/` mitpflegen, wenn sich etwas ändert)
 - Keine `any`, keine auskommentierten Blöcke, keine TODOs ohne Issue
