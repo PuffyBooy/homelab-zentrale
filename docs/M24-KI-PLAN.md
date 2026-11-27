@@ -1,0 +1,110 @@
+# M24: KI-Vorschläge, schneller Docker-Wechsel, interaktive Gameserver (Plan)
+
+Stand: Plan vom 27.11.2026, gebaut wird frühestens ab 29.11.2026 18:00 (Wien).
+Wunsch des Admins: „Vorschläge, was ich bei den Servern besser machen kann, schnelles Docker-Switching, Vorschläge, wie ich Server schnell aufbaue, und beim Gameserver mehr interaktiv einstellen und automatisch Vorschläge. Ich kann einen Cloud-API-Key geben.“
+
+Baut auf: M10 (Prioritäten, RAM-Reserve), M12 (Gameserver, Statistik, Modrinth), M16 (Server im Detail), M17 (Updates, Health-Gate mit Rollback), M18 (Schwachstellen-Scan, Fail2ban), M21 (App-Store, eigene Vorlagen), M22 (Azure mit Preisen), M23 (Docker komplett, Stacks). M23 und M11b müssen vorher gemergt sein.
+
+## Grundsätze
+
+1. **Zwei Stufen.** Stufe 1 sind feste Regeln im Core (ohne KI, ohne Key, kostenlos, testbar). Stufe 2 ist das Sprachmodell: Es sortiert, erklärt, fasst zusammen und beantwortet freie Fragen. Ohne Key läuft Stufe 1 trotzdem. So hängen gute Vorschläge nie allein an der KI.
+2. **Vorschlag, nie Aktion.** Die KI führt nichts aus. Ein Vorschlag kann höchstens auf eine Aktion aus der festen Liste `SUGGESTION_ACTIONS` zeigen, die eine bestehende API-Route mit deren Schema aufruft. Der Admin klickt „Anwenden“, sieht vorher die Änderung (Diff), und Step-up und Namensbestätigung gelten wie bei der Hand-Aktion.
+3. **Datensparsam.** An den Anbieter geht nur ein typisierter Schnappschuss (zod-Schema `aiContextSchema`) aus erlaubten Feldern, nie Rohdateien, Umgebungsvariablen, Logs, Tokens, Passwörter, RCON, Benutzerlinks, Tailscale-IPs. Danach läuft ein Schwärzer (Muster für Tokens, Keys, URLs mit Zugangsdaten, private Schlüssel). Optional werden Server- und Containernamen durch Kürzel ersetzt (`server-1`) und in der Antwort zurückübersetzt. „Was geht raus?“ zeigt den exakten Text vor dem Senden.
+4. **Anbieter-neutral.** `AI_PROVIDERS = anthropic | openai | ollama`, eine Schnittstelle `AiProvider.complete({system, input, schema, maxTokens})`. Antworten müssen JSON nach zod-Schema sein (Tool-Aufruf bzw. Structured Output); was nicht passt, wird verworfen.
+5. **Kosten im Griff.** Monatsbudget (Standard 5 €), Grenze pro Anfrage (Tokens), höchstens 30 Anfragen pro Stunde, Cache über den Hash des Schnappschusses (gleiche Lage = keine neue Anfrage). Tägliche automatische Analyse ist aus, bis der Admin sie einschaltet. Ab 80 % Budget `warn`, ab 100 % nur noch Stufe 1.
+
+## Arbeitspakete
+
+### WP Schema (`packages/shared`, zuerst fertig)
+- `api/ai.ts`: Einstellungen (Anbieter, Modell, Key gesetzt ja/nein, Ollama-URL, Budget, Pseudonymisieren, Auto-Analyse mit Uhrzeit), Vorschlag (`id, area: server|security|docker|setup|game, severity: info|warn|crit, title, why, evidence[], action?`), Verlauf, Verbrauch.
+- `SUGGESTION_ACTIONS`: z. B. `container.setLimit`, `container.setRestartPolicy`, `stack.pinImage`, `stack.switchRevision`, `update.applyNow`, `game.setSetting`, `game.setRam`, `game.setSleep`, `game.installMod`, `game.move`, `cleanup.run`, `app.install`. Jede zeigt auf eine vorhandene Route; neue Routen kommen nur über die WPs unten.
+- `aiContextSchema` (erlaubte Felder) und `agent-docker`-Erweiterung für Stack-Versionen.
+- Modul `ai` in `MODULES` (Standard aus, Einschalten mit Step-up). Migration: nächste freie Nummer beim Bauen (voraussichtlich 20).
+
+### WP Core: KI-Kern ∥ (`apps/core/src/ai`)
+- Anbieter-Clients nur gegen feste Hosts: `api.anthropic.com`, `api.openai.com`; Ollama nur auf `127.0.0.1`, `100.64.0.0/10` oder `*.ts.net` (kein öffentliches Ollama). Keine Weiterleitungen, Zeitlimit 60 s.
+- Key AES-256-GCM verschlüsselt (wie GitHub-/HA-Token), nach dem Speichern nie wieder angezeigt („gesetzt“), Ändern mit Step-up, „Verbindung testen“ mit einer Mini-Anfrage. Key nie in Antwort, Log, Fehler, Export.
+- Kontext-Bauer, Schwärzer, Pseudonymisierer, Budget-Zähler (Tokens × Preisliste pro Modell, Preise als Datei in `packages/shared`, vom Admin überschreibbar).
+- Seite „Frag die Zentrale“: freie Frage plus Schnappschuss, Antwort als Text plus optionale Vorschläge (gleiches Schema, gleiche Aktionsliste).
+
+### WP Core: Regeln ∥ (`apps/core/src/advisor`)
+Stufe-1-Regeln, jede mit Test und Begründungstext:
+- **Ressourcen:** RAM dauerhaft über 85 % (7-Tage-Werte), Container ohne Speicherlimit, Platte voll in < 14 Tagen (Trend), Swap aktiv, Docker-Müll > 5 GB (M16 `dockerDf`), Server dauerhaft leer und ein anderer voll (Umzug vorschlagen, M11).
+- **Sicherheit:** kritische Lücken (M18), Port auf `0.0.0.0` statt Tailscale-IP (M11 Port-Abgleich), `privileged`/Docker-Socket in fremden Stacks (M23), OS-Updates offen > 14 Tage (M17), Neustart nötig, Fail2ban aus bei offenem SSH.
+- **Konfiguration:** Image mit `:latest`, keine Restart-Policy, kein Healthcheck, Logs ohne Größenlimit, kein Backup für Gameserver mit Spielern.
+- Vorschläge entstehen nach jedem Inventar-Lauf, werden zusammengeführt (gleiche Ursache = ein Vorschlag) und verschwinden selbst, wenn die Ursache weg ist. „Ausblenden“ und „In 7 Tagen wieder zeigen“.
+
+### WP Docker schnell wechseln ∥ (`apps/core/src/containers`, `apps/agent`)
+- **Stack-Versionen:** Bei jedem `compose.up` durch die Zentrale speichert sie eine Revision (Compose-Datei, `.env` ohne Secrets, Image-Digests). Liste „Versionen“ am Stack, Knopf „Zu dieser Version wechseln“.
+- **Wechsel mit Sicherheitsnetz:** neue Version starten, Health-Gate 3 Min wie M17, sonst automatisch zurück zur letzten guten Revision. Volumes bleiben immer.
+- **Image-Tag wechseln:** Auswahl aus den Tags der Registry (nur `registry-1.docker.io`, `ghcr.io`, `lscr.io`, `quay.io`), Vorschau als Diff, „Auf Digest festnageln“.
+- **Als Vorlage speichern:** laufender Stack wird eigene M21-Vorlage (durch dieselbe Sicherheitsprüfung, Passwörter werden Parameter).
+- KI-Anteil: „Lohnt sich das Update?“ fasst die Release-Notes zusammen (nur GitHub-Releases des Image-Projekts, öffentlicher Text).
+
+### WP Server schnell aufbauen ∥ (`apps/core/src/advisor/setup`)
+- Assistent „Was soll der Server können?“: Auswahl aus Zielen (Mediaserver, Passwörter, Dateien, Gameserver für N Freunde …) oder freier Text (KI).
+- Ergebnis ist ein **Bauplan** nur aus Bausteinen, die es gibt: M21-Apps, Gameserver-Vorlagen, Aufgaben (M20), Selbstheilung, Checks. Dazu: welcher Server (freier RAM, Architektur, Reserve), welche Ports, geschätzter RAM.
+- „Bauplan ausführen“ arbeitet Schritt für Schritt mit Bestätigung pro Schritt; jeder Schritt nutzt die normale Route. Ohne Key gibt es feste Baupläne als Vorlagen.
+- Für neue Server: Verweis auf den Einzeiler (M11b) und auf passende Azure-Größe (M22).
+
+### WP Gameserver interaktiv ∥ (`apps/core/src/games`, `templates/games`)
+- **Einstellungen als Formular:** `template.json` bekommt `settings[]` (Schlüssel, Typ, Bereich, Beschreibung auf Deutsch, `live: rcon-Befehl | restart`). Minecraft zuerst (`server.properties` + Gamerules: Schwierigkeit, PvP, Sichtweite, Simulationsweite, max. Spieler, MOTD, Whitelist, Spawn-Schutz, keepInventory …), danach Valheim, Satisfactory, Factorio, Palworld nach Bedarf.
+- **Live ändern:** wo möglich sofort über RCON (Gamerules, Whitelist, Schwierigkeit), sonst Markierung „wirkt nach Neustart“ mit Knopf. RCON nur mit fest erlaubten Befehlen pro Vorlage, Werte nach Schema geprüft, kein freier Befehl über diesen Weg.
+- **Automatische Vorschläge (Stufe 1):**
+  - RAM: aus Spielerzahl, TPS und GC-Spitzen der letzten 7 Tage („6 GB reichen, 10 GB belegt“ oder „TPS fällt bei 6 Spielern, auf 8 GB erhöhen“), mit M10-Reserve geprüft.
+  - Schlafzeit: aus der Stunden-Statistik (M12), z. B. „nachts nie Spieler, Schlaf nach 5 statt 15 Min“, plus Zeitplan für Neustart/Backup in die leerste Stunde.
+  - Version: neue Spielversion verfügbar, aber nur vorschlagen, wenn alle installierten Mods dafür eine Version haben (Modrinth).
+  - Mods: Leistungs-Mods für den Loader (Fabric: Lithium, FerriteCore; Paper: eingebaut), Mods ohne Update für die aktuelle Version.
+  - Host: Vergleich der eigenen Server (freier RAM, CPU, Last zur Spielzeit) und der Azure-Größe mit Kosten im Schlafmodus (M22), Umzug über M11.
+- KI-Anteil: „Erklär mir diese Einstellung“, „Stell den Server für 4 Freunde mit Kindern ein“ (Antwort ist ein Satz `game.setSetting`-Vorschläge, die der Admin abhakt).
+
+### WP Gewählte Zusatzpakete ∥ (Auswahl des Admins vom 27.11.2026: Ideen 1, 3, 5, 6, 7)
+- **„Warum?“ an jeder Meldung** (`apps/core/src/ai/explain`): Knopf an jeder WARN/CRIT-Meldung und an fehlgeschlagenen Deploys/CI-Läufen (M25). Kontext: Meldung, Metriken 1 h davor, Docker-Ereignisse, höchstens 200 geschwärzte Log-Zeilen des betroffenen Containers. Vorschau „Was geht raus?“ ist hier Pflicht (Logs). Antwort: wahrscheinliche Ursache, Sicherheit der Einschätzung (sicher/vermutlich/unklar), nächster Schritt als Vorschlag aus `SUGGESTION_ACTIONS`. Ohne Key: Stufe-1-Hinweise (OOM-Kill, Exit-Code, Platte voll, Healthcheck).
+- **Server-Rezept als Datei** (`apps/core/src/recipes`, Schema `api/recipes.ts`): Export aller von der Zentrale angelegten Dinge eines Servers (Apps mit Parametern, Stacks mit Revision, Gameserver mit Einstellungen und Mods, Aufgaben, Selbstheilung, Checks, Prioritäten) als YAML mit Versionsnummer. Secrets kommen nie mit; beim Import werden Passwörter neu erzeugt, Tokens neu abgefragt. Import auf einen anderen Server: Vorschau (was entsteht, RAM, Ports, Architektur), dann Schritt für Schritt wie der Bauplan. Welten und Daten kommen über Backups (M12/M13b), nicht über das Rezept. Optional: Rezepte in ein eigenes GitHub-Repo committen (M25), damit es Versionen gibt.
+- **Wunschliste für Freunde** (`apps/core/src/share/wishes`): neues Benutzerlink-Recht `wish` (Standard aus). Freunde schlagen Mods (Suche in Modrinth über die Zentrale), Einstellungen aus `settings[]` oder ein neues Spiel aus den Vorlagen vor und stimmen mit +1 ab. Freitext max. 280 Zeichen, nur Anzeige (kein HTML), Rate-Limit pro Link, höchstens 20 offene Wünsche pro Gameserver. Admin sieht die Liste im Gameserver-Detail, „Annehmen“ wird zum normalen Vorschlag (Installieren/Einstellen mit Bestätigung), „Ablehnen“ mit optionalem Satz. Freund sieht den Status. Discord-Webhook meldet neue Wünsche, wenn gewünscht. Das Gateway gibt keine anderen Daten preis.
+- **Modpack-Assistent** (`apps/core/src/games/modpacks`): Wunsch als Text („Survival mit Technik und Performance“) oder als Häkchen-Liste (Performance, Technik, Abenteuer, Bauen, Karte, QoL). Ohne KI: kuratierte Bausteine pro Loader/Version. Mit KI: Suchbegriffe → Modrinth-Suche → die KI wählt nur aus den gefundenen Projekten. Danach prüft die Zentrale hart: jede Mod hat eine Version für Spielversion und Loader, Abhängigkeiten werden aufgelöst, bekannte Unverträglichkeiten (`incompatible` aus Modrinth) führen zum Ausschluss. Ergebnis als Liste mit Größe und RAM-Schätzung, Installation erst nach Bestätigung und vorherigem Backup; „In Testwelt probieren“ erst mit Idee 2.
+- **KI in der Befehlspalette** (`apps/web` Palette, `apps/core/src/ai/palette`): Eingaben, die keinem festen Befehl entsprechen, gehen als Frage an die KI (mit Hinweis „KI“ in der Zeile). Antwort kurz, mit höchstens 3 Aktionsknöpfen aus `SUGGESTION_ACTIONS`. Feste Befehle („Starte Minecraft“) erkennt zuerst ein einfacher Parser ohne KI, damit das schnell und kostenlos bleibt.
+
+**Abnahme Zusatzpakete:** „Warum?“ an einer OOM-Meldung eines Sim-Containers nennt OOM und schlägt ein höheres Limit vor; ein Rezept wird exportiert, enthält kein Secret (Test) und legt auf einem zweiten Sim-Server dieselben Apps und Gameserver an; ein Freund mit `wish` schlägt eine Mod vor, ein Link ohne `wish` bekommt 403; der Modpack-Assistent liefert für Fabric 1.21 nur Mods mit passender Version, die Liste installiert sich nach Bestätigung; „warum ist der pi langsam“ in der Palette liefert eine Antwort mit Aktionsknopf, „starte minecraft“ läuft ohne KI-Anfrage. Sicherheitstests: Wunsch-Text wird nie als HTML gerendert und nie in einen Prompt ohne Kennzeichnung als Fremdtext übernommen; Rezept-Import akzeptiert nur das Schema (keine Pfade außerhalb `/opt/homelab`, Compose geht durch die M21-Prüfung); Palette kann keine Aktion ohne Klick ausführen.
+
+### WP Web ∥ (`apps/web`)
+- Seite „Vorschläge“: Liste nach Bereich und Schwere (Form + Text, nie nur Farbe), pro Vorschlag Begründung, Belege, „Anwenden“ (einzige Bernstein-Aktion), „Ausblenden“, „Später“.
+- Vorschläge-Abschnitt im Server-Detail (M16), im Gameserver-Detail neuer Reiter „Einstellungen“ (Formular) und „Vorschläge“, am Stack Reiter „Versionen“.
+- Einstellungen → KI: Anbieter, Modell, Key (Passwortfeld, danach „gesetzt“), Ollama-URL, Budget mit Verbrauch im Monat, Pseudonymisieren, Auto-Analyse, „Was geht raus?“.
+- Neue Komponenten (Vorschlagskarte, Diff-Ansicht) zuerst als Vorschlag in `docs/QUESTIONS.md`, sonst aus `packages/ui`.
+
+## Abnahme
+- Ohne Key: Ein Sim-Server mit Container ohne Limit, `:latest`-Image und offenem Port auf `0.0.0.0` bekommt drei Vorschläge; „Limit setzen“ verlangt die gleiche Bestätigung wie von Hand; nach dem Fix verschwindet der Vorschlag.
+- Mit Anbieter-Attrappe (Test, e2e): Analyse liefert sortierte Vorschläge; eine Antwort mit unbekannter Aktion oder falschem Schema wird verworfen; Budget 100 % schaltet auf Stufe 1.
+- Stack wechselt auf eine neue Revision, ein absichtlich kaputtes Image fällt nach dem Health-Gate auf die alte Revision zurück.
+- Minecraft: Schwierigkeit wird live per RCON geändert, Sichtweite zeigt „wirkt nach Neustart“; RAM- und Schlafvorschlag entstehen aus Sim-Statistik.
+- Bauplan „Vaultwarden + Minecraft für 5“ wird auf dem passenden Sim-Server Schritt für Schritt angelegt.
+
+**Sicherheitstests:** Modul aus = 404; keine Route ohne Session; Key nie in Antwort/Log/Fehler/Export; Kontext enthält nachweislich keine Secrets (Test mit gefälschten Tokens in Env, Labels, Compose); nur feste Anbieter-Hosts, Ollama nur lokal/Tailnet; Prompt-Injection über Containernamen, MOTD oder Release-Notes kann keine Aktion außerhalb `SUGGESTION_ACTIONS` und keine Parameter außerhalb der Schemas auslösen; „Anwenden“ ohne Step-up dort, wo die Hand-Aktion Step-up braucht, wird abgelehnt; RCON nur erlaubte Befehle; Registry-Abfragen nur zu erlaubten Hosts; gespeicherte Revisionen enthalten keine Secrets.
+
+## Reihenfolge beim Bauen
+1. Schema (`packages/shared`), dann parallel Regeln, KI-Kern, Docker-Wechsel, Gameserver-Einstellungen, danach Web, Bauplan zuletzt.
+2. Regeln und Gameserver-Formular bringen schon ohne Key sichtbaren Nutzen und kommen zuerst in den PR.
+
+## Was der Admin liefern muss
+- **Einen API-Key**, erst wenn M24 gemergt ist, eingetragen unter Einstellungen → KI (nie im Chat, nie im Repo). Empfehlung: Anthropic-Key (console.anthropic.com → API Keys) oder OpenAI-Key (platform.openai.com → API keys), beide mit Ausgabenlimit beim Anbieter. Ohne Key laufen die Regel-Vorschläge trotzdem. Kostenlos geht auch Ollama auf einem eigenen Rechner im Tailnet (dann schwächere Vorschläge).
+- Entscheidungen (sonst gelten die Annahmen): Anbieter (Annahme: Anthropic), Monatsbudget (Annahme: 5 €), Server-/Containernamen pseudonymisieren (Annahme: an), tägliche Auto-Analyse (Annahme: aus).
+
+## Weitere Ideen (nach Nutzen sortiert, nicht Teil von M24)
+Ergänzt am 27.11.2026 auf Wunsch des Admins. Bereits gesammelte Ideen aus `docs/OFFENE-FRAGEN-UND-IDEEN.md` sind hier nicht wiederholt. Gewählt am 27.11.2026: 1, 3, 5, 6, 7 (siehe „WP Gewählte Zusatzpakete“). Der Rest bleibt Idee.
+
+| # | Idee | KI? | Nutzen | Aufwand |
+|---|------|-----|--------|---------|
+| 1 | **„Warum?“ an jeder Meldung:** Bei WARN/CRIT erklärt die KI die wahrscheinliche Ursache aus Metriken, Ereignissen und geschwärzten Log-Zeilen (Vorschau, was rausgeht) und schlägt den nächsten Schritt vor. | ja | hoch | mittel |
+| 2 | **Testwelt per Klick:** Gameserver aus dem letzten Backup als Kopie auf freiem Port starten, z. B. um ein Mod- oder Versions-Update zu testen; danach übernehmen oder wegwerfen. | nein | hoch | mittel |
+| 3 | **Server-Rezept als Datei:** alles, was die Zentrale auf einem Server angelegt hat (Apps, Stacks, Gameserver, Aufgaben, Checks), als YAML exportieren und auf einem neuen Server einspielen. Schnellster Neuaufbau und Umzug. | nein | hoch | mittel |
+| 4 | **Spieleabend planen:** „Freitag 20:00, Minecraft“: Server wird vorher geweckt, RAM-Reserve geprüft, Backup gemacht, Discord-Ankündigung, danach wieder Schlaf. | nein | hoch | klein |
+| 5 | **Wunschliste für Freunde:** Über den Benutzerlink schlagen Freunde Mods, Einstellungen oder Spiele vor und stimmen ab; der Admin nimmt an oder lehnt ab. | nein | mittel | klein |
+| 6 | **Modpack-Assistent:** „Survival mit Technik und Performance“ → passende, untereinander kompatible Modrinth-Liste für Version und Loader, Installation per Bestätigung. | ja | mittel | mittel |
+| 7 | **KI-Befehle in der Befehlspalette:** „Starte Minecraft“, „Warum ist der Pi langsam?“, Antwort mit Aktionsknopf (gleiche Regeln wie M24). | ja | mittel | klein (nach M24) |
+| 8 | **Wochenbericht mit Zusammenfassung:** Sonntag eine Push mit dem Wichtigsten der Woche in drei Sätzen plus offenen Vorschlägen. | ja | mittel | klein |
+| 9 | **Drift-Erkennung:** Meldung, wenn ein Stack außerhalb der Zentrale geändert wurde (Compose-Datei oder Image-Digest weicht von der letzten Revision ab), mit „Zurücksetzen“ oder „Als neue Version übernehmen“. | nein | mittel | klein |
+| 10 | **Compose-Importer:** eine Compose-Datei aus dem Internet einfügen, die KI erklärt sie, die Zentrale prüft sie wie im App-Store und macht eine sichere eigene Vorlage daraus. | ja | mittel | mittel |
+| 11 | **Backup-Probe für Gameserver:** einmal pro Woche ein Backup in einem Wegwerf-Container starten und prüfen, ob die Welt lädt; Anzeige „letztes geprüftes Backup vor 3 Tagen“. | nein | mittel | mittel |
+| 12 | **Live-Karte:** BlueMap für Minecraft als Zusatz, Link auch im Benutzerlink für Freunde. | nein | niedrig | klein |
+| 13 | **Log-Muster:** wiederkehrende Fehlermeldungen über alle Container gruppieren („seit gestern 400× dieselbe Zeile in nextcloud“). | teils | niedrig | mittel |

@@ -248,6 +248,46 @@ Wunsch des Admins vom 26.11.2026: Azure-Konto einmal verknüpfen, dann bestellt 
 
 ---
 
+## M24: KI-Vorschläge, schneller Docker-Wechsel, interaktive Gameserver
+Wunsch des Admins vom 27.11.2026. Modul `ai` (Standard aus, Einschalten mit Step-up), anbieterneutral (Anthropic, OpenAI, Ollama im Tailnet). Feste Regeln liefern Vorschläge auch ohne Key, das Sprachmodell sortiert und erklärt nur. Vorschläge sind nie Aktionen: „Anwenden“ ruft nur Aktionen aus `SUGGESTION_ACTIONS` über bestehende Routen mit deren Step-up auf. Dazu Stack-Versionen mit Wechsel und automatischem Rollback, Bauplan-Assistent für neue Server, Gameserver-Einstellungen als Formular mit Live-Änderung per RCON und automatische Vorschläge für RAM, Schlafzeit, Version, Mods und Host (inkl. Azure). Voraussetzung: M23 und M11b gemergt. Arbeitspakete, Abnahme und Sicherheitstests: `docs/M24-KI-PLAN.md`.
+
+---
+
+## M25: GitHub-Ausbau
+Wunsch des Admins vom 27.11.2026. Modul `github` bleibt optional. Lesen ist Standard, Schreiben wird pro Repo mit Step-up freigeschaltet, der Client ruft nur Aufrufe aus `GITHUB_CALLS` auf (nie Repos/Secrets/Rechte ändern, Branches nur unter `hz/`). Rechte-Bericht des Tokens, PR-Übersicht mit Mergen, Actions mit Logs/Re-run/Workflow starten, Preview-Deploys pro PR, Releases mit Rollback, Deploy-Status nach GitHub, Update-PRs für Images, Meldung als Issue, Sicherheitsfunde, adaptives Polling statt Webhooks. Arbeitspakete, Token-Empfehlung, Abnahme und Sicherheitstests: `docs/M25-GITHUB-PLAN.md`.
+
+---
+
+## M26: Freunde-Zugang mit einem Klick
+Wunsch des Admins vom 27.11.2026. Assistent „Freunde-Zugang einrichten“ richtet das Share-Gateway selbst ein: Weg A (empfohlen) als eigener Tailscale-Knoten mit Funnel nur für das Gateway (keine Ports, keine Domain), Weg B auf einem Server mit öffentlicher IP über den Agent (`share.install`, feste Compose mit Caddy, DNS über M20, Host-Firewall, optional Oracle-Security-List per OCI-Schlüssel). Dazu „Freunde“: ein persönlicher Link pro Freund für mehrere Gameserver, Einladen per Kopieren/QR/Teilen/Discord, Whitelist aus dem Minecraft-Namen. Core und Agent bleiben nie öffentlich. Details: `docs/M26-FREUNDE-ZUGANG-PLAN.md`.
+
+---
+
+## M27: Gameserver Plus
+Wunsch des Admins vom 27.11.2026. Forge/NeoForge und Ein-Klick-Profile pro Spiel, Modpacks aus Modrinth (`.mrpack`) und CurseForge (eigener API-Key), mehrere Welten pro Server mit Wechsel und ZIP für Freunde, Live-Konsole für Freunde nur mit Befehls-Allowlist, Auto-Skalierung auf eine größere Azure-VM ohne Spieler online und mit gleicher Relay-Adresse. Details: `docs/M27-M28-PLAN.md`.
+
+---
+
+## M28: Projekte hosten
+Wunsch des Admins vom 27.11.2026. Repo-Link einfügen → die Zentrale erkennt Compose, Dockerfile, Node, Python oder statisch, baut auf dem Zielserver und startet; Subdomain mit HTTPS (Standard nur im Tailnet, öffentlich nur mit Step-up), Push to deploy mit Health-Gate und Rollback, Variablen und verschlüsselte Secrets pro Projekt, Logs und Neustart pro Projekt. Details: `docs/M27-M28-PLAN.md`.
+
+---
+
+## M29: App-Store 2.0 mit Suche
+Wunsch des Admins vom 27.11.2026. Rund 80 eingebaute Apps in Kategorien, Suche (deutsch/englisch, tippfehlertolerant) und Filter (Architektur, RAM, installiert), Bundles, optionale Ausnahmen pro Vorlage mit Step-up (nie Docker-Socket oder privileged), optionaler Import von CasaOS-/Umbrel-Katalogen durch dieselbe Prüfung, Backup und Rollback pro App. Details: `docs/M29-APPSTORE-PLAN.md`.
+
+---
+
+## M30: 3D-Drucker Bambu Lab
+Wunsch des Admins vom 27.11.2026. Modul `printer` (Standard aus): Anbindung im LAN über den Agent (MQTT/FTPS, Zertifikat festgenagelt) oder über Home Assistant, Kachel mit Status, Fortschritt, Restzeit, Temperaturen, AMS und Kamera (auch Wandmodus), Push bei Fertig/Fehler, Pause/Fortsetzen/Licht, Abbrechen und Drucken mit Step-up, Datei-Upload, Verlauf. Details: `docs/M30-BAMBU-PLAN.md`.
+
+---
+
+## M31: Tür und Gegensprechanlage
+Wunsch des Admins vom 27.11.2026 (BTicino Classe 100X mit WLAN plus zweite Station ohne WLAN). Modul `door` über Home Assistant (Rückfall: Shelly am Türkontakt): Klingeln als Push mit Bild, Wandkachel und Echo-Ansage, Öffnen nur mit Bestätigung und Step-up, Wandgerät nur mit ausdrücklicher Freigabe, „Tür öffnen?“-Push bei Ankunft (nie automatisch), Verlauf mit Bildern. Details: `docs/M31-TUER-PLAN.md`.
+
+---
+
 ## Definition of Done (für jeden PR)
 - Code, Tests und Doku sind aktuell (`docs/` mitpflegen, wenn sich etwas ändert)
 - Keine `any`, keine auskommentierten Blöcke, keine TODOs ohne Issue
