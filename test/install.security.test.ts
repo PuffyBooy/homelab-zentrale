@@ -68,6 +68,10 @@ exit 0
 
 const STUB_CURL = `#!/usr/bin/env bash
 printf 'curl %s\\n' "$*" >>"$STUB_LOG"
+if [[ "\${STUB_TLS_FAIL:-0}" == 1 && "$*" == *https://* ]]; then
+  echo "curl: (60) SSL: no alternative certificate subject name matches target host name 'heimserver.tail1234.ts.net'" >&2
+  printf 000; exit 60
+fi
 for a in "$@"; do [[ "$a" == "-w" ]] && { printf 200; exit 0; }; done
 echo '{"ok":true}'
 `;
@@ -118,6 +122,7 @@ function run(args: string[], extra: Record<string, string> = {}, opts: { bash?: 
       HZ_SHARE_CONF_DIR: env.share,
       HZ_CADDY_FILE: join(env.dir, 'Caddyfile'),
       HZ_HEALTH_TIMEOUT: '4',
+      HZ_TLS_TIMEOUT: '3',
       STUB_LOG: env.log,
       ...extra,
     },
@@ -169,6 +174,39 @@ describe('deploy/install.sh (core)', () => {
     expect(r.calls).toContain('tailscale serve --bg --https=443 http://127.0.0.1:8080');
     expect(r.calls).not.toMatch(/tailscale funnel(?! --https=443 off)/);
     expect(r.calls).not.toContain('funnel --https=443 on');
+  });
+
+  it('checks the ts.net certificate after tailscale serve', () => {
+    const r = run(['--yes', '--timezone', 'UTC']);
+    expect(r.code, r.out).toBe(0);
+    expect(r.calls).toContain('https://heimserver.tail1234.ts.net/api/health');
+    expect(r.out).toContain('gültiges Zertifikat');
+  });
+
+  it('wrong certificate on 443: names the other listener and the certificate seen', () => {
+    for (const [name, body] of [
+      [
+        'ss',
+        `#!/bin/sh\necho 'LISTEN 0 511 0.0.0.0:443 0.0.0.0:* users:(("nginx",pid=812,fd=6))'\n`,
+      ],
+      ['getent', '#!/bin/sh\necho "100.64.0.9 heimserver.tail1234.ts.net"\n'],
+      [
+        'openssl',
+        // Only the certificate probe is stubbed; the key generation uses the real one.
+        '#!/bin/sh\ncase "$1" in\n  s_client) echo cert ;;\n  x509) cat >/dev/null; echo "subject=CN = nas.local" ;;\n  *) exec /usr/bin/openssl "$@" ;;\nesac\n',
+      ],
+    ] as const) {
+      writeFileSync(join(env.bin, name), body);
+      chmodSync(join(env.bin, name), 0o755);
+    }
+    const r = run(['--yes', '--timezone', 'UTC'], { STUB_TLS_FAIL: '1' });
+    // The core runs; the install finishes with a clear warning instead of failing.
+    expect(r.code, r.out).toBe(0);
+    expect(r.out).toContain('nicht mit gültigem Zertifikat');
+    expect(r.out).toContain('no alternative certificate subject name');
+    expect(r.out).toContain('nginx');
+    expect(r.out).toContain('CN = nas.local');
+    expect(r.out).toContain('HTTPS Certificates');
   });
 
   it('turns an existing funnel off', () => {

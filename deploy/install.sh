@@ -55,6 +55,7 @@ if [[ "${HZ_INSTALL_ALLOW_NONROOT:-0}" == 1 ]]; then
   CADDY_FILE="${HZ_CADDY_FILE:-$CADDY_FILE}"
 fi
 HEALTH_TIMEOUT="${HZ_HEALTH_TIMEOUT:-90}"
+TLS_TIMEOUT="${HZ_TLS_TIMEOUT:-90}"
 
 CORE_ENV="$CONF_DIR/core.env"
 CORE_COMPOSE="$CONF_DIR/docker-compose.yml"
@@ -440,6 +441,7 @@ setup_serve() {
     return 0
   fi
   no_funnel
+  warn_foreign_443 || true
   if ! timeout 180 tailscale serve --bg --https=443 "$CORE_URL_LOCAL"; then
     warn "tailscale serve ist fehlgeschlagen. Meist sind HTTPS-Zertifikate im Tailnet aus:"
     warn "https://login.tailscale.com/admin/dns -> HTTPS Certificates aktivieren, dann das Skript erneut ausführen."
@@ -447,6 +449,64 @@ setup_serve() {
   fi
   no_funnel
   ok "https://$1 -> $CORE_URL_LOCAL (nur im Tailnet)"
+  verify_serve_tls "$1" || true
+}
+
+# Another service on 0.0.0.0:443 (nginx, Caddy, a NAS UI ...) takes the tailnet IPv4
+# address too; tailscaled then gets only IPv6 and other servers see that service's
+# certificate. Returns 0 when one was found.
+warn_foreign_443() {
+  local others=""
+  command -v ss >/dev/null 2>&1 || return 1
+  others="$(ss -ltnpH 'sport = :443' 2>/dev/null | grep -v tailscaled || true)"
+  [[ -n "$others" ]] || return 1
+  warn "Auf Port 443 hört noch ein anderer Dienst und fängt Anfragen aus dem Tailnet ab:"
+  printf '%s\n' "$others" | awk '{print "      " $4 "  " $6}' >&2
+  info "Diesen Dienst nur an die LAN-IP binden (z. B. nginx: listen 192.168.1.10:443 ssl;)"
+  info "oder abschalten (sudo systemctl disable --now nginx), dann: sudo systemctl restart tailscaled"
+  return 0
+}
+
+# verify_serve_tls <host>: the ts.net name answers with a valid certificate for itself.
+# Agents enroll with `curl https://<host>/install.sh`, so a wrong certificate breaks them.
+# The first request makes tailscaled fetch the certificate (Let's Encrypt), which can take
+# up to a minute.
+verify_serve_tls() {
+  local host="$1" i out=""
+  for ((i = 0; i < TLS_TIMEOUT; i += 3)); do
+    out="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 20 "https://$host/api/health" 2>&1 || true)"
+    if [[ "$out" == 200 ]]; then
+      ok "https://$host hat ein gültiges Zertifikat"
+      return 0
+    fi
+    # A wrong certificate does not fix itself by waiting.
+    case "$out" in *"subject name"* | *"self-signed"* | *"self signed"*) break ;; esac
+    sleep 3
+  done
+  warn "https://$host antwortet nicht mit gültigem Zertifikat:"
+  printf '%s\n' "$out" | grep -v '^[0-9]*$' | tail -n 1 | sed 's/^/      /' >&2
+  explain_tls "$host"
+  return 1
+}
+
+# Why the tailnet name does not answer with its own certificate, as far as this host tells.
+explain_tls() {
+  local host="$1" names="" resolved="" tsip=""
+  warn_foreign_443 || true
+  if command -v openssl >/dev/null 2>&1; then
+    names="$(timeout 15 openssl s_client -connect "$host:443" -servername "$host" </dev/null 2>/dev/null |
+      openssl x509 -noout -subject -ext subjectAltName 2>/dev/null | tr '\n' ' ' || true)"
+    if [[ -n "$names" ]]; then info "Zertifikat dort: $names"; fi
+  fi
+  resolved="$(getent hosts "$host" 2>/dev/null | awk '{print $1; exit}' || true)"
+  tsip="$(tailscale ip -4 2>/dev/null | head -n 1 || true)"
+  if [[ -z "$resolved" ]]; then
+    info "$host lässt sich hier nicht auflösen: MagicDNS ist aus (https://login.tailscale.com/admin/dns)."
+  elif [[ -n "$tsip" && "$resolved" != "$tsip" ]]; then
+    info "$host zeigt auf $resolved, die Tailscale-IP dieses Servers ist $tsip."
+  fi
+  info "In https://login.tailscale.com/admin/dns müssen MagicDNS und HTTPS Certificates an sein."
+  info "Danach erneut prüfen: sudo $0 status"
 }
 
 wait_health() { # wait_health <url> <seconds>
@@ -737,10 +797,8 @@ core_install() {
   start_core
   local base
   base="$(env_get "$CORE_ENV" HZ_BASE_URL)"
+  # Includes the certificate check of the tailnet name (verify_serve_tls).
   setup_serve "${base#https://}"
-  if [[ $serve -eq 1 ]] && ! wait_health "$base" 20; then
-    warn "$base antwortet noch nicht. Das erste Zertifikat kann eine Minute dauern."
-  fi
   show_first_login "$base"
   remind_secret_key
   if [[ $interactive -eq 1 ]] && confirm "Share-Gateway für Freunde ohne Tailscale geplant (öffentlicher Server, optional)?" n; then
@@ -789,6 +847,7 @@ core_status() {
   if command -v tailscale >/dev/null 2>&1; then
     tailscale serve status || true
     no_funnel
+    if [[ "$base" =~ ^https://(.+)$ ]]; then TLS_TIMEOUT=3 verify_serve_tls "${BASH_REMATCH[1]}" || true; fi
   else
     warn "tailscale fehlt"
   fi

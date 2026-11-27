@@ -85,6 +85,8 @@ sudo ./deploy/install.sh               # Schlüssel und Einstellungen bleiben
 
 Den Snap entfernt das Skript nur nach ausdrücklichem „j“, nie mit `--yes`. `--purge` löscht dabei alles im Snap-Docker, auch Volumes anderer Container (z. B. eines Agents). Lässt sich die Ursache nicht beheben (LXC), startet das Skript ohne `no-new-privileges`, aber nur nach ausdrücklichem „j“ oder mit `--allow-no-nnp` (`--yes` allein bricht ab); Benutzer `node`, keine Capabilities, schreibgeschütztes Dateisystem und `127.0.0.1` bleiben. Jedes `update` prüft erneut und schaltet die Option wieder ein, sobald der Host es erlaubt. Der Agent (`install-agent.sh`) prüft das noch nicht; auf so einem Host den Snap entfernen.
 
+**`curl: (60) SSL: no alternative certificate subject name matches …ts.net` beim Einzeiler eines Agents:** Auf dem Server der Zentrale hört ein anderer Dienst auf `0.0.0.0:443` (z. B. nginx). Dann bekommt `tailscale serve` nur IPv6, und andere Server landen bei diesem Dienst und seinem Zertifikat. Das Skript prüft nach `tailscale serve` das Zertifikat und nennt den Dienst. Beheben: `sudo ss -ltnp | grep ':443 '`, den Dienst nur an die LAN-IP binden (nginx: `listen 192.168.1.10:443 ssl;`) oder abschalten (`sudo systemctl disable --now nginx`), dann `sudo systemctl restart tailscaled`. `sudo ./deploy/install.sh status` prüft erneut.
+
 ## Was das Skript nie tut
 
 - `tailscale funnel` einschalten, eine Portweiterleitung anlegen oder den Core auf etwas anderes als `127.0.0.1` binden.
