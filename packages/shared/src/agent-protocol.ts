@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { backupTargetRpcParams } from './agent-backup-target.js';
 import { opsRpcParams } from './agent-ops.js';
+import { automationRpcParams } from './agent-automation.js';
 
 /**
  * Agent <-> core protocol (docs/ARCHITECTURE.md, "Agent-Protokoll").
@@ -116,6 +117,8 @@ export const helloSchema = z.strictObject({
     /** HZ_AGENT_ALLOW_TERMINAL=1 on this server. */
     terminal: z.boolean(),
     docker: z.boolean(),
+    /** M20: HZ_AGENT_ALLOW_TASKS=1 on this server (scheduled commands, task.exec). */
+    tasks: z.boolean().optional(),
     /** M15: HZ_AGENT_ALLOW_RELAY=1 on this server (game relay ingress). Missing on old agents. */
     relay: z.boolean().optional(),
   }),
@@ -1201,6 +1204,8 @@ export const rpcParamsByAction = {
   'pty.input': z.strictObject({ streamId: streamIdSchema, data: z.string().max(16 * 1024) }),
   'pty.resize': z.strictObject({ streamId: streamIdSchema, ...ptySize }),
   'pty.close': z.strictObject({ streamId: streamIdSchema }),
+  /** M20/M21: task.exec, speedtest.run, cert.write, cert.remove, app.remove. */
+  ...automationRpcParams,
 
   // M16 Server-Verwaltung ----------------------------------------------------
   /**

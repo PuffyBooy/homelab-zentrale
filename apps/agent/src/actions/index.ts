@@ -10,6 +10,8 @@ import {
   type RpcResult,
 } from '@hz/shared';
 import { resolveHomelabPath } from '../paths.js';
+import { appRemove } from './app-remove.js';
+import { certRemove, certWrite } from './certs.js';
 import { checkHttp, checkPing, checkTcp } from './checks.js';
 import { composeDown, composePull, composeUp, composeWrite } from './compose.js';
 import { containerRestart, containerStart, containerStop } from './container.js';
@@ -34,6 +36,7 @@ import { gameRcon, gameStatus } from './games.js';
 import { relaySet } from './relay.js';
 import { ptyClose, ptyInput, ptyOpen, ptyResize } from './pty.js';
 import { cleanup, cleanupPreview } from './system-cleanup.js';
+import { speedtestRun } from './speedtest.js';
 import { systemReboot } from './system-reboot.js';
 import { systemDockerDf } from './system-docker-df.js';
 import { systemDu } from './system-du.js';
@@ -43,6 +46,7 @@ import { systemShutdown } from './system-shutdown.js';
 import { systemUpgrade } from './system-upgrade.js';
 import { updateApply, updateCheck } from './update.js';
 import { wolSend } from './wol-send.js';
+import { taskExec } from './task-exec.js';
 import {
   ActionError,
   type ActionContext,
@@ -107,6 +111,11 @@ export const handlers: ActionHandlers = {
   'image.scan': (p, ctx) => imageScan(p, ctx),
   'fail2ban.status': (p, ctx) => fail2banStatus(p, ctx),
   'fail2ban.unban': (p, ctx) => fail2banUnban(p, ctx),
+  'task.exec': taskExec,
+  'speedtest.run': speedtestRun,
+  'cert.write': certWrite,
+  'cert.remove': certRemove,
+  'app.remove': appRemove,
   'backup.target.status': (p, ctx) => backupTargetStatus(p, ctx),
   'backup.target.sync': (p, ctx) => backupTargetSync(p, ctx),
   'backup.target.store': (p, ctx, id) => backupTargetStore(p, ctx, id),

@@ -4,9 +4,11 @@ import { api } from './api.js';
 
 /**
  * Optional modules (decision 2026-11-26): github, homeassistant, games, the M14
- * Anbindungen proxmox, dnsfilter, fritzbox, uptimekuma, storage (M13) and the M18
- * operations modules (api/ops.ts) and cloud (M22, api/cloud.ts). Their nav items, overview tiles, palette entries and
- * settings tiles are hidden while switched off.
+ * Anbindungen proxmox, dnsfilter, fritzbox, uptimekuma, storage (M13), the M18
+ * operations modules (api/ops.ts), tasks, selfheal, speedtest, domains (M20), apps (M21)
+ * and cloud (M22, api/cloud.ts). Their nav items, overview tiles, palette entries and
+ * settings tiles are hidden while switched off. A page that belongs to several modules
+ * (Automatik, Internet, Sicherheit, Netzwerk) stays visible while at least one of them is on.
  */
 
 export const modulesKey = ['settings', 'modules'] as const;
@@ -29,6 +31,11 @@ export const ALL_MODULES_ON: Modules = {
   fail2ban: false,
   discordbot: false,
   voice: false,
+  tasks: true,
+  selfheal: true,
+  speedtest: true,
+  domains: true,
+  apps: true,
   cloud: false,
 };
 
@@ -46,6 +53,11 @@ export const MODULE_LABEL: Record<ModuleId, string> = {
   fail2ban: 'Fail2ban',
   discordbot: 'Discord-Bot',
   voice: 'Sprachsteuerung',
+  tasks: 'Geplante Aufgaben',
+  selfheal: 'Selbstheilung',
+  speedtest: 'Speedtest',
+  domains: 'Domains und Zertifikate',
+  apps: 'App-Store',
   cloud: 'Cloud-Server',
 };
 
@@ -64,6 +76,14 @@ export const MODULE_HINT: Record<ModuleId, string> = {
   fail2ban: 'Gesperrte IPs pro Server sehen und entsperren',
   discordbot: 'Freunde starten Gameserver mit /start, mit den Rechten ihres Benutzerlinks',
   voice: 'Echo Show und Alexa über Home Assistant',
+  tasks:
+    'Container neu starten, Stacks aktualisieren, Docker aufräumen nach Zeitplan. Befehle nur auf Servern mit Agent --tasks.',
+  selfheal:
+    'Startet hängende Container neu (unhealthy, Absturz, Website DOWN), höchstens 3-mal in 30 Min.',
+  speedtest:
+    'Misst Download, Upload und Ping gegen speed.cloudflare.com. Jede Messung verbraucht Datenvolumen.',
+  domains: 'DNS-Einträge bei Cloudflare oder DuckDNS und Let’s-Encrypt-Zertifikate.',
+  apps: 'Jellyfin, Nextcloud, Vaultwarden und Co. aus Vorlagen auf einem Server installieren.',
   cloud: 'Server bei Azure bestellen, die nur laufen, solange gespielt wird. Kostet Geld.',
 };
 
@@ -82,6 +102,11 @@ export const MODULE_PAGE: Record<ModuleId, string> = {
   fail2ban: 'Sicherheit',
   discordbot: 'Einstellungen',
   voice: 'Einstellungen',
+  tasks: 'Automatik',
+  selfheal: 'Automatik',
+  speedtest: 'Internet',
+  domains: 'Internet',
+  apps: 'Apps',
   cloud: 'Cloud',
 };
 
@@ -99,6 +124,11 @@ export const MODULE_ICON: Record<ModuleId, IconName> = {
   fail2ban: 'lock',
   discordbot: 'users',
   voice: 'home',
+  tasks: 'refresh',
+  selfheal: 'refresh',
+  speedtest: 'wifi',
+  domains: 'wifi',
+  apps: 'cloud',
   cloud: 'cloud',
 };
 
@@ -114,29 +144,39 @@ const NAV_MODULES: Record<string, readonly ModuleId[]> = {
   security: ['vulnscan', 'fail2ban'],
   vms: ['proxmox'],
   network: ['fritzbox', 'dnsfilter'],
+  apps: ['apps'],
+  internet: ['speedtest', 'domains'],
+  automation: ['tasks', 'selfheal'],
+  cloud: ['cloud'],
+};
+
+/** First path segment -> modules behind the page ("Netzwerk" gates itself, isNetworkOn). */
+const PATH_MODULES: Record<string, readonly ModuleId[]> = {
+  github: ['github'],
+  home: ['homeassistant'],
+  games: ['games'],
+  vms: ['proxmox'],
+  logs: ['logsearch'],
+  security: ['vulnscan', 'fail2ban'],
+  apps: ['apps'],
+  internet: ['speedtest', 'domains'],
+  automation: ['tasks', 'selfheal'],
   cloud: ['cloud'],
 };
 
 /** First module of a nav item, if any. */
 export function navModule(navId: string): ModuleId | undefined {
-  return NAV_MODULES[navId]?.[0];
+  return navModules(navId)[0];
 }
 
 export function navModules(navId: string): readonly ModuleId[] {
-  return NAV_MODULES[navId] ?? [];
+  return Object.hasOwn(NAV_MODULES, navId) ? (NAV_MODULES[navId] ?? []) : [];
 }
 
-/** All modules behind a path (`/github/…`, `/home`, `/games/…`, `/vms`, `/logs`, `/security`, `/cloud`). */
+/** All modules behind a path (`/github/…`, `/vms`, `/security`, `/automation`, `/cloud` …). */
 export function modulesOfPath(pathname: string): readonly ModuleId[] {
   const first = pathname.split('/')[1] ?? '';
-  if (first === 'github') return ['github'];
-  if (first === 'home') return ['homeassistant'];
-  if (first === 'games') return ['games'];
-  if (first === 'vms') return ['proxmox'];
-  if (first === 'logs') return ['logsearch'];
-  if (first === 'security') return ['vulnscan', 'fail2ban'];
-  if (first === 'cloud') return ['cloud'];
-  return [];
+  return Object.hasOwn(PATH_MODULES, first) ? (PATH_MODULES[first] ?? []) : [];
 }
 
 /** Module that owns a path, if any (the first one for pages shared by two modules). */
@@ -176,8 +216,8 @@ export function fetchModules(signal?: AbortSignal): Promise<Modules> {
 }
 
 /**
- * Step-up when switching GitHub, Home Assistant, Discord-Bot, Sprachsteuerung or Cloud on
- * (MODULES_ENABLE_STEP_UP); api() asks and retries.
+ * Step-up when switching GitHub, Home Assistant, Discord-Bot, Sprachsteuerung, tasks,
+ * domains or Cloud on (MODULES_ENABLE_STEP_UP); api() asks and retries.
  */
 export function saveModules(body: Partial<Modules>): Promise<Modules> {
   return api('/api/settings/modules', {

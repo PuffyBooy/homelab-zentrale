@@ -82,6 +82,12 @@ describe('agent protocol allowlist', () => {
         'backup.target.sync',
         'backup.target.store',
         'wol.send',
+        // M20/M21 (agent-automation.ts)
+        'task.exec',
+        'speedtest.run',
+        'cert.write',
+        'cert.remove',
+        'app.remove',
       ].sort(),
     );
   });

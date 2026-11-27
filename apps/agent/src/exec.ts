@@ -1,4 +1,5 @@
-import { execFile, spawn } from 'node:child_process';
+import { execFile, spawn, type ChildProcessByStdio } from 'node:child_process';
+import type { Readable } from 'node:stream';
 import path from 'node:path';
 
 /**
@@ -292,6 +293,30 @@ export type Spawner = (
 /** How long the pipes may stay open after the child exited. */
 const PIPE_DRAIN_MS = 2000;
 
+type PipedChild = ChildProcessByStdio<null, Readable, Readable>;
+
+/**
+ * The single spawn call of the agent: argument array, no shell, stdin closed, own
+ * process group, so a timeout or cancel also kills grandchildren (deploy.sh ->
+ * sleep/compose, git -> ssh/git-remote-https, task commands -> their children).
+ */
+function startChild(
+  file: string,
+  args: readonly string[],
+  opts: { cwd: string | undefined; env: Record<string, string> },
+): PipedChild {
+  // Callers checked the program (allowlist, deploy script or task shell shape).
+  // nosemgrep
+  return spawn(file, [...args], {
+    shell: false,
+    cwd: opts.cwd,
+    env: opts.env,
+    windowsHide: true,
+    stdio: ['ignore', 'pipe', 'pipe'],
+    detached: true,
+  });
+}
+
 function spawnChecked(
   programs: ReadonlySet<string>,
   file: string,
@@ -307,18 +332,7 @@ function spawnChecked(
   const env = childEnv(opts.env);
   const timeout = opts.timeoutMs ?? 30_000;
   const maxOutput = opts.maxOutputBytes ?? 64 * 1024 * 1024;
-  // The streaming wrapper: allowlisted program, argument array, no shell.
-  // nosemgrep
-  const child = spawn(file, [...args], {
-    shell: false,
-    cwd: opts.cwd,
-    env,
-    windowsHide: true,
-    stdio: ['ignore', 'pipe', 'pipe'],
-    // Own process group, so a timeout or cancel also kills grandchildren
-    // (deploy.sh -> sleep/compose, git -> ssh/git-remote-https).
-    detached: true,
-  });
+  const child = startChild(file, args, { cwd: opts.cwd, env });
   let reason: SpawnResult['error'];
   let total = 0;
   const kill = (why: NonNullable<SpawnResult['error']>) => {
@@ -386,4 +400,60 @@ export const spawnFile: Spawner = (file, args, cb, opts = {}) =>
 export function makeSpawner(programs: ReadonlySet<string>): Spawner {
   const frozen = new Set(programs);
   return (file, args, cb, opts = {}) => spawnChecked(frozen, file, args, cb, opts);
+}
+
+// ---------------------------------------------------------------------------
+// task.exec (actions/task-exec.ts): the admin's scheduled command on the host.
+
+/**
+ * The task shell. Like the deploy script it is NOT in PROGRAMS (runFile('sh', ...)
+ * stays refused); spawnTaskShell only allows exactly these two shapes:
+ *   /bin/sh -c <command>                                         (direct)
+ *   nsenter --target 1 --mount --uts --ipc --net --pid --cgroup --wd=<abs> -- /bin/sh -c <command>
+ * The command is one argument; the agent never builds a command string itself.
+ */
+export const TASK_SHELL = '/bin/sh';
+
+/** Environment of a task command. Fixed values only, nothing from the agent's own env. */
+export const TASK_ENV: Readonly<Record<string, string>> = Object.freeze({
+  PATH: CHILD_ENV.PATH ?? '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin',
+  HOME: '/root',
+  LANG: 'C.UTF-8',
+});
+
+export const TASK_NSENTER_ARGS = [
+  '--target',
+  '1',
+  '--mount',
+  '--uts',
+  '--ipc',
+  '--net',
+  '--pid',
+  '--cgroup',
+] as const;
+
+export function isTaskShellCall(file: string, args: readonly string[]): boolean {
+  if (args.some((a) => typeof a !== 'string' || a.includes('\0'))) return false;
+  if (file === TASK_SHELL) return args.length === 2 && args[0] === '-c';
+  if (file !== 'nsenter' || args.length !== TASK_NSENTER_ARGS.length + 5) return false;
+  const n = TASK_NSENTER_ARGS.length;
+  const wd = args[n] ?? '';
+  return (
+    TASK_NSENTER_ARGS.every((a, i) => args[i] === a) &&
+    wd.startsWith('--wd=/') &&
+    path.normalize(wd.slice(5)) === wd.slice(5) &&
+    args[n + 1] === '--' &&
+    args[n + 2] === TASK_SHELL &&
+    args[n + 3] === '-c'
+  );
+}
+
+export type TaskChild = PipedChild;
+
+/** Starts a task command (shape checked) with TASK_ENV only. */
+export function spawnTaskShell(file: string, args: readonly string[], cwd: string): TaskChild {
+  if (!isTaskShellCall(file, args)) throw new ExecPolicyError('not a task shell call');
+  if (!path.isAbsolute(cwd) || cwd.includes('\0'))
+    throw new ExecPolicyError('cwd must be absolute');
+  return startChild(file, args, { cwd, env: { ...TASK_ENV } });
 }

@@ -24,6 +24,11 @@ export const MODULES = [
   'fail2ban',
   'discordbot',
   'voice',
+  'tasks',
+  'selfheal',
+  'speedtest',
+  'domains',
+  'apps',
   'cloud',
 ] as const;
 export const moduleIdSchema = z.enum(MODULES);
@@ -46,6 +51,16 @@ export const modulesSchema = z.strictObject({
   fail2ban: z.boolean(),
   discordbot: z.boolean(),
   voice: z.boolean(),
+  /** M20: Geplante Aufgaben pro Server (api/tasks.ts). */
+  tasks: z.boolean(),
+  /** M20: Selbstheilung hängender Container (api/selfheal.ts). */
+  selfheal: z.boolean(),
+  /** M20: Speedtest-Verlauf (api/speedtest.ts). */
+  speedtest: z.boolean(),
+  /** M20: Domains, DNS und Zertifikate (api/domains.ts). */
+  domains: z.boolean(),
+  /** M21: App-Store und Stack-Vorlagen (api/apps.ts). */
+  apps: z.boolean(),
   /** M22 Cloud-Server (api/cloud.ts): orders VMs at a cloud provider (Azure), off by default. */
   cloud: z.boolean(),
 });
@@ -65,6 +80,11 @@ export const MODULE_DEFAULTS: Modules = {
   fail2ban: false,
   discordbot: false,
   voice: false,
+  tasks: false,
+  selfheal: false,
+  speedtest: false,
+  domains: false,
+  apps: false,
   cloud: false,
 };
 
@@ -79,6 +99,9 @@ export const MODULES_ENABLE_STEP_UP: readonly ModuleId[] = [
   // Control from outside the hub (Discord, Home Assistant / Alexa).
   'discordbot',
   'voice',
+  // M20: tasks can run shell commands; domains holds DNS tokens.
+  'tasks',
+  'domains',
   // Orders VMs that cost money with the admin's cloud credentials.
   'cloud',
 ];

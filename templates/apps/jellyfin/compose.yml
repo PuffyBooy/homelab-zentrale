@@ -1,0 +1,13 @@
+# Jellyfin (templates/apps/README.md). Rendered by the core; values come from .env.
+services:
+  jellyfin:
+    image: jellyfin/jellyfin:10.11.11
+    restart: unless-stopped
+    environment:
+      TZ: ${TZ}
+    ports:
+      - '${BIND}:${WEB_PORT}:8096'
+    volumes:
+      - ./data/config:/config
+      - ./data/cache:/cache
+      - ./data/media:/media

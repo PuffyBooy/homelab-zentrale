@@ -1,0 +1,72 @@
+{
+  "id": "nextcloud",
+  "name": "Nextcloud",
+  "description": "Eigene Cloud für Dateien, Kalender und Kontakte, mit MariaDB als Datenbank und Redis als Cache.",
+  "category": "dateien",
+  "version": "35.0.3",
+  "website": "https://nextcloud.com",
+  "arch": [
+    "amd64",
+    "arm64"
+  ],
+  "minRamMb": 1536,
+  "params": [
+    {
+      "type": "port",
+      "key": "WEB_PORT",
+      "label": "Web-Oberfläche (Port)",
+      "default": 8180,
+      "protocol": "tcp",
+      "web": true
+    },
+    {
+      "type": "string",
+      "key": "ADMIN_USER",
+      "label": "Admin-Benutzername",
+      "default": "admin",
+      "required": true,
+      "pattern": "^[A-Za-z0-9._-]{1,64}$"
+    },
+    {
+      "type": "password",
+      "key": "ADMIN_PASSWORD",
+      "label": "Admin-Passwort",
+      "generate": true,
+      "minLength": 12
+    },
+    {
+      "type": "string",
+      "key": "TRUSTED_DOMAINS",
+      "label": "Vertrauenswürdige Adressen (mit Leerzeichen getrennt)",
+      "default": "localhost",
+      "required": true,
+      "pattern": "^[A-Za-z0-9.:-]+( [A-Za-z0-9.:-]+){0,9}$"
+    },
+    {
+      "type": "password",
+      "key": "DB_PASSWORD",
+      "label": "Datenbank-Passwort",
+      "generate": true,
+      "minLength": 16
+    },
+    {
+      "type": "password",
+      "key": "DB_ROOT_PASSWORD",
+      "label": "Datenbank-Root-Passwort",
+      "generate": true,
+      "minLength": 16
+    },
+    {
+      "type": "password",
+      "key": "REDIS_PASSWORD",
+      "label": "Redis-Passwort",
+      "generate": true,
+      "minLength": 16
+    }
+  ],
+  "hints": [
+    "Trusted Domains: Nextcloud antwortet nur unter den eingetragenen Adressen. Trag den Tailnet-Namen oder die IP des Servers ein (ohne http:// und ohne Port).",
+    "Für HTTPS per tailscale serve oder Reverse-Proxy danach in config.php overwriteprotocol auf https setzen.",
+    "Der erste Start richtet die Datenbank ein und dauert ein paar Minuten."
+  ]
+}

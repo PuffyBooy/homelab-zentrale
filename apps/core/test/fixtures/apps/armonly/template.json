@@ -1,0 +1,12 @@
+{
+  "id": "armonly",
+  "name": "Nur ARM",
+  "description": "Läuft nur auf arm64 (Test).",
+  "category": "werkzeuge",
+  "version": "1.0",
+  "arch": ["arm64"],
+  "minRamMb": 64,
+  "params": [
+    { "type": "port", "key": "WEB_PORT", "label": "Web-Port", "default": 9100, "web": true }
+  ]
+}

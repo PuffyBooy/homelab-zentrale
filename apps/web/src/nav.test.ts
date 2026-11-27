@@ -35,6 +35,9 @@ describe('navigation', () => {
       'Netzwerk',
       'Wohnung',
       'Meldungen',
+      'Apps',
+      'Internet',
+      'Automatik',
       'Konsole',
       'Log-Suche',
       'Sicherheit',
@@ -51,6 +54,9 @@ describe('navigation', () => {
     expect(activeNavId('/settings')).toBe('settings');
     expect(activeNavId('/homeassistant')).toBe('overview');
     expect(activeNavId('/unknown')).toBe('overview');
+    expect(activeNavId('/automation')).toBe('automation');
+    expect(activeNavId('/internet')).toBe('internet');
+    expect(activeNavId('/apps')).toBe('apps');
   });
 });
 
@@ -79,7 +85,10 @@ describe('shortcuts', () => {
       '7',
       '8',
       '9',
-      '\u00a0',
+      '',
+      '',
+      '',
+      '',
       '`',
       'l',
       's',
@@ -89,6 +98,7 @@ describe('shortcuts', () => {
     // Same targets with the keyed items as NavRail shows them.
     expect(shortcutTarget('9', keyed)).toBe('/home');
     expect(shortcutTarget('`', keyed)).toBe('/console');
+    expect(shortcutTarget('', keyed)).toBeUndefined();
     expect(shortcutTarget('\u00a0', keyed)).toBeUndefined();
   });
 
@@ -133,6 +143,11 @@ describe('shortcuts', () => {
       fail2ban: false,
       discordbot: false,
       voice: false,
+      tasks: false,
+      selfheal: false,
+      speedtest: false,
+      domains: false,
+      apps: false,
       cloud: false,
     });
     expect(items.map((i) => i.id)).toEqual([
@@ -147,6 +162,28 @@ describe('shortcuts', () => {
     expect(shortcutTarget('5', items)).toBe('/websites');
     expect(shortcutTarget('`', items)).toBe('/console');
     expect(shortcutAction(key('6'), items)).toEqual({ kind: 'navigate', to: '/alerts' });
+  });
+
+  it('fresh install: 9 still opens the console (new modules are off)', () => {
+    const items = visibleNavItems(navItems, {
+      github: true,
+      homeassistant: true,
+      games: true,
+      ...NONE_EXTRA,
+      storage: true,
+      logsearch: false,
+      vulnscan: false,
+      fail2ban: false,
+      discordbot: false,
+      voice: false,
+      tasks: false,
+      selfheal: false,
+      speedtest: false,
+      domains: false,
+      apps: false,
+      cloud: false,
+    });
+    expect(shortcutTarget('9', items)).toBe('/console');
   });
 
   it('shows Netzwerk when FRITZ!Box or DNS-Filter is on, VMs only with Proxmox', () => {

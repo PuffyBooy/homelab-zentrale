@@ -1,0 +1,29 @@
+{
+  "id": "vaultwarden",
+  "name": "Vaultwarden",
+  "description": "Passwort-Manager, kompatibel mit Bitwarden.",
+  "category": "sicherheit",
+  "version": "1.32.7",
+  "website": "https://github.com/dani-garcia/vaultwarden",
+  "arch": ["amd64", "arm64"],
+  "minRamMb": 128,
+  "params": [
+    { "type": "port", "key": "WEB_PORT", "label": "Web-Port", "default": 8222, "web": true },
+    { "type": "password", "key": "ADMIN_TOKEN", "label": "Admin-Token" },
+    {
+      "type": "bool",
+      "key": "SIGNUPS_ALLOWED",
+      "label": "Registrierung erlauben",
+      "default": false
+    },
+    {
+      "type": "string",
+      "key": "DOMAIN",
+      "label": "Adresse",
+      "default": "",
+      "required": false,
+      "pattern": "https://[a-z0-9.-]+"
+    }
+  ],
+  "hints": ["Braucht HTTPS für die Browser-Erweiterung."]
+}

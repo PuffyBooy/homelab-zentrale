@@ -1,6 +1,7 @@
 import type { ModuleId } from '@hz/shared';
 import { lazy, Suspense, type ComponentType, type ReactElement } from 'react';
 import { Route, Routes } from 'react-router';
+import { navModules } from '../lib/modules.js';
 import { navItems } from '../nav.js';
 import { AlertsPage } from '../pages/alerts/AlertsPage.js';
 import { ContainerLogsPage } from '../pages/containers/ContainerLogsPage.js';
@@ -56,6 +57,18 @@ const GameDetailPage = page(
   () => import('../pages/games/GameDetailPage.js'),
   (m) => m.GameDetailPage,
 );
+const AutomationPage = page(
+  () => import('../pages/automation/AutomationPage.js'),
+  (m) => m.AutomationPage,
+);
+const InternetPage = page(
+  () => import('../pages/internet/InternetPage.js'),
+  (m) => m.InternetPage,
+);
+const AppsPage = page(
+  () => import('../pages/apps/AppsPage.js'),
+  (m) => m.AppsPage,
+);
 
 const LogSearchPage = page(
   () => import('../pages/logsearch/LogSearchPage.js'),
@@ -99,7 +112,10 @@ function L({ c: C }: { c: ComponentType }): ReactElement {
   );
 }
 
-/** Lazy page of an optional module: "Modul ausgeschaltet" while it is off. */
+/**
+ * Lazy page of an optional module: "Modul ausgeschaltet" while it is off. With a list
+ * the page shows while any of them is on (Automatik, Internet).
+ */
 function G({ m, c }: { m: ModuleId | readonly ModuleId[]; c: ComponentType }): ReactElement {
   return (
     <ModuleGate module={m}>
@@ -107,6 +123,9 @@ function G({ m, c }: { m: ModuleId | readonly ModuleId[]; c: ComponentType }): R
     </ModuleGate>
   );
 }
+
+const AUTOMATION = navModules('automation');
+const INTERNET = navModules('internet');
 
 /** Dev-only component gallery. Dead code in production builds. */
 const DevUiPage = import.meta.env.DEV
@@ -126,6 +145,9 @@ const BUILT = new Set([
   '/home',
   '/alerts',
   '/console',
+  '/apps',
+  '/internet',
+  '/automation',
   '/logs',
   '/security',
   '/cloud',
@@ -201,6 +223,9 @@ export function AppRoutes(): ReactElement {
         />
         <Route path="alerts" element={<AlertsPage />} />
         <Route path="console" element={<L c={ConsolePage} />} />
+        <Route path="apps" element={<G m="apps" c={AppsPage} />} />
+        <Route path="internet" element={<G m={INTERNET} c={InternetPage} />} />
+        <Route path="automation" element={<G m={AUTOMATION} c={AutomationPage} />} />
         <Route path="logs" element={<G m="logsearch" c={LogSearchPage} />} />
         <Route path="security" element={<G m={SECURITY_MODULES} c={SecurityPage} />} />
         <Route path="cloud" element={<G m="cloud" c={CloudPage} />} />

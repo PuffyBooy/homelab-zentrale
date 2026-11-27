@@ -176,12 +176,17 @@ export type ModuleSwitches = Partial<
     | 'vulnscan'
     | 'fail2ban'
     | 'discordbot'
-    | 'voice',
+    | 'voice'
+    | 'tasks'
+    | 'selfheal'
+    | 'speedtest'
+    | 'domains'
+    | 'apps',
     boolean
   >
 >;
 
-/** PUT /api/settings/modules (step-up when GitHub or Home Assistant is switched on). */
+/** PUT /api/settings/modules (step-up for the modules in MODULES_ENABLE_STEP_UP). */
 export async function setModules(page: Page, totp: Totp, modules: ModuleSwitches): Promise<void> {
   const res = await stepUpCall(page, totp, 'PUT', '/api/settings/modules', modules);
   expect(res.status).toBe(200);

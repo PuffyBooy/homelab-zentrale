@@ -93,7 +93,6 @@ const MODULE_PREFIXES: Record<ModuleId, readonly string[]> = {
     '/s',
     // M15 game relay
     '/api/relay',
-    '/api/settings/dns',
   ],
   proxmox: ['/api/proxmox'],
   dnsfilter: ['/api/dnsfilter'],
@@ -105,6 +104,11 @@ const MODULE_PREFIXES: Record<ModuleId, readonly string[]> = {
   fail2ban: ['/api/fail2ban'],
   discordbot: ['/api/discord-bot'],
   voice: ['/api/voice'],
+  tasks: ['/api/tasks'],
+  selfheal: ['/api/selfheal'],
+  speedtest: ['/api/speedtest'],
+  domains: ['/api/domains'],
+  apps: ['/api/apps'],
   cloud: ['/api/cloud'],
 };
 

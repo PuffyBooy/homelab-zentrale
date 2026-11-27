@@ -8,23 +8,17 @@ import {
   type ReactElement,
   type RefObject,
 } from 'react';
-import { useLocation } from 'react-router';
+import { Link, useLocation } from 'react-router';
 import { Alert, Button, StatusDot, Tile, Toggle } from '@hz/ui';
 import { CopyBlock } from '../../components/CopyBlock.js';
 import { Dialog } from '../../components/Dialog.js';
 import { Field } from '../../components/Field.js';
 import { FormError } from '../../components/FormError.js';
-import { SelectField } from '../../components/SelectField.js';
-import { isApiError } from '../../lib/api.js';
 import { errorText } from '../../lib/errors.js';
-import { formatAgo, formatWhen } from '../../lib/format.js';
 import { gamesKey } from '../../lib/games.js';
 import {
-  DNS_PROVIDER_TEXT,
+  DOMAINS_PATH,
   RELAY_ENV_HINT,
-  dnsSettingsKey,
-  dnsStatus,
-  fetchDnsSettings,
   fetchIngresses,
   ingressDirty,
   ingressDraft,
@@ -32,24 +26,12 @@ import {
   ingressStatus,
   ingressSummary,
   ingressesKey,
-  parseDnsDraft,
   parseIngressDraft,
   relayedGamesText,
-  saveDnsSettings,
   saveIngress,
-  type DnsDraft,
-  type DnsDraftErrors,
-  type DnsProvider,
-  type DnsSettings,
   type IngressDraft,
   type IngressDraftErrors,
 } from '../../lib/relay.js';
-
-/** The user closed the step-up dialog: no error line for that. */
-function shownError(err: unknown): string | null {
-  if (!err || isApiError(err, 'step_up_required')) return null;
-  return errorText(err);
-}
 
 /** Tiles that load their data scroll to `/settings#<id>` once it is there. */
 function useScrollAnchor(id: string, ready: boolean): RefObject<HTMLDivElement> {
@@ -88,6 +70,10 @@ export function IngressTile(): ReactElement {
           Ein Eingang ist ein Server mit öffentlicher IPv4. Er nimmt die Spielports an und leitet
           sie über Tailscale zum Server, auf dem das Spiel läuft. Zuhause ist dann keine
           Portweiterleitung nötig.
+        </p>
+        <p className="app-text app-pad" data-testid="relay-dns-hint">
+          DNS-Namen für Gameserver kommen aus <Link to={DOMAINS_PATH}>Internet → Domains</Link>{' '}
+          (Modul „Domains“, Anbieter Cloudflare oder DuckDNS).
         </p>
         {list.isPending ? <p className="app-empty app-pad">Lade Eingänge …</p> : null}
         {list.isError && !list.data ? (
@@ -249,155 +235,5 @@ function IngressDialog({
         </div>
       </form>
     </Dialog>
-  );
-}
-
-const PROVIDERS: readonly DnsProvider[] = ['none', 'cloudflare', 'duckdns'];
-
-function draftOf(s: DnsSettings): DnsDraft {
-  return { provider: s.provider, token: '', zoneId: s.zoneId ?? '' };
-}
-
-/**
- * Settings → DNS (ROADMAP M15): optional provider for fixed game names. The token is
- * write-only; the core only says whether one is stored. Saving needs step-up.
- */
-export function DnsTile(): ReactElement {
-  const qc = useQueryClient();
-  const settings = useQuery({
-    queryKey: dnsSettingsKey,
-    queryFn: ({ signal }) => fetchDnsSettings(signal),
-  });
-  const [draft, setDraft] = useState<DnsDraft>({ provider: 'none', token: '', zoneId: '' });
-  const [errors, setErrors] = useState<DnsDraftErrors>({});
-  const loaded = useRef(false);
-  const s = settings.data;
-
-  useEffect(() => {
-    if (!s || loaded.current) return;
-    loaded.current = true;
-    setDraft(draftOf(s));
-  }, [s]);
-
-  const save = useMutation({
-    mutationFn: saveDnsSettings,
-    onSuccess: (next) => {
-      qc.setQueryData<DnsSettings>(dnsSettingsKey, next);
-      setDraft(draftOf(next));
-    },
-  });
-
-  function set<K extends keyof DnsDraft>(key: K, value: DnsDraft[K]): void {
-    setDraft((d) => ({ ...d, [key]: value }));
-    setErrors({});
-  }
-
-  function submit(e: FormEvent): void {
-    e.preventDefault();
-    if (!s) return;
-    const parsed = parseDnsDraft(draft, s);
-    if (!parsed.ok) {
-      setErrors(parsed.errors);
-      return;
-    }
-    save.mutate(parsed.body);
-  }
-
-  const head = s ? dnsStatus(s) : null;
-  const anchor = useScrollAnchor('dns', !!s);
-  const dirty =
-    !!s &&
-    (draft.provider !== s.provider ||
-      draft.token.trim() !== '' ||
-      (draft.provider === 'cloudflare' && draft.zoneId.trim() !== (s.zoneId ?? '')));
-  const keepsToken = !!s && s.tokenSet && s.provider === draft.provider;
-
-  return (
-    <div id="dns" ref={anchor} className="app-anchor">
-      <Tile title="DNS" icon="globe" status={head?.status} statusLabel={head?.label}>
-        {settings.isError && !s ? <FormError title={errorText(settings.error)} /> : null}
-        {settings.isPending ? <p className="app-empty">Lade DNS …</p> : null}
-        {s ? (
-          <>
-            <p className="app-text">
-              Optional: feste Namen für Gameserver. Die Zentrale setzt den A-Record auf die IPv4 des
-              Eingangs und zieht ihn beim Wechsel mit.
-            </p>
-            <dl className="app-kv">
-              <dt>Token</dt>
-              <dd>{s.tokenSet ? 'gesetzt' : 'keiner'}</dd>
-              <dt>Zuletzt gesetzt</dt>
-              <dd>
-                {s.lastUpdateAt
-                  ? `${formatWhen(new Date(s.lastUpdateAt))} · ${formatAgo(new Date(s.lastUpdateAt))}`
-                  : 'noch nie'}
-              </dd>
-            </dl>
-            {s.lastError ? (
-              <Alert tone="crit" title="Letzter Fehler">
-                {s.lastError}
-              </Alert>
-            ) : null}
-            <form className="hz-form" onSubmit={submit} noValidate>
-              <SelectField
-                label="Anbieter"
-                value={draft.provider}
-                onChange={(e) => set('provider', e.target.value as DnsProvider)}
-                options={PROVIDERS.map((p) => ({ value: p, label: DNS_PROVIDER_TEXT[p] }))}
-              />
-              {draft.provider !== 'none' ? (
-                <Field
-                  label={draft.provider === 'cloudflare' ? 'API-Token' : 'DuckDNS-Token'}
-                  type="password"
-                  mono
-                  autoComplete="off"
-                  spellCheck={false}
-                  maxLength={100}
-                  placeholder={keepsToken ? 'gesetzt' : ''}
-                  value={draft.token}
-                  onChange={(e) => set('token', e.target.value)}
-                  hint={
-                    keepsToken
-                      ? 'Gesetzt. Leer lassen, um ihn zu behalten.'
-                      : draft.provider === 'cloudflare'
-                        ? 'Token mit Recht „Zone.DNS bearbeiten“ für die Domain.'
-                        : 'Token von duckdns.org. Namen heißen dann <name>.duckdns.org.'
-                  }
-                  error={errors.token}
-                />
-              ) : null}
-              {draft.provider === 'cloudflare' ? (
-                <Field
-                  label="Zone-ID"
-                  mono
-                  autoComplete="off"
-                  spellCheck={false}
-                  maxLength={32}
-                  value={draft.zoneId}
-                  onChange={(e) => set('zoneId', e.target.value)}
-                  error={errors.zoneId}
-                />
-              ) : null}
-              {draft.provider === 'none' && s.tokenSet ? (
-                <Alert tone="info" title="Speichern löscht den Token." />
-              ) : null}
-              {shownError(save.error) ? <FormError title={shownError(save.error) ?? ''} /> : null}
-              {save.isSuccess && !dirty ? (
-                <Alert tone="ok" title="Gespeichert.">
-                  {save.data.provider === 'none'
-                    ? 'Kein DNS-Anbieter.'
-                    : `DNS über ${DNS_PROVIDER_TEXT[save.data.provider]}.`}
-                </Alert>
-              ) : null}
-              <div className="hz-form-actions">
-                <Button type="submit" variant="primary" disabled={!dirty || save.isPending}>
-                  Speichern
-                </Button>
-              </div>
-            </form>
-          </>
-        ) : null}
-      </Tile>
-    </div>
   );
 }

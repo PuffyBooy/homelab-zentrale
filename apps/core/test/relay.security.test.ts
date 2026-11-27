@@ -2,10 +2,11 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { gameRelayResponseSchema } from '@hz/shared';
 import { eq } from 'drizzle-orm';
 import { RpcError } from '../src/agents/hub.js';
-import { gameRelays, gameServers, servers } from '../src/db/schema.js';
+import { dnsRecords, gameRelays, gameServers, servers } from '../src/db/schema.js';
 import { moduleOfPath } from '../src/modules/service.js';
-import { DNS_HOSTS, DnsError, setARecord } from '../src/relay/dns.js';
+import { DNS_TEXT } from '../src/relay/service.js';
 import { stepUp, withStepUp, type WsClient } from './agent-helpers.js';
+import { CF_TOKEN, World } from './domains-helpers.js';
 import { gameRequest, readyGame, withGames, type GameSetup } from './games-helpers.js';
 import { SAME_ORIGIN, type TestApp } from './helpers.js';
 import { addIngress, putIngress, putRelay, relayIdle, type FakeIngress } from './relay-helpers.js';
@@ -24,8 +25,13 @@ interface Setup {
   gameId: string;
 }
 
-async function setup(opts: { relay?: boolean; enable?: boolean } = {}): Promise<Setup> {
-  const s = await withGames(clients);
+async function setup(
+  opts: { relay?: boolean; enable?: boolean; world?: World; captureLogs?: boolean } = {},
+): Promise<Setup> {
+  const s = await withGames(clients, {
+    ...(opts.world ? { modules: { domains: true }, features: { domains: opts.world.deps() } } : {}),
+    ...(opts.captureLogs ? { captureLogs: true } : {}),
+  });
   t = s.t;
   const game = await readyGame(s);
   const ing = await addIngress(s, clients, { relay: opts.relay ?? true });
@@ -62,8 +68,6 @@ const ROUTES = [
   ['PUT', '/api/servers/AAAAAAAAAAAAAAAA/ingress'],
   ['GET', '/api/games/AAAAAAAAAAAAAAAA/relay'],
   ['PUT', '/api/games/AAAAAAAAAAAAAAAA/relay'],
-  ['GET', '/api/settings/dns'],
-  ['PUT', '/api/settings/dns'],
 ] as const;
 
 describe('relay security (M15)', () => {
@@ -78,6 +82,22 @@ describe('relay security (M15)', () => {
     expect(moduleOfPath('/api/servers/:id')).toBeNull();
   });
 
+  it('the old DNS settings route is gone: /api/settings/dns answers 404 (also with step-up)', async () => {
+    const x = await setup();
+    expect(moduleOfPath('/api/settings/dns')).toBeNull();
+    await stepUp(x.s.t, x.s.secret, x.s.cookie);
+    for (const method of ['GET', 'PUT'] as const) {
+      const res = await gameRequest(x.s, method, '/api/settings/dns', {
+        provider: 'duckdns',
+        token: 'a'.repeat(26),
+      });
+      expect(res.statusCode, method).toBe(404);
+    }
+    expect(x.s.t.db.sqlite.prepare("SELECT * FROM settings WHERE key = 'relay.dns'").all()).toEqual(
+      [],
+    );
+  });
+
   it('games module off: the ingress route answers 404 module_disabled', async () => {
     const x = await setup();
     x.s.t.app.hzCore.modules.set({ games: false });
@@ -86,7 +106,7 @@ describe('relay security (M15)', () => {
     expect(res.json()).toMatchObject({ error: 'module_disabled' });
   });
 
-  it('step-up for ingress, relay and DNS changes; without it nothing changes or reaches an agent', async () => {
+  it('step-up for ingress and relay changes; without it nothing changes or reaches an agent', async () => {
     const x = await setup({ enable: false });
     const before = x.ing.sets.length;
     for (const [url, payload] of [
@@ -94,8 +114,10 @@ describe('relay security (M15)', () => {
         `/api/servers/${x.ing.serverId}/ingress`,
         { enabled: true, publicIp: null, portFrom: 25565, portTo: 25600 },
       ],
-      [`/api/games/${x.gameId}/relay`, { ingressServerId: x.ing.serverId }],
-      ['/api/settings/dns', { provider: 'duckdns', token: 'a'.repeat(26) }],
+      [
+        `/api/games/${x.gameId}/relay`,
+        { ingressServerId: x.ing.serverId, dnsName: 'mc.example.com' },
+      ],
     ] as const) {
       const res = await gameRequest(x.s, 'PUT', url, payload);
       expect(res.statusCode, url).toBe(403);
@@ -104,9 +126,7 @@ describe('relay security (M15)', () => {
     expect(x.ing.sets.length).toBe(before);
     expect(relayRows(x)).toEqual([]);
     expect(x.s.t.db.sqlite.prepare('SELECT * FROM server_ingress').all()).toEqual([]);
-    expect(x.s.t.db.sqlite.prepare("SELECT * FROM settings WHERE key = 'relay.dns'").all()).toEqual(
-      [],
-    );
+    expect(x.s.t.db.db.select().from(dnsRecords).all()).toEqual([]);
   });
 
   it('targets only in the tailnet: a host without Tailscale address gets no route', async () => {
@@ -247,113 +267,85 @@ describe('relay security (M15)', () => {
     expect(
       (await putRelay(x.s, x.gameId, { ingressServerId: 'BBBBBBBBBBBBBBBB' })).statusCode,
     ).toBe(404);
-    for (const p of [
-      { provider: 'aws' },
-      { provider: 'duckdns', token: 'short' },
-      { provider: 'duckdns', token: 'abc def ghi jkl mno pqr' },
-    ]) {
-      expect((await gameRequest(x.s, 'PUT', '/api/settings/dns', p)).statusCode).toBe(400);
-    }
   });
 });
 
-describe('DNS client (M15, security)', () => {
-  const TOKEN = 'tok' + 'Q'.repeat(20);
+describe('relay DNS through the domains module (M15/M20, security)', () => {
+  async function withProvider(captureLogs = false) {
+    const world = new World(() => Date.now());
+    const x = await setup({ world, captureLogs });
+    await stepUp(x.s.t, x.s.secret, x.s.cookie);
+    const res = await gameRequest(x.s, 'POST', '/api/domains/providers', {
+      kind: 'cloudflare',
+      label: 'Cloudflare',
+      token: CF_TOKEN,
+    });
+    expect(res.statusCode, res.body).toBe(201);
+    return { x, world, providerId: res.json<{ id: string }>().id };
+  }
 
-  it('contacts only the fixed provider hosts, never follows redirects, has a timeout', async () => {
-    const urls: string[] = [];
-    const inits: RequestInit[] = [];
-    const fetchImpl = (url: string, init: RequestInit) => {
-      urls.push(url);
-      inits.push(init);
-      return Promise.resolve(new Response('OK'));
-    };
-    await setARecord(
-      fetchImpl,
-      { provider: 'duckdns', token: TOKEN, zoneId: null },
-      'abc.duckdns.org',
-      '203.0.113.5',
+  it('a relay record cannot be edited, synced away or deleted through the admin domains routes', async () => {
+    const { x, world } = await withProvider();
+    const res = await putRelay(x.s, x.gameId, {
+      ingressServerId: x.ing.serverId,
+      dnsName: 'mc.example.com',
+    });
+    expect(res.statusCode, res.body).toBe(200);
+    const rec = x.s.t.db.db.select().from(dnsRecords).get();
+    expect(rec).toMatchObject({ owner: 'relay', ownerRef: x.gameId });
+    const id = rec?.id ?? '';
+    const put = await gameRequest(x.s, 'PUT', `/api/domains/records/${id}`, {
+      target: { kind: 'static', value: '198.51.100.99' },
+    });
+    expect(put.statusCode).toBe(403);
+    const del = await gameRequest(x.s, 'DELETE', `/api/domains/records/${id}`);
+    expect(del.statusCode).toBe(403);
+    // The provider still uses it: it cannot be deleted either.
+    const delProvider = await gameRequest(
+      x.s,
+      'DELETE',
+      `/api/domains/providers/${rec?.providerId ?? ''}`,
     );
-    expect(urls.map((u) => new URL(u).host)).toEqual(['www.duckdns.org']);
-    expect(inits[0]?.redirect).toBe('error');
-    expect(inits[0]?.signal).toBeInstanceOf(AbortSignal);
-    expect([...DNS_HOSTS].sort()).toEqual(['api.cloudflare.com', 'www.duckdns.org']);
-
-    // Names outside duckdns.org (also look-alikes) are refused before any request.
-    for (const name of ['abc.duckdns.org.evil.com', 'a.b.duckdns.org', 'evil.com']) {
-      await expect(
-        setARecord(
-          fetchImpl,
-          { provider: 'duckdns', token: TOKEN, zoneId: null },
-          name,
-          '203.0.113.5',
-        ),
-      ).rejects.toBeInstanceOf(DnsError);
-    }
-    // A bad zone id never becomes part of a URL.
-    await expect(
-      setARecord(
-        fetchImpl,
-        { provider: 'cloudflare', token: TOKEN, zoneId: '../../x' },
-        'mc.example.org',
-        '203.0.113.5',
-      ),
-    ).rejects.toBeInstanceOf(DnsError);
-    expect(urls).toHaveLength(1);
+    expect(delProvider.statusCode).toBe(409);
+    expect(x.s.t.db.db.select().from(dnsRecords).all()).toEqual([rec]);
+    const cf = [...world.cf.records.values()].find((r) => r.name === 'mc.example.com');
+    expect(cf?.content).not.toBe('198.51.100.99');
   });
 
-  it('errors never contain the token or the URL (even if fetch reports it)', async () => {
-    const failing = (url: string) => Promise.reject(new Error(`connect failed ${url}`));
-    const err = await setARecord(
-      failing,
-      { provider: 'duckdns', token: TOKEN, zoneId: null },
-      'abc.duckdns.org',
-      '203.0.113.5',
-    ).catch((e: unknown) => e);
-    expect(err).toBeInstanceOf(DnsError);
-    const e = err as DnsError;
-    expect(`${e.message} ${e.text} ${String(e.stack)}`).not.toContain(TOKEN);
-    expect(e.text).toBe('DNS-Anbieter nicht erreichbar');
-
-    const rejecting = () =>
-      Promise.resolve(
-        new Response(JSON.stringify({ success: false, token: TOKEN }), { status: 403 }),
-      );
-    const e2 = (await setARecord(
-      rejecting,
-      { provider: 'cloudflare', token: TOKEN, zoneId: 'b'.repeat(32) },
-      'mc.example.org',
-      '203.0.113.5',
-    ).catch((x: unknown) => x)) as DnsError;
-    expect(e2.text).toBe('DNS-Anbieter lehnt das Token ab');
-    expect(e2.text).not.toContain(TOKEN);
-
-    // Oversized answers are refused: by Content-Length and while streaming.
-    const big = () =>
-      Promise.resolve(
-        new Response('x', { headers: { 'content-length': String(10 * 1024 * 1024) } }),
-      );
-    const huge = () => Promise.resolve(new Response('K'.repeat(300 * 1024)));
-    for (const f of [big, huge]) {
-      const e3 = (await setARecord(
-        f,
-        { provider: 'duckdns', token: TOKEN, zoneId: null },
-        'abc.duckdns.org',
-        '203.0.113.5',
-      ).catch((x: unknown) => x)) as DnsError;
-      expect(e3).toBeInstanceOf(DnsError);
-      expect(e3.text).toBe('Ungültige Antwort des DNS-Anbieters');
+  it('no DNS token in any relay response, log line or audit entry', async () => {
+    const { x } = await withProvider(true);
+    const bodies: string[] = [];
+    for (const name of ['mc.example.com', 'play.example.com', 'nozone.example.net']) {
+      const res = await putRelay(x.s, x.gameId, { ingressServerId: x.ing.serverId, dnsName: name });
+      expect(res.statusCode, res.body).toBe(200);
+      bodies.push(res.body);
+      bodies.push((await gameRequest(x.s, 'GET', `/api/games/${x.gameId}/relay`)).body);
     }
+    bodies.push((await gameRequest(x.s, 'GET', '/api/relay/ingresses')).body);
+    bodies.push((await gameRequest(x.s, 'GET', `/api/games/${x.gameId}`)).body);
+    bodies.push((await putRelay(x.s, x.gameId, { ingressServerId: null })).body);
+    await relayIdle(x.s);
+    const audit = JSON.stringify(x.s.t.db.sqlite.prepare('SELECT * FROM audit_log').all());
+    for (const text of [...bodies, x.s.t.logs.join('\n'), audit]) {
+      expect(text).not.toContain(CF_TOKEN);
+      expect(text).not.toContain('tokenEnc');
+    }
+  });
 
-    // Malformed answers (zod) are refused.
-    const junk = () => Promise.resolve(new Response('{"success":true,"result":[{"id":"../x"}]}'));
-    await expect(
-      setARecord(
-        junk,
-        { provider: 'cloudflare', token: TOKEN, zoneId: 'b'.repeat(32) },
-        'mc.example.org',
-        '203.0.113.5',
-      ),
-    ).rejects.toBeInstanceOf(DnsError);
+  it('a name under a zone no provider owns: dnsOk false, no provider is contacted', async () => {
+    const { x, world } = await withProvider();
+    const before = world.calls.length;
+    for (const name of ['mc.example.net', 'mc.example.com.evil.org', 'meinheim.duckdns.org']) {
+      const res = await putRelay(x.s, x.gameId, { ingressServerId: x.ing.serverId, dnsName: name });
+      expect(res.statusCode, res.body).toBe(200);
+      expect(gameRelayResponseSchema.parse(res.json()).relay, name).toMatchObject({
+        dnsName: name,
+        dnsOk: false,
+        dnsError: DNS_TEXT.noProvider,
+      });
+    }
+    await relayIdle(x.s);
+    expect(world.calls.length).toBe(before);
+    expect(x.s.t.db.db.select().from(dnsRecords).all()).toEqual([]);
   });
 });

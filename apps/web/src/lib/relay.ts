@@ -1,6 +1,5 @@
 import {
   dnsNameSchema,
-  dnsSettingsSchema,
   gameRelayResponseSchema,
   ingressListResponseSchema,
   ingressResponseSchema,
@@ -15,15 +14,12 @@ import { api, isApiError } from './api.js';
 import { errorText } from './errors.js';
 
 /** Inferred from the shared schemas, so web needs no direct zod import. */
-export type DnsSettings = ReturnType<typeof dnsSettingsSchema.parse>;
-export type DnsProvider = DnsSettings['provider'];
 export type IngressUpdate = ReturnType<typeof ingressUpdateRequestSchema.parse>;
 
 // ---------------------------------------------------------------------------
 // Query keys and REST calls (routes from packages/shared/src/api/relay.ts)
 
 export const ingressesKey = ['relay', 'ingresses'] as const;
-export const dnsSettingsKey = ['settings', 'dns'] as const;
 export const gameRelayKey = (gameId: string) => ['game-relay', gameId] as const;
 
 const enc = encodeURIComponent;
@@ -41,21 +37,6 @@ export async function saveIngress(serverId: string, body: IngressUpdate): Promis
     schema: ingressResponseSchema,
   });
   return res.ingress;
-}
-
-export function fetchDnsSettings(signal?: AbortSignal): Promise<DnsSettings> {
-  return api('/api/settings/dns', { schema: dnsSettingsSchema, signal });
-}
-
-export interface DnsSettingsInput {
-  provider: DnsProvider;
-  token?: string;
-  zoneId?: string | null;
-}
-
-/** Step-up route. Without `token` the stored one stays; provider none deletes it. */
-export function saveDnsSettings(body: DnsSettingsInput): Promise<DnsSettings> {
-  return api('/api/settings/dns', { method: 'PUT', body, schema: dnsSettingsSchema });
 }
 
 export async function fetchGameRelay(
@@ -227,24 +208,31 @@ export function relayStatus(r: GameRelay): { status: Status; label: string } {
   return RELAY_STATE[r.state];
 }
 
+/** Where the DNS names come from (M20 domains module). */
+export const DOMAINS_PATH = '/internet';
+
+/** DNS line of a relay: always shape and text. null: the game has no DNS name. */
+export function relayDnsStatus(r: GameRelay): { status: Status; label: string } | null {
+  if (!r.dnsName || r.dnsOk === null) return null;
+  if (r.dnsOk) return { status: 'ok', label: 'Zeigt auf den Eingang' };
+  return { status: 'warn', label: 'Zeigt nicht auf den Eingang' };
+}
+
 export function dnsOkText(r: GameRelay): string {
-  if (!r.dnsName) return 'kein Name';
-  if (r.dnsOk === null) return 'kein DNS-Anbieter eingerichtet';
-  return r.dnsOk ? 'zeigt auf den Eingang' : 'zeigt noch nicht auf den Eingang';
+  const st = relayDnsStatus(r);
+  if (!st) return 'kein Name';
+  if (st.status === 'ok') return 'zeigt auf den Eingang';
+  return r.dnsError ?? 'zeigt noch nicht auf den Eingang';
 }
 
 /** Validates the optional DNS name; empty means none. */
 export function parseDnsName(
   raw: string,
-  provider: DnsProvider | undefined,
 ): { ok: true; name: string | null } | { ok: false; error: string } {
   const t = raw.trim();
   if (!t) return { ok: true, name: null };
   const parsed = dnsNameSchema.safeParse(t);
   if (!parsed.success) return { ok: false, error: 'Ungültiger Name (z. B. mc.example.org).' };
-  if (provider === 'duckdns' && !/^[a-z0-9-]+\.duckdns\.org$/.test(parsed.data)) {
-    return { ok: false, error: 'Bei DuckDNS: <name>.duckdns.org.' };
-  }
   return { ok: true, name: parsed.data };
 }
 
@@ -254,54 +242,4 @@ export function gameRelayErrorText(err: unknown): string | null {
     return 'Ein Port ist am Eingang schon belegt oder liegt außerhalb seines Bereichs.';
   }
   return errorText(err);
-}
-
-// ---------------------------------------------------------------------------
-// DNS provider (Settings → DNS)
-
-export const DNS_PROVIDER_TEXT: Record<DnsProvider, string> = {
-  none: 'Keiner',
-  cloudflare: 'Cloudflare',
-  duckdns: 'DuckDNS',
-};
-
-export interface DnsDraft {
-  provider: DnsProvider;
-  token: string;
-  zoneId: string;
-}
-
-export type DnsDraftErrors = Partial<Record<'token' | 'zoneId', string>>;
-
-/** Builds the PUT body; the token is only sent when typed (empty keeps the stored one). */
-export function parseDnsDraft(
-  d: DnsDraft,
-  current: Pick<DnsSettings, 'provider' | 'tokenSet'>,
-): { ok: true; body: DnsSettingsInput } | { ok: false; errors: DnsDraftErrors } {
-  if (d.provider === 'none') return { ok: true, body: { provider: 'none', zoneId: null } };
-  const errors: DnsDraftErrors = {};
-  const token = d.token.trim();
-  const keep = current.tokenSet && current.provider === d.provider;
-  if (!token && !keep) errors.token = 'Token fehlt.';
-  else if (token && !/^[A-Za-z0-9_-]{20,100}$/.test(token)) {
-    errors.token = '20 bis 100 Zeichen: Buchstaben, Ziffern, - und _.';
-  }
-  const zone = d.zoneId.trim().toLowerCase();
-  if (d.provider === 'cloudflare' && !/^[0-9a-f]{32}$/.test(zone)) {
-    errors.zoneId = 'Zone-ID: 32 Zeichen 0–9 und a–f (Übersicht der Domain bei Cloudflare).';
-  }
-  if (Object.keys(errors).length > 0) return { ok: false, errors };
-  const body: DnsSettingsInput = {
-    provider: d.provider,
-    zoneId: d.provider === 'cloudflare' ? zone : null,
-  };
-  if (token) body.token = token;
-  return { ok: true, body };
-}
-
-export function dnsStatus(s: DnsSettings): { status: Status; label: string } {
-  if (s.provider === 'none') return { status: 'off', label: 'AUS' };
-  if (!s.tokenSet) return { status: 'warn', label: 'KEIN TOKEN' };
-  if (s.lastError) return { status: 'crit', label: 'FEHLER' };
-  return { status: 'ok', label: DNS_PROVIDER_TEXT[s.provider].toUpperCase() };
 }

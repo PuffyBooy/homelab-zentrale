@@ -1,0 +1,13 @@
+# FreshRSS with SQLite (templates/apps/README.md). Values come from .env.
+services:
+  freshrss:
+    image: freshrss/freshrss:1.31.0
+    restart: unless-stopped
+    environment:
+      CRON_MIN: '3,33'
+      TZ: ${TZ}
+    ports:
+      - '${BIND}:${WEB_PORT}:80'
+    volumes:
+      - ./data/data:/var/www/FreshRSS/data
+      - ./data/extensions:/var/www/FreshRSS/extensions

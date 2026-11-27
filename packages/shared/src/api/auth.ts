@@ -155,6 +155,10 @@ export const errorCodeSchema = z.enum([
   'ha_error',
   /** The optional module (github, homeassistant, games) is switched off (404). */
   'module_disabled',
+  /** M20/M21: the name/id already exists (DNS record at the provider, template id) (409). */
+  'exists',
+  /** M20/M21: still used by records, certificates or installed apps (409). */
+  'in_use',
   /**
    * Game start refused: its RAM limit does not fit into free RAM minus the
    * reserve for wichtig containers (409). `details`: InsufficientRamDetails.

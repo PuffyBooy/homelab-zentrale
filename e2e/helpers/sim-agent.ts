@@ -9,8 +9,9 @@ import { WebSocket } from 'ws';
  * listening ports of the inventory plus game.export / game.import (binary transfer with
  * transfer.begin/chunk/ack/end and a sha256 check), for M16/M17 the server
  * administration (du, docker df, services, processes, shutdown, update.*, upgrade) plus
- * inventory.failedServices, and with `ops` (M18) logs.search, image.scan,
- * fail2ban.status and fail2ban.unban from canned data. Nothing here runs a real command.
+ * inventory.failedServices, with `ops` (M18) logs.search, image.scan, fail2ban.status
+ * and fail2ban.unban from canned data, and with `apps` (M21) compose.write of an app.
+ * Nothing here runs a real command.
  */
 
 /** Same shape as listeningPortSchema in packages/shared. */
@@ -278,6 +279,8 @@ export interface SimAgentOptions {
   exportBytes?: number;
   /** M13: inventory.storage (RAID, volumes, disks); left out when undefined. */
   storage?: Record<string, unknown>;
+  /** M21: compose.write creates the app container (image from compose.yml), like docker compose create. */
+  apps?: boolean;
   /** M16: inventory.failedServices; default none (the M16 spec sets backup-sync.service). */
   failedServices?: string[];
   /** M15: announce the relay capability and accept relay.set (no sockets are opened). */
@@ -366,6 +369,8 @@ export class SimAgent {
   /** World data per game folder name: set by game.import, read by game.export. */
   readonly gameData = new Map<string, Buffer>();
   private readonly imports = new Map<string, SimImport>();
+  /** M21: files of the last compose.write per folder (compose.yml, .env). */
+  readonly writtenFiles = new Map<string, Record<string, unknown>>();
   private readonly exports = new Map<string, SimExport>();
   /** M16: failed systemd units reported in every inventory. */
   failedServices: string[];
@@ -821,6 +826,10 @@ export class SimAgent {
       return;
     }
     if (this.o.games && this.answerGame(id, action, params)) return;
+    if (this.o.apps && action === 'compose.write') {
+      this.writeApp(id, params);
+      return;
+    }
     if (action === 'container.limit') {
       this.answerLimit(id, params);
       return;
@@ -910,6 +919,35 @@ export class SimAgent {
     c.cpuLimit = cpus;
     this.sendInventory();
     this.send({ type: 'rpc.result', id, ok: true, data: { cpus } });
+  }
+
+  /**
+   * compose.write for an app (M21): keeps the files and adds one `created` container per
+   * folder; compose.up then starts it through act(). Nothing is written to disk.
+   */
+  private writeApp(id: string, params: Record<string, unknown>): void {
+    const dir = String(params.dir ?? '');
+    const files = (params.files ?? {}) as Record<string, unknown>;
+    const compose = typeof files['compose.yml'] === 'string' ? files['compose.yml'] : '';
+    this.writtenFiles.set(dir, files);
+    const name = dir.split('/').pop() ?? 'app';
+    if (!this.containers.some((c) => c.composeDir === dir)) {
+      this.containers.push({
+        dockerId: hexId(),
+        name,
+        image: /^\s*image:\s*(\S+)/m.exec(compose)?.[1] ?? 'app:e2e',
+        imageId: imageId(),
+        composeProject: name,
+        composeService: name,
+        composeDir: dir,
+        state: 'created',
+        health: 'none',
+        statusText: 'Created',
+        ports: [],
+      });
+    }
+    this.sendInventory();
+    this.send({ type: 'rpc.result', id, ok: true, data: {} });
   }
 
   /**

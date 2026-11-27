@@ -172,6 +172,7 @@ describe('install.sh end to end (real curl + sh against the live app)', () => {
     const env = readEnv(envFile);
     expect(Object.keys(env).sort()).toEqual([
       'HZ_AGENT_ALLOW_RELAY',
+      'HZ_AGENT_ALLOW_TASKS',
       'HZ_AGENT_ALLOW_TERMINAL',
       'HZ_AGENT_NAME',
       'HZ_AGENT_TOKEN',
@@ -181,6 +182,7 @@ describe('install.sh end to end (real curl + sh against the live app)', () => {
       HZ_CORE_URL: `${live.origin.replace('http:', 'ws:')}/agent`,
       HZ_AGENT_NAME: 'pi',
       HZ_AGENT_ALLOW_TERMINAL: '0',
+      HZ_AGENT_ALLOW_TASKS: '0',
       // M15: no game relay unless --allow-relay is given.
       HZ_AGENT_ALLOW_RELAY: '0',
     });

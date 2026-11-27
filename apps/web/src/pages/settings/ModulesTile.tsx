@@ -1,4 +1,4 @@
-import { MODULES, type ModuleId, type Modules } from '@hz/shared';
+import { MODULES, MODULES_ENABLE_STEP_UP, type ModuleId, type Modules } from '@hz/shared';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { ReactElement } from 'react';
 import { Tile, Toggle } from '@hz/ui';
@@ -45,8 +45,9 @@ export function ModulesTile(): ReactElement {
       <p className="app-text">
         Ausgeschaltete Module verschwinden aus Navigation und Übersicht, ihre Abfragen und Jobs
         ruhen. Daten und Einstellungen bleiben erhalten. Module mit Zugangsdaten (GitHub, Home
-        Assistant, die Anbindungen) und Module, die von außen steuern (Discord-Bot, Sprachsteuerung)
-        oder Geld kosten (Cloud), einschalten braucht einen Code.
+        Assistant, die Anbindungen, Domains), Module, die von außen steuern (Discord-Bot,
+        Sprachsteuerung) oder Geld kosten (Cloud), und Geplante Aufgaben einschalten braucht einen
+        Code.
       </p>
       {modules.isError ? <FormError title={errorText(modules.error)} /> : null}
       {m ? (
@@ -55,7 +56,9 @@ export function ModulesTile(): ReactElement {
             <Toggle
               key={id}
               label={MODULE_LABEL[id]}
-              hint={`${m[id] ? 'an' : 'aus'} · ${MODULE_HINT[id]}`}
+              hint={`${m[id] ? 'an' : 'aus'} · ${MODULE_HINT[id]}${
+                !m[id] && MODULES_ENABLE_STEP_UP.includes(id) ? ' Einschalten mit Code.' : ''
+              }`}
               checked={m[id]}
               disabled={save.isPending}
               onChange={(next) => save.mutate({ [id]: next })}

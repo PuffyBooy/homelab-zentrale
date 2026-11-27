@@ -47,6 +47,11 @@ describe('Einstellungen → Anbindungen', () => {
         fail2ban: false,
         discordbot: false,
         voice: false,
+        tasks: false,
+        selfheal: false,
+        speedtest: false,
+        domains: false,
+        apps: false,
         cloud: false,
       }),
     ).toEqual(['proxmox', 'fritzbox']);

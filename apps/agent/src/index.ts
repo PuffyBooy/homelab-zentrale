@@ -17,6 +17,7 @@ import { makeHostExec, runFile, spawnFile } from './exec.js';
 import { normalizeArch, type HostContext } from './host.js';
 import { createLogger } from './log.js';
 import { PtyManager } from './actions/pty.js';
+import { TaskManager } from './actions/task-exec.js';
 import { RelayManager } from './actions/relay.js';
 import { StreamManager } from './streams.js';
 import { markConnected, markDisconnected } from './health.js';
@@ -91,6 +92,16 @@ async function main(): Promise<void> {
         log,
       })
     : undefined;
+  // Only constructed with HZ_AGENT_ALLOW_TASKS=1 (task.exec).
+  const tasks = config.allowTasks
+    ? new TaskManager({
+        allowTasks: true,
+        hostExec: config.hostExec,
+        host,
+        homelabRoot: config.homelabRoot,
+        log,
+      })
+    : undefined;
   // Wake listeners of sleeping games (game.wake.arm); the event goes out on the
   // agent connection like every other event.
   const wake: WakeManager = new WakeManager({
@@ -152,6 +163,8 @@ async function main(): Promise<void> {
       dataDir: config.dataDir,
       trivyImage: config.trivyImage,
       ...(pty ? { pty } : {}),
+      allowTasks: config.allowTasks,
+      ...(tasks ? { tasks } : {}),
       wake,
       services: config.services,
       ...(updates ? { updates } : {}),
@@ -166,6 +179,7 @@ async function main(): Promise<void> {
     dataDir: config.dataDir,
     envToken: config.token,
     allowTerminal: config.allowTerminal,
+    allowTasks: config.allowTasks,
     allowRelay: config.allowRelay,
     docker: docker !== null,
     version: await agentVersion(),
@@ -216,6 +230,7 @@ async function main(): Promise<void> {
     hostExec: config.hostExec,
     docker: docker !== null,
     terminal: config.allowTerminal,
+    tasks: config.allowTasks,
     relay: config.allowRelay,
   });
   // Temp archives of backups that died with a previous agent process (no backup runs yet).
@@ -236,6 +251,7 @@ async function main(): Promise<void> {
     inventorySoon.cancel();
     streams.cancelAll();
     pty?.closeAll();
+    tasks?.killAll();
     conn.stop();
     clearInterval(flushTimer);
     void markDisconnected();

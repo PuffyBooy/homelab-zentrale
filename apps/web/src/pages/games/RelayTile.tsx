@@ -10,9 +10,7 @@ import { SelectField } from '../../components/SelectField.js';
 import { gamesKey } from '../../lib/games.js';
 import {
   DIRECT,
-  dnsOkText,
-  dnsSettingsKey,
-  fetchDnsSettings,
+  DOMAINS_PATH,
   fetchGameRelay,
   fetchIngresses,
   gameRelayErrorText,
@@ -21,6 +19,7 @@ import {
   parseDnsName,
   relayChoiceLabel,
   relayChoices,
+  relayDnsStatus,
   relayStatus,
   saveGameRelay,
   type GameRelayInput,
@@ -69,6 +68,7 @@ function DirectView({ game }: { game: GameSummary }): ReactElement {
 
 function RelayView({ relay }: { relay: GameRelay }): ReactElement {
   const st = relayStatus(relay);
+  const dns = relayDnsStatus(relay);
   return (
     <div className="app-stack" data-testid="game-relay">
       <dl className="app-kv">
@@ -83,8 +83,16 @@ function RelayView({ relay }: { relay: GameRelay }): ReactElement {
         <dt>DNS-Name</dt>
         <dd className="app-break">{relay.dnsName ?? 'keiner'}</dd>
         <dt>DNS</dt>
-        <dd>{dnsOkText(relay)}</dd>
+        <dd>{dns ? <StatusDot status={dns.status} label={dns.label} /> : 'kein Name'}</dd>
       </dl>
+      {relay.dnsOk === false ? (
+        <Alert
+          tone="warn"
+          title={relay.dnsError ?? 'DNS-Eintrag zeigt noch nicht auf den Eingang.'}
+        >
+          Anbieter und Einträge unter <Link to={DOMAINS_PATH}>Internet → Domains</Link>.
+        </Alert>
+      ) : null}
       {relay.address ? (
         <CopyBlock label="Adresse für Freunde" text={relay.address} inline />
       ) : (
@@ -104,10 +112,6 @@ function RelayForm({ game, relay }: { game: GameSummary; relay: GameRelay | null
   const ingresses = useQuery({
     queryKey: ingressesKey,
     queryFn: ({ signal }) => fetchIngresses(signal),
-  });
-  const dns = useQuery({
-    queryKey: dnsSettingsKey,
-    queryFn: ({ signal }) => fetchDnsSettings(signal),
   });
   const [target, setTarget] = useState(relay?.ingressServerId ?? DIRECT);
   const [dnsName, setDnsName] = useState(relay?.dnsName ?? '');
@@ -130,7 +134,6 @@ function RelayForm({ game, relay }: { game: GameSummary; relay: GameRelay | null
   if (relay && !choices.some((i) => i.serverId === relay.ingressServerId)) {
     options.push({ value: relay.ingressServerId, label: `${relay.ingressName} · nicht bereit` });
   }
-  const provider = dns.data?.provider;
   const dirty =
     target !== (relay?.ingressServerId ?? DIRECT) ||
     (target !== DIRECT && dnsName.trim().toLowerCase() !== (relay?.dnsName ?? ''));
@@ -141,7 +144,7 @@ function RelayForm({ game, relay }: { game: GameSummary; relay: GameRelay | null
       save.mutate({ ingressServerId: null });
       return;
     }
-    const name = parseDnsName(dnsName, provider);
+    const name = parseDnsName(dnsName);
     if (!name.ok) {
       setNameError(name.error);
       return;
@@ -179,7 +182,7 @@ function RelayForm({ game, relay }: { game: GameSummary; relay: GameRelay | null
           autoComplete="off"
           spellCheck={false}
           maxLength={253}
-          placeholder={provider === 'duckdns' ? 'meinspiel.duckdns.org' : 'mc.example.org'}
+          placeholder="mc.example.org"
           value={dnsName}
           onChange={(e) => {
             setDnsName(e.target.value);
@@ -187,14 +190,10 @@ function RelayForm({ game, relay }: { game: GameSummary; relay: GameRelay | null
             save.reset();
           }}
           hint={
-            provider === 'none' || provider === undefined ? (
-              <>
-                Ohne DNS-Anbieter setzt die Zentrale keinen Eintrag (
-                <Link to="/settings#dns">Einstellungen → DNS</Link>).
-              </>
-            ) : (
-              'Die Zentrale setzt den A-Record auf die IPv4 des Eingangs.'
-            )
+            <>
+              Die Zentrale setzt den A-Record auf die IPv4 des Eingangs, beim Anbieter aus{' '}
+              <Link to={DOMAINS_PATH}>Internet → Domains</Link>, dessen Zone den Namen enthält.
+            </>
           }
           error={nameError}
         />

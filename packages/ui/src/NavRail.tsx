@@ -8,7 +8,10 @@ export interface NavItem {
   icon: IconName;
   href?: string | undefined;
   count?: number | undefined;
-  /** Shortcut shown left of the label. Defaults to the 1-based position (reference bundle). */
+  /**
+   * Shortcut shown left of the label. Defaults to the 1-based position (reference bundle).
+   * An empty string leaves the key cap empty (items past the ninth have no digit).
+   */
   key?: string | undefined;
 }
 
@@ -36,7 +39,9 @@ export function NavRail({ items, active, title }: NavRailProps): ReactElement {
               className={cx('hz-nav-item', it.id === active && 'hz-nav-active')}
               aria-current={it.id === active ? 'page' : undefined}
             >
-              <span className="hz-nav-key">{it.key || String(i + 1)}</span>
+              <span className="hz-nav-key" aria-hidden={it.key === '' ? true : undefined}>
+                {it.key ?? String(i + 1)}
+              </span>
               <span>{it.label}</span>
               {it.count ? <span className="hz-nav-count">{it.count}</span> : null}
             </a>

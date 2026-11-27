@@ -173,6 +173,24 @@ describe('database', () => {
     ]);
   });
 
+  it('migration 19: drops the old relay DNS settings (token included), keeps other settings', () => {
+    const file = join(emptyDir(), 'm17.sqlite');
+    const v16 = openDatabase(
+      file,
+      migrations.filter((m) => m.version <= 16),
+    );
+    v16.sqlite.exec(`
+      INSERT INTO settings VALUES ('relay.dns', '{"provider":"duckdns","tokenEnc":"enc"}', 0);
+      INSERT INTO settings VALUES ('ha.settings', '{"url":"http://192.0.2.20:8123"}', 0);`);
+    v16.close();
+    h = openDatabase(file);
+    const keys = h.sqlite.prepare('SELECT key FROM settings ORDER BY key').all() as {
+      key: string;
+    }[];
+    expect(keys.map((k) => k.key)).not.toContain('relay.dns');
+    expect(keys.map((k) => k.key)).toContain('ha.settings');
+  });
+
   it('migration 10 on a fresh install: games on, github and homeassistant off', () => {
     h = openDatabase(':memory:');
     const modules = h.sqlite

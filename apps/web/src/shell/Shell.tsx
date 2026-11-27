@@ -14,7 +14,12 @@ import {
   useServerFilter,
   useServers,
 } from '../lib/data.js';
+import { useApps } from '../lib/apps.js';
+import { useDomains } from '../lib/domains.js';
 import { interceptLinks } from '../lib/links.js';
+import { useSelfheal } from '../lib/selfheal.js';
+import { useSpeedtest } from '../lib/speedtest.js';
+import { useTasks } from '../lib/tasks.js';
 import { visibleNavItems } from '../lib/modules.js';
 import { useNetworkView } from '../lib/network.js';
 import { useProxmoxView } from '../lib/proxmox.js';
@@ -31,6 +36,7 @@ import {
   needsContainers,
   needsGames,
   needsHa,
+  needsModuleData,
   needsNetwork,
   needsProxmox,
   needsRepos,
@@ -77,6 +83,12 @@ function ShellBody(): ReactElement {
   const repos = useRepos(needsRepos(pathname) && modules.github);
   const games = useGames(needsGames(pathname) && modules.games);
   const ha = useHaState(needsHa(pathname) && modules.homeassistant);
+  const area = needsModuleData(pathname);
+  const tasks = useTasks(area === 'automation' && modules.tasks);
+  const selfheal = useSelfheal(area === 'automation' && modules.selfheal);
+  const speedtest = useSpeedtest(7, area === 'internet' && modules.speedtest);
+  const domains = useDomains(area === 'internet' && modules.domains);
+  const apps = useApps(area === 'apps' && modules.apps);
   const proxmox = useProxmoxView(needsProxmox(pathname) && modules.proxmox);
   const net = useNetworkView(modules, needsNetwork(pathname));
   const [filter, setFilter] = useServerFilter();
@@ -90,6 +102,11 @@ function ShellBody(): ReactElement {
     repos: repos.data,
     games: games.data,
     ha: ha.data,
+    tasks: tasks.data,
+    selfheal: selfheal.data,
+    speedtest: speedtest.data,
+    domains: domains.data,
+    apps: apps.data,
     proxmox: modules.proxmox ? proxmox.guests.data : undefined,
     fritz: net.fritzData,
     dns: net.dnsData,

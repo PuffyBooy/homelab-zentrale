@@ -133,6 +133,11 @@ describe('VMs page', () => {
         fail2ban: false,
         discordbot: false,
         voice: false,
+        tasks: false,
+        selfheal: false,
+        speedtest: false,
+        domains: false,
+        apps: false,
         cloud: false,
       },
     });

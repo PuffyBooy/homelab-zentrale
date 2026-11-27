@@ -1,0 +1,17 @@
+# Forgejo with SQLite (templates/apps/README.md). Values come from .env.
+services:
+  forgejo:
+    image: codeberg.org/forgejo/forgejo:15.0.7
+    restart: unless-stopped
+    environment:
+      USER_UID: ${PUID}
+      USER_GID: ${PGID}
+      FORGEJO__database__DB_TYPE: sqlite3
+      FORGEJO__server__SSH_PORT: ${SSH_PORT}
+      FORGEJO__server__SSH_LISTEN_PORT: '22'
+      TZ: ${TZ}
+    ports:
+      - '${BIND}:${WEB_PORT}:3000'
+      - '${BIND}:${SSH_PORT}:22'
+    volumes:
+      - ./data/forgejo:/data

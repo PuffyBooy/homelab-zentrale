@@ -1,0 +1,8 @@
+services:
+  app:
+    image: busybox:1.36
+    ports:
+      - published: ${WEB_PORT}
+        target: 80
+        host_ip: ${BIND}
+        protocol: tcp

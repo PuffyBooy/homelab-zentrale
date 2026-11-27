@@ -12,6 +12,10 @@ export const navItems: NavItem[] = [
   { id: 'network', label: 'Netzwerk', icon: 'wifi', href: '/network' },
   { id: 'home', label: 'Wohnung', icon: 'home', href: '/home' },
   { id: 'alerts', label: 'Meldungen', icon: 'bell', href: '/alerts' },
+  // Optional modules of M20/M21 (off by default). After Meldungen, so 1–8 keep their pages.
+  { id: 'apps', label: 'Apps', icon: 'cloud', href: '/apps' },
+  { id: 'internet', label: 'Internet', icon: 'wifi', href: '/internet' },
+  { id: 'automation', label: 'Automatik', icon: 'refresh', href: '/automation' },
   { id: 'console', label: 'Konsole', icon: 'terminal', href: '/console', key: '`' },
   // Operations modules (off by default). After the console, with letter keys, so the
   // digits 1–9 keep their places (docs/QUESTIONS.md).
@@ -56,15 +60,12 @@ export function shortcutLabel(item: NavItem, index: number): string {
   return index < MAX_DIGIT_KEYS ? String(index + 1) : '';
 }
 
-/** Blank key cap: NavRail falls back to the position for an empty key. */
-const NO_KEY = '\u00a0';
-
 /**
- * Visible items with an explicit key cap each, for NavRail: items past the ninth show an
- * empty cap instead of "10", "11" (no such shortcut exists).
+ * Visible items with an explicit key cap each, for NavRail: items past the ninth get an
+ * empty key ('' renders an empty, aria-hidden cap) instead of "10", "11" (no such shortcut).
  */
 export function withShortcutKeys<T extends NavItem>(items: readonly T[]): T[] {
-  return items.map((it, i) => ({ ...it, key: shortcutLabel(it, i) || NO_KEY }));
+  return items.map((it, i) => ({ ...it, key: shortcutLabel(it, i) }));
 }
 
 /**

@@ -1,0 +1,27 @@
+{
+  "id": "freshrss",
+  "name": "FreshRSS",
+  "description": "Feed-Reader für RSS und Atom im Browser, mit Apps über die Google-Reader- und Fever-Schnittstelle.",
+  "category": "werkzeuge",
+  "version": "1.31.0",
+  "website": "https://freshrss.org",
+  "arch": [
+    "amd64",
+    "arm64"
+  ],
+  "minRamMb": 128,
+  "params": [
+    {
+      "type": "port",
+      "key": "WEB_PORT",
+      "label": "Web-Oberfläche (Port)",
+      "default": 8280,
+      "protocol": "tcp",
+      "web": true
+    }
+  ],
+  "hints": [
+    "Beim ersten Aufruf führt ein Assistent durch die Einrichtung (Datenbank SQLite wählen, Admin-Konto anlegen).",
+    "Feeds werden zweimal pro Stunde aktualisiert."
+  ]
+}

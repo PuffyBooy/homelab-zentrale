@@ -39,11 +39,13 @@ describe('SMART override (security)', () => {
     expect(body).not.toMatch(/privileged|devices:|\/dev:/);
   });
 
-  it('install.sh accepts only `<code>` with --smart / --allow-relay', () => {
+  it('install.sh accepts only `<code>` with --smart / --tasks / --allow-relay', () => {
     const tpl = readFileSync(INSTALL_TEMPLATE_PATH, 'utf8');
     for (const args of [
       ['ABCD-EFGH', '--evil'],
       ['ABCD-EFGH', '--smart', 'x'],
+      ['ABCD-EFGH', '--tasks', '--smart', '--tasks'],
+      ['ABCD-EFGH', '--tasks=1'],
       ['ABCD-EFGH', '--allow-relay', '--smart', '--smart'],
       ['ABCD-EFGH', '--allow-relay=1'],
       [],

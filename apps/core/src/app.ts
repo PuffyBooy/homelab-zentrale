@@ -65,6 +65,14 @@ import { PushService } from './push/service.js';
 import { readNotifySettings } from './push/settings.js';
 import { loadVapidKeys } from './push/vapid.js';
 import { healthRoutes } from './routes/health.js';
+import {
+  featuresIdle,
+  registerFeatureRoutes,
+  setupFeatures,
+  stopFeatures,
+  type FeatureDeps,
+  type Features,
+} from './features.js';
 import { Scheduler } from './scheduler.js';
 import { serverRoutes } from './servers/routes.js';
 import { serverAdminRoutes } from './servers/admin-routes.js';
@@ -93,6 +101,7 @@ import { backupTargetRoutes } from './storage/backup-target-routes.js';
 import { storageRoutes } from './storage/routes.js';
 import { seedDemoRelay } from './demo/relay.js';
 import { relayRoutes } from './relay/routes.js';
+import { relayDnsFrom } from './relay/domains-dns.js';
 import { RelayService } from './relay/service.js';
 import { StorageService } from './storage/service.js';
 import { setupOps, type OpsServices } from './ops/index.js';
@@ -143,10 +152,10 @@ export interface AppDeps {
   wolUdp?: UdpSender;
   /** M12: HTTP for Discord webhooks and the Modrinth API (tests: a fake). */
   gameFetch?: FetchLike;
-  /** M15: HTTP for the DNS providers Cloudflare / DuckDNS (tests: a fake). */
-  dnsFetch?: FetchLike;
   /** Discord REST for the bot (tests: a fake; the gateway URL comes from it). */
   discordFetch?: DiscordFetch;
+  /** M20/M21 modules: fake HTTP, short timers, template dirs (tests). */
+  features?: FeatureDeps;
   /** M22: transport to Azure (tests: a fake Azure). */
   cloudFetch?: AzureFetch;
 }
@@ -192,6 +201,8 @@ export interface CoreServices {
   integrations: Integrations;
   notify: NotifyService;
   wol: WolService;
+  /** M20/M21: tasks, selfheal, speedtest, domains, apps (features.ts). */
+  features: Features;
   /** M13b NAS als Backup-Ziel. */
   backupTarget: BackupTargetService;
   db: DbHandle;
@@ -666,15 +677,14 @@ export async function buildApp(config: Config, deps: AppDeps = {}): Promise<Fast
     }
   });
   // ---- M15: game relay (ingresses, fixed addresses, DNS) ------------------------
+  // DNS names go through the domains module (wired below, after setupFeatures).
   const relay = new RelayService({
     db: db.db,
-    box,
     now,
     hub,
     servers,
     games,
     log: app.log.child({ mod: 'relay' }),
-    ...(deps.dnsFetch ? { fetch: deps.dnsFetch } : {}),
   });
   games.setRelay(relay);
   // Ports, a move, a deleted game: the routes of the ingresses follow (sent only on change).
@@ -787,6 +797,33 @@ export async function buildApp(config: Config, deps: AppDeps = {}): Promise<Fast
   servers.onChange((id, deleted) => {
     if (deleted) removeWolConfig(db.db, id, now());
   });
+  // ---- M20/M21: tasks, selfheal, speedtest, domains, apps (features.ts) -------------
+  const features = setupFeatures(
+    {
+      config,
+      db: db.db,
+      box,
+      now,
+      log: app.log,
+      scheduler,
+      hub,
+      alerts,
+      servers,
+      containers,
+      checks,
+      games,
+      throttle,
+      ports,
+      modules,
+    },
+    deps.features,
+  );
+  // M15 relay DNS through the domains module: immediately when it is switched on
+  // (its own listener in setupDomains ran first), else every minute (relay/service.ts).
+  relay.setDns(relayDnsFrom(features.domains.service));
+  modules.onChange((id, on) => {
+    if (id === 'domains' && on) relay.queueDns();
+  });
 
   app.decorate('hzCore', {
     backupTarget,
@@ -825,6 +862,7 @@ export async function buildApp(config: Config, deps: AppDeps = {}): Promise<Fast
     integrations,
     notify,
     wol,
+    features,
     db,
   });
 
@@ -842,6 +880,7 @@ export async function buildApp(config: Config, deps: AppDeps = {}): Promise<Fast
   });
   scheduler.every('onboarding.prune', HOUR, () => void onboarding.prune());
   scheduler.every('logs.leases', 30_000, () => logs.expireLeases());
+  scheduler.every('relay.dns', 60_000, () => relay.syncDns(), { align: true });
   // Rule set of M10 on the metrics interval (agents send metrics every 10 s).
   scheduler.every('throttle.tick', 10_000, () => throttle.tick());
   // Module switches: stop/start pollers, connections and jobs without restart.
@@ -868,7 +907,7 @@ export async function buildApp(config: Config, deps: AppDeps = {}): Promise<Fast
       backupTarget.setEnabled(on);
     } else if (m === 'discordbot') discordBot.setEnabled(on);
     else if (m === 'voice') voice.setEnabled(on);
-    // cloud: switched in cloud/index.ts (ticks and Azure calls stop, machines stay).
+    // M14 integrations; M20/M21 modules (features.ts) and cloud (cloud/index.ts) switch themselves.
     else if (m !== 'cloud') integrations.setModule(m, on);
     app.log.info({ module: m, on }, 'module switched');
   });
@@ -935,12 +974,14 @@ export async function buildApp(config: Config, deps: AppDeps = {}): Promise<Fast
         voice.idle(),
         integrations.idle(),
         notify.idle(),
+        featuresIdle(features),
       ]),
       new Promise((r) => setTimeout(r, 3_000).unref()),
     ]);
     ha.stop();
     discordBot.shutdown();
     voice.shutdown();
+    stopFeatures(features);
     github.deployer.shutdown();
     consoles.closeAll();
     hub.shutdown();
@@ -1000,6 +1041,7 @@ export async function buildApp(config: Config, deps: AppDeps = {}): Promise<Fast
   await app.register(portRoutes, { prefix: '/api', db: db.db, now, servers, ports });
   await app.register(moduleRoutes, { prefix: '/api', db: db.db, now, modules });
   await app.register(storageRoutes, { prefix: '/api', storage });
+  await registerFeatureRoutes(app, features);
   await app.register(backupTargetRoutes, { prefix: '/api', backupTarget, now });
   await app.register(alertRoutes, { prefix: '/api', db: db.db, now, alerts });
   await app.register(containerRoutes, {

@@ -1,4 +1,4 @@
-import { and, asc, eq } from 'drizzle-orm';
+import { asc, eq } from 'drizzle-orm';
 import type { FastifyBaseLogger } from 'fastify';
 import { z } from 'zod';
 import {
@@ -9,15 +9,11 @@ import {
   type GameRelay,
   type Ingress,
   type RelayRoute,
-  type dnsSettingsRequestSchema,
-  type dnsSettingsSchema,
   type gameRelayRequestSchema,
   type ingressUpdateRequestSchema,
 } from '@hz/shared';
 import { RpcError, type AgentHub } from '../agents/hub.js';
-import type { FetchLike } from '../checks/rdap.js';
 import type { Clock } from '../clock.js';
-import type { SecretBox } from '../crypto.js';
 import { writeAudit } from '../db/audit.js';
 import type { Db } from '../db/index.js';
 import {
@@ -30,12 +26,10 @@ import {
   type ServerIngressRow,
   type ServerRow,
 } from '../db/schema.js';
-import { readSetting, writeSetting } from '../db/settings.js';
 import { HttpError } from '../http/errors.js';
 import { emptyUsed, isFree, markUsed, protosOf, type UsedPorts } from '../games/ports.js';
 import type { HostPort } from '../games/render.js';
 import type { GameRelayHooks, GameService } from '../games/service.js';
-import { deleteARecord, DnsError, nameAllowed, setARecord, type DnsConfig } from './dns.js';
 
 /**
  * M15 game relay (packages/shared/src/api/relay.ts, SPEC 6.6).
@@ -47,13 +41,20 @@ import { deleteARecord, DnsError, nameAllowed, setARecord, type DnsConfig } from
  * a deleted game, a new Tailscale address) and on every hello of the ingress agent.
  * The per-game result is stored in game_relays.state / error.
  *
- * Optional DNS: the A record of a game's name points to the ingress IPv4
- * (dns.ts). The provider token is stored encrypted (AAD DNS_AAD) and never
- * leaves this file except towards the provider.
+ * Optional DNS: the A record of a game's name points to the ingress IPv4. The
+ * record belongs to the domains module (M20, owner 'relay', ownerRef = game id),
+ * reached through the small RelayDns interface (wired in app.ts, see
+ * relay/domains-dns.ts). The relay never sees a provider token.
+ *
+ * When DNS is (re)applied: on assignment, name change, ingress switch and ingress
+ * IP change (ensure), on unassignment and name removal (remove). Everything else
+ * (domains module switched on, a provider added or its zones changed, a provider
+ * that was down, records left over while the module was off or of deleted games)
+ * is caught by syncDns(): every minute (job relay.dns) and right after the domains
+ * module is switched on. It only calls ensure for relays whose record is missing
+ * or points elsewhere; keeping an existing record in sync is the domains job.
  */
 
-export const DNS_SETTING = 'relay.dns';
-const DNS_AAD = 'settings.relay.dns.token';
 export const RELAY_TIMEOUT_MS = 15_000;
 /** relayRouteSchema allows up to 10 consecutive ports per route. */
 const MAX_COUNT = 10;
@@ -74,37 +75,58 @@ export const RELAY_TEXT = {
   disabled: 'Eingang ist ausgeschaltet',
 } as const;
 
-type DnsSettings = z.infer<typeof dnsSettingsSchema>;
-type DnsSettingsRequest = z.output<typeof dnsSettingsRequestSchema>;
 type IngressUpdate = z.output<typeof ingressUpdateRequestSchema>;
 type GameRelayRequest = z.output<typeof gameRelayRequestSchema>;
 
-const storedDnsSchema = z.object({
-  provider: z.enum(['none', 'cloudflare', 'duckdns']).catch('none'),
-  tokenEnc: z.string().nullable().catch(null),
-  zoneId: z.string().nullable().catch(null),
-  lastError: z.string().nullable().catch(null),
-  lastUpdateAt: z.number().nullable().catch(null),
-});
-type StoredDns = z.infer<typeof storedDnsSchema>;
-const EMPTY_DNS: StoredDns = {
-  provider: 'none',
-  tokenEnc: null,
-  zoneId: null,
-  lastError: null,
-  lastUpdateAt: null,
-};
+export const DNS_TEXT = {
+  moduleOff: 'Modul Domains ist aus (Einstellungen → Module).',
+  noProvider: 'Kein DNS-Anbieter für diesen Namen (Internet → Domains).',
+  pending: 'DNS-Eintrag wird gesetzt …',
+  noIp: 'Eingang hat keine öffentliche IPv4',
+  failed: 'DNS-Eintrag konnte nicht gesetzt werden',
+} as const;
+
+/** A relay-owned A record as the domains module stores it. */
+export interface RelayDnsRecord {
+  providerId: string;
+  name: string;
+  /** IPv4 the record should point to. */
+  target: string | null;
+  /** IPv4 the provider has (last sync). */
+  value: string | null;
+  status: 'ok' | 'pending' | 'error';
+  /** German, no secret. */
+  lastError: string | null;
+}
+
+/**
+ * What the relay needs from the domains module (M20). One A record per game
+ * (ownerRef = game id). ensure/remove throw HttpError with a fixed German
+ * userMessage (e.g. 409 exists, 404 module_disabled).
+ */
+export interface RelayDns {
+  /** Domains module switched on. */
+  enabled(): boolean;
+  /** First provider whose zones contain the name, null if none. No request. */
+  providerFor(name: string): string | null;
+  /** Clash with a record the hub already manages (admin or other owner), else null. */
+  conflict(gameId: string, providerId: string, name: string): string | null;
+  record(gameId: string): RelayDnsRecord | null;
+  /** Game ids that own a relay record. */
+  owners(): string[];
+  ensure(input: { gameId: string; providerId: string; name: string; ip: string }): Promise<void>;
+  remove(gameId: string): Promise<void>;
+}
 
 export interface RelayDeps {
   db: Db;
-  box: SecretBox;
   now: Clock;
   hub: Pick<AgentHub, 'call' | 'isConnected'>;
   servers: { isConnected(id: string): boolean; isVirtual(id: string): boolean };
   games: GameService;
   log: FastifyBaseLogger;
-  /** HTTP for the DNS providers (tests: a fake). */
-  fetch?: FetchLike;
+  /** Domains module; null until wired (setDns) or without DNS. */
+  dns?: RelayDns | null;
 }
 
 const listenPortsSchema = z
@@ -130,18 +152,26 @@ interface Plan {
   games: Map<string, PlanEntry>;
 }
 
-const iso = (ms: number): string => new Date(ms).toISOString();
-
 export class RelayService implements GameRelayHooks {
   /** JSON of the routes the ingress agent accepted last (cleared on hello / offline). */
   private readonly lastSent = new Map<string, string>();
   private readonly chains = new Map<string, Promise<void>>();
   private dnsChain: Promise<void> = Promise.resolve();
+  private dns: RelayDns | null;
+  /** Last ensure failure per game (German, no secret), cleared on success. */
+  private readonly dnsErrors = new Map<string, string>();
   private readonly background = new Set<Promise<unknown>>();
   private queued = false;
   private stopped = false;
 
-  constructor(private readonly deps: RelayDeps) {}
+  constructor(private readonly deps: RelayDeps) {
+    this.dns = deps.dns ?? null;
+  }
+
+  /** The domains module is created after the relay (features.ts): wired here. */
+  setDns(dns: RelayDns | null): void {
+    this.dns = dns;
+  }
 
   /** Core shutdown: no new reconciles (the database closes next). */
   stop(): void {
@@ -288,7 +318,7 @@ export class RelayService implements GameRelayHooks {
     const game = this.deps.games.row(gameId);
     const port = game ? this.listenOf(r, game)[0]?.port : undefined;
     const host = r.dnsName ?? ip;
-    const dns = this.storedDns();
+    const dns = this.dnsStatus(r, ip);
     return {
       ingressServerId: r.ingressServerId,
       ingressName: server?.name ?? r.ingressServerId,
@@ -296,10 +326,8 @@ export class RelayService implements GameRelayHooks {
       address: host === null ? null : port === undefined ? host : `${host}:${port}`,
       state: r.state === 'ok' || r.state === 'error' ? r.state : 'pending',
       error: r.error,
-      dnsOk:
-        r.dnsName === null || dns.provider === 'none' || dns.tokenEnc === null
-          ? null
-          : ip !== null && r.dnsIp === ip,
+      dnsOk: dns.ok,
+      dnsError: dns.error,
     };
   }
 
@@ -721,7 +749,7 @@ export class RelayService implements GameRelayHooks {
         details: { name: game.name, ingress: prev.ingressServerId },
       });
       await this.reconcile(prev.ingressServerId);
-      await this.releaseName(gameId, prev);
+      if (prev.dnsName !== null) await this.removeDns(gameId);
       this.deps.games.touch(gameId);
       return null;
     }
@@ -758,20 +786,18 @@ export class RelayService implements GameRelayHooks {
         throw new HttpError(409, 'conflict', undefined, `DNS-Name wird schon von ${owner} genutzt`);
       }
     }
-    const dns = this.storedDns();
-    if (dnsName !== null && dns.provider !== 'none' && !nameAllowed(dns.provider, dnsName)) {
-      throw new HttpError(
-        400,
-        'invalid_input',
-        undefined,
-        'Bei DuckDNS nur Namen unter duckdns.org',
-      );
+    if (dnsName !== null && this.dns?.enabled()) {
+      // A record the hub already manages under this name (admin or leftover): refuse
+      // up front. A name that exists only at the provider shows up in dnsError.
+      const providerId = this.dns.providerFor(dnsName);
+      const clash = providerId === null ? null : this.dns.conflict(gameId, providerId, dnsName);
+      if (clash !== null) throw new HttpError(409, 'conflict', undefined, clash);
     }
     const values = {
       listenPortsJson: JSON.stringify(pub.map((p) => ({ name: p.name, port: p.port }))),
       ingressServerId: ingressId,
       dnsName,
-      dnsIp: prev?.dnsName === dnsName ? (prev?.dnsIp ?? null) : null,
+      dnsIp: null,
       state: sameIngress ? prev.state : 'pending',
       error: sameIngress ? prev.error : null,
       // A new assignment goes last: on a port conflict the older relay keeps its ports.
@@ -796,100 +822,32 @@ export class RelayService implements GameRelayHooks {
     });
     await this.reconcile(ingressId);
     if (prev && !sameIngress) await this.reconcile(prev.ingressServerId);
-    if (prev && prev.dnsName !== dnsName) await this.releaseName(gameId, prev);
+    if (prev && prev.dnsName !== dnsName) this.dnsErrors.delete(gameId);
     if (dnsName !== null) await this.applyDns(gameId);
+    else if (prev !== undefined && prev.dnsName !== null) await this.removeDns(gameId);
     this.deps.games.touch(gameId);
     return this.relayOf(gameId);
   }
 
-  // ---- DNS ----------------------------------------------------------------------------
+  // ---- DNS (domains module) -----------------------------------------------------------
 
-  private storedDns(): StoredDns {
-    const parsed = storedDnsSchema.safeParse(readSetting(this.deps.db, DNS_SETTING) ?? EMPTY_DNS);
-    return parsed.success ? parsed.data : EMPTY_DNS;
-  }
-
-  private writeDns(next: StoredDns): void {
-    writeSetting(this.deps.db, DNS_SETTING, next, this.deps.now());
-  }
-
-  /** Never the token: only whether one is stored. */
-  dnsSettings(): DnsSettings {
-    const s = this.storedDns();
-    return {
-      provider: s.provider,
-      tokenSet: s.tokenEnc !== null,
-      zoneId: s.provider === 'cloudflare' ? s.zoneId : null,
-      lastError: s.lastError,
-      lastUpdateAt: s.lastUpdateAt === null ? null : iso(s.lastUpdateAt),
-    };
-  }
-
-  private dnsConfig(): DnsConfig | null {
-    const s = this.storedDns();
-    if (s.provider === 'none' || s.tokenEnc === null) return null;
-    let token: string;
-    try {
-      token = this.deps.box.decrypt(s.tokenEnc, DNS_AAD);
-    } catch {
-      return null;
-    }
-    return { provider: s.provider, token, zoneId: s.zoneId };
-  }
-
-  async updateDns(req: DnsSettingsRequest): Promise<DnsSettings> {
-    const prev = this.storedDns();
-    const now = this.deps.now();
-    let next: StoredDns;
-    if (req.provider === 'none') {
-      next = { ...EMPTY_DNS };
-    } else {
-      // A token is only ever sent to the provider it was entered for.
-      if (req.token === undefined && req.provider !== prev.provider) {
-        throw new HttpError(
-          400,
-          'invalid_input',
-          undefined,
-          'Bei einem Anbieterwechsel das Token neu eingeben',
-        );
-      }
-      const tokenEnc =
-        req.token !== undefined ? this.deps.box.encrypt(req.token, DNS_AAD) : prev.tokenEnc;
-      if (tokenEnc === null) {
-        throw new HttpError(400, 'invalid_input', undefined, 'Token fehlt');
-      }
-      const zoneId =
-        req.provider === 'cloudflare'
-          ? req.zoneId === undefined
-            ? prev.zoneId
-            : req.zoneId
-          : null;
-      if (req.provider === 'cloudflare' && zoneId === null) {
-        throw new HttpError(400, 'invalid_input', undefined, 'Cloudflare-Zone fehlt');
-      }
-      next = { provider: req.provider, tokenEnc, zoneId, lastError: null, lastUpdateAt: null };
-    }
-    this.writeDns(next);
-    writeAudit(this.deps.db, now, {
-      actor: 'admin',
-      action: 'settings.dns_updated',
-      target: null,
-      details: {
-        provider: next.provider,
-        tokenChanged:
-          req.token !== undefined || (req.provider === 'none' && prev.tokenEnc !== null),
-        zoneId: next.zoneId,
-      },
-    });
-    if (next.provider !== 'none') {
-      const named = this.deps.db
-        .select({ gameId: gameRelays.gameId, dnsName: gameRelays.dnsName })
-        .from(gameRelays)
-        .all()
-        .filter((r) => r.dnsName !== null);
-      for (const r of named) await this.applyDns(r.gameId, true);
-    }
-    return this.dnsSettings();
+  /** dnsOk / dnsError of the relay view. */
+  private dnsStatus(
+    r: GameRelayRow,
+    ip: string | null,
+  ): { ok: boolean | null; error: string | null } {
+    const name = r.dnsName;
+    if (name === null) return { ok: null, error: null };
+    const dns = this.dns;
+    if (!dns?.enabled()) return { ok: false, error: DNS_TEXT.moduleOff };
+    const providerId = dns.providerFor(name);
+    if (providerId === null) return { ok: false, error: DNS_TEXT.noProvider };
+    if (ip === null) return { ok: false, error: DNS_TEXT.noIp };
+    const rec = dns.record(r.gameId);
+    const mine = rec !== null && rec.providerId === providerId && rec.name === name;
+    if (mine && rec.status === 'ok' && rec.value === ip) return { ok: true, error: null };
+    const error = this.dnsErrors.get(r.gameId) ?? (mine ? rec.lastError : null) ?? DNS_TEXT.pending;
+    return { ok: false, error: error.slice(0, 200) };
   }
 
   /** Name of the game that uses `dnsName` for its relay (other than `gameId`), or null. */
@@ -904,101 +862,135 @@ export class RelayService implements GameRelayHooks {
     return this.deps.games.row(other.gameId)?.name ?? other.gameId;
   }
 
+  /** Serialises every DNS change (one at a time, in order). */
+  private dnsQueue(fn: () => Promise<void>): Promise<void> {
+    const run = this.dnsChain.then(fn);
+    this.dnsChain = run.catch((err: unknown) => {
+      this.deps.log.error(
+        { err: err instanceof Error ? { name: err.name, stack: err.stack } : 'error' },
+        'relay dns failed',
+      );
+    });
+    return this.dnsChain;
+  }
+
+  private dnsFailure(gameId: string, name: string, err: unknown): void {
+    const text = (
+      err instanceof HttpError && err.userMessage !== undefined ? err.userMessage : DNS_TEXT.failed
+    ).slice(0, 200);
+    const prev = this.dnsErrors.get(gameId);
+    this.dnsErrors.set(gameId, text);
+    if (prev === text) return; // periodic retries: report a reason once
+    this.deps.log.warn({ gameId, name, error: text }, 'dns update failed');
+    writeAudit(this.deps.db, this.deps.now(), {
+      actor: 'system',
+      action: 'relay.dns_failed',
+      target: gameId,
+      details: { name, error: text },
+    });
+    this.deps.games.touch(gameId);
+  }
+
   /**
-   * A game gave up its DNS name: delete the A record the core set (Cloudflare,
-   * only if it still points to that IP and no other game uses the name). DuckDNS
-   * cannot delete; its record stays. Failures are reported, not thrown.
+   * A game gave up its DNS name (or its relay): the domains module deletes its
+   * record, also at the provider. While the module is off the record stays and
+   * syncDns removes it later. Failures are reported, not thrown.
    */
-  releaseName(gameId: string, prev: Pick<GameRelayRow, 'dnsName' | 'dnsIp'>): Promise<void> {
-    const name = prev.dnsName;
-    const ip = prev.dnsIp;
-    if (name === null || ip === null || this.nameOwner(name, gameId) !== null) {
-      return Promise.resolve();
-    }
-    const run = this.dnsChain.then(async () => {
-      const cfg = this.dnsConfig();
-      if (!cfg) return;
+  removeDns(gameId: string): Promise<void> {
+    this.dnsErrors.delete(gameId);
+    return this.dnsQueue(async () => {
+      const dns = this.dns;
+      if (!dns?.enabled() || dns.record(gameId) === null) return;
       try {
-        const deleted = await deleteARecord(this.deps.fetch ?? fetch, cfg, name, ip);
-        if (!deleted) return;
+        await dns.remove(gameId);
         writeAudit(this.deps.db, this.deps.now(), {
           actor: 'system',
           action: 'relay.dns_deleted',
           target: gameId,
-          details: { name, provider: cfg.provider, ip },
+          details: {},
         });
       } catch (err) {
         const text =
-          err instanceof DnsError ? err.text : 'DNS-Eintrag konnte nicht gelöscht werden';
-        this.writeDns({ ...this.storedDns(), lastError: text });
-        this.deps.log.warn({ gameId, name, error: text }, 'dns delete failed');
+          err instanceof HttpError && err.userMessage !== undefined
+            ? err.userMessage.slice(0, 200)
+            : 'DNS-Eintrag konnte nicht gelöscht werden';
+        this.deps.log.warn({ gameId, error: text }, 'dns delete failed');
         writeAudit(this.deps.db, this.deps.now(), {
           actor: 'system',
           action: 'relay.dns_failed',
           target: gameId,
-          details: { name, provider: cfg.provider, error: text },
+          details: { error: text },
         });
       }
     });
-    this.dnsChain = run.catch(() => undefined);
-    return this.dnsChain;
   }
 
-  /** Points the game's DNS name to its ingress (skipped when already done unless `force`). */
-  applyDns(gameId: string, force = false): Promise<void> {
-    const run = this.dnsChain.then(() => this.runDns(gameId, force));
-    this.dnsChain = run.catch(() => undefined);
-    return this.dnsChain;
+  /** Points the game's DNS name to its ingress (no-op while the record already does). */
+  applyDns(gameId: string): Promise<void> {
+    return this.dnsQueue(() => this.runDns(gameId));
   }
 
-  private async runDns(gameId: string, force: boolean): Promise<void> {
+  private async runDns(gameId: string): Promise<void> {
+    const dns = this.dns;
+    if (this.stopped || !dns?.enabled()) return;
     const r = this.relayRow(gameId);
     if (!r?.dnsName) return;
+    const name = r.dnsName;
+    const providerId = dns.providerFor(name);
+    if (providerId === null) {
+      // No provider (any more) for this name: an old record of the game goes.
+      this.dnsErrors.delete(gameId);
+      if (dns.record(gameId) !== null) await dns.remove(gameId).catch(() => undefined);
+      return;
+    }
     const ip = this.publicIpOf(
       this.ingressRow(r.ingressServerId),
       this.serverRow(r.ingressServerId),
     );
-    if (ip === null || (!force && r.dnsIp === ip)) return;
-    const cfg = this.dnsConfig();
-    if (!cfg) return;
-    const name = r.dnsName;
+    if (ip === null) return;
+    const rec = dns.record(gameId);
+    const current =
+      rec !== null && rec.providerId === providerId && rec.name === name && rec.target === ip;
+    if (current && !this.dnsErrors.has(gameId)) return;
     try {
-      if (!nameAllowed(cfg.provider, name)) {
-        throw new DnsError('Bei DuckDNS nur Namen unter duckdns.org');
-      }
-      await setARecord(this.deps.fetch ?? fetch, cfg, name, ip);
+      await dns.ensure({ gameId, providerId, name, ip });
     } catch (err) {
-      const text = err instanceof DnsError ? err.text : 'DNS-Eintrag konnte nicht gesetzt werden';
-      this.writeDns({ ...this.storedDns(), lastError: text });
-      this.deps.log.warn({ gameId, name, error: text }, 'dns update failed');
-      writeAudit(this.deps.db, this.deps.now(), {
-        actor: 'system',
-        action: 'relay.dns_failed',
-        target: gameId,
-        details: { name, provider: cfg.provider, error: text },
-      });
-      this.deps.games.touch(gameId);
+      this.dnsFailure(gameId, name, err);
       return;
     }
-    // Only if the relay still has this name and ingress (it may have changed meanwhile).
-    this.deps.db
-      .update(gameRelays)
-      .set({ dnsIp: ip })
-      .where(
-        and(
-          eq(gameRelays.gameId, gameId),
-          eq(gameRelays.dnsName, name),
-          eq(gameRelays.ingressServerId, r.ingressServerId),
-        ),
-      )
-      .run();
-    this.writeDns({ ...this.storedDns(), lastError: null, lastUpdateAt: this.deps.now() });
+    this.dnsErrors.delete(gameId);
     writeAudit(this.deps.db, this.deps.now(), {
       actor: 'system',
       action: 'relay.dns_updated',
       target: gameId,
-      details: { name, provider: cfg.provider, ip },
+      details: { name, ip },
     });
     this.deps.games.touch(gameId);
+  }
+
+  /**
+   * Brings all relay records in line (job relay.dns every minute, and when the
+   * domains module is switched on): records of games without a DNS name (or
+   * without relay) go, named relays whose record is missing or points elsewhere
+   * are ensured. Nothing happens while the module is off.
+   */
+  async syncDns(): Promise<void> {
+    const dns = this.dns;
+    if (this.stopped || !dns?.enabled()) return;
+    const named = this.deps.db
+      .select({ gameId: gameRelays.gameId, dnsName: gameRelays.dnsName })
+      .from(gameRelays)
+      .all()
+      .filter((r) => r.dnsName !== null)
+      .map((r) => r.gameId);
+    const keep = new Set(named);
+    for (const id of this.dnsErrors.keys()) if (!keep.has(id)) this.dnsErrors.delete(id);
+    for (const owner of dns.owners()) if (!keep.has(owner)) await this.removeDns(owner);
+    for (const gameId of named) await this.applyDns(gameId);
+  }
+
+  /** syncDns in the background (module switched on). */
+  queueDns(): void {
+    this.track(this.syncDns());
   }
 }

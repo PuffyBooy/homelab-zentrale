@@ -99,7 +99,7 @@ design/                   Designsystem (nicht von Hand ändern, siehe design/REA
 | `server_storage` | server_id, storage_json (letztes `inventory.storage`: RAID, Volumes, Platten mit SMART), updated_at (M13, Migration 14) |
 | `game_backups` | id, game_id, path, size, created_at |
 | `server_ingress` | server_id, enabled, public_ip, port_from, port_to, updated_at (Eingang für das Game-Relay, M15, Migration 16) |
-| `game_relays` | game_id, ingress_server_id, dns_name, dns_ip (zuletzt beim Anbieter gesetzt), listen_ports_json (feste Ports am Eingang, bleiben beim Umzug), state, error, updated_at (M15) |
+| `game_relays` | game_id, ingress_server_id, dns_name, dns_ip (seit M20 ungenutzt: den A-Eintrag führt das Domains-Modul als `dns_records` mit owner `relay`), listen_ports_json (feste Ports am Eingang, bleiben beim Umzug), state, error, updated_at (M15) |
 | `game_schedules` | id, game_id, kind (`restart`/`backup`), days_json (ISO-Wochentage), time (HH:MM in `HZ_TIMEZONE`), enabled, last_run_at (M12, Migration 15) |
 | `game_notify` | game_id, discord_url_enc (AES-GCM), events_json, last_sent_at, last_error (M12) |
 | `game_player_sessions` | id, game_id, player, started_at, ended_at (aus den Status-Abfragen, 90 Tage, M12) |
@@ -177,6 +177,10 @@ Die erste Nachricht muss innerhalb von 10 s ein gültiges `hello` sein. Danach a
 | `image.scan` | `{id}` → der Agent ermittelt den Registry-Digest selbst und startet das gepinnte Trivy-Image (`HZ_AGENT_TRIVY_IMAGE`) mit `--image-src remote`, ohne Docker-Socket und Host-Pfade, Cache im Volume `hz-trivy-cache`; lokal gebaute Images → `local_image`; ein Scan gleichzeitig (sonst `busy`) |
 | `fail2ban.status` / `fail2ban.unban` | `{}` / `{jail, ip}`: `fail2ban-client status [jail]` bzw. `fail2ban-client set <jail> unbanip <ip>` auf dem Host; der Jail muss in der Jail-Liste stehen |
 | `pty.open` / `pty.input` / `pty.resize` / `pty.close` | nur wenn `HZ_AGENT_ALLOW_TERMINAL=1` |
+| `task.exec` | `{taskId, command, timeoutSec}` → `{exitCode, timedOut, durationMs, output, truncated}`: eine Zeile `/bin/sh -c` auf dem Host, nur wenn `HZ_AGENT_ALLOW_TASKS=1` (M20), feste Umgebung, Prozessgruppe nach dem Zeitlimit beendet, Befehl nie im Log |
+| `speedtest.run` | `{maxSeconds, maxBytes}` → Download, Upload, Ping, Jitter; nur gegen `speed.cloudflare.com` (M20) |
+| `cert.write` / `cert.remove` | `{name, fullchainPem, privkeyPem}` / `{name}`: nur `/opt/homelab/certs/<name>/`, Schlüssel 0600, keine Symlinks (M20) |
+| `app.remove` | `{appId, deleteData}`: `compose down` in `/opt/homelab/apps/<appId>/`, mit `deleteData` Ordner löschen (M21) |
 
 Pfade werden im Agent normalisiert und müssen mit `/opt/homelab/` beginnen. Kein `exec` beliebiger Strings: Jede Aktion ruft feste Programme mit Argument-Arrays auf (`execFile`, nie `shell: true`).
 

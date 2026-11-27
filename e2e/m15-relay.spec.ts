@@ -9,7 +9,8 @@ import { PASSWORD, USER, loopbackOrigin } from './helpers/auth.js';
  * M15 "Game-Relay" (web part) against an own core with HZ_DEMO=1 (port 8098, own data
  * folder, own admin and TOTP). The demo data has one ingress and one game relayed through
  * it. Demo servers have no agent, so the spec only checks what is visible: Settings →
- * Eingänge and DNS, "Erreichbar über" on the game page, "über <Eingang>" in the list.
+ * Eingänge with the hint that DNS names come from Internet → Domains (M20), "Erreichbar
+ * über" on the game page (DNS state and error), "über <Eingang>" in the list.
  * Screenshots in docs/screenshots/m15/ in dark, light and wall.
  */
 
@@ -23,7 +24,13 @@ test.describe.configure({ mode: 'serial', timeout: 120_000 });
 interface RelayGame {
   id: string;
   name: string;
-  relay: { ingressName: string; address: string | null } | null;
+  relay: {
+    ingressName: string;
+    address: string | null;
+    dnsName: string | null;
+    dnsOk: boolean | null;
+    dnsError: string | null;
+  } | null;
 }
 
 let core: ChildProcess | null = null;
@@ -137,13 +144,20 @@ test.afterAll(async () => {
   core?.kill('SIGTERM');
 });
 
-test('Settings: Eingänge lists the servers with state, firewall line and DNS', async () => {
+test('Settings: Eingänge lists the servers with state, firewall line and the DNS hint', async () => {
   await page.goto('/settings#eingaenge');
   const tile = tileByTitle(page, 'Eingänge');
   await expect(tile).toBeVisible();
   await expect(tile.getByText(/Ein Eingang ist ein Server mit öffentlicher IPv4/)).toBeVisible();
-  await expect(tileByTitle(page, 'DNS')).toBeVisible();
-  await expect(tileByTitle(page, 'DNS').getByLabel('Anbieter')).toBeVisible();
+  // M20: no own DNS settings any more, the names come from the domains module.
+  await expect(tileByTitle(page, 'DNS')).toHaveCount(0);
+  const hint = tile.getByTestId('relay-dns-hint');
+  await expect(hint).toContainText('DNS-Namen für Gameserver kommen aus');
+  await expect(hint.getByRole('link', { name: 'Internet → Domains' })).toHaveAttribute(
+    'href',
+    '/internet',
+  );
+  expect((await api('GET', '/api/settings/dns')).status).toBe(404);
   test.skip(!hasIngresses, 'core without the M15 demo ingress');
 
   const row = tile.getByTestId('ingress-row').filter({ has: page.locator('.hz-status-ok') });
@@ -183,6 +197,17 @@ test('game detail: "Erreichbar über" with ingress, state and address', async ()
   }
   await expect(tile.getByRole('button', { name: 'Kopieren', exact: true })).toBeVisible();
   await expect(tile.getByLabel('Eingang', { exact: true })).toBeVisible();
+  // DNS state: shape and text; on failure the core's reason and a link to the domains.
+  if (g.relay?.dnsName && g.relay.dnsOk === false) {
+    await expect(
+      tile.locator('.hz-status-warn', { hasText: 'Zeigt nicht auf den Eingang' }),
+    ).toBeVisible();
+    const alert = tile.locator('.hz-alert-warn');
+    if (g.relay.dnsError) await expect(alert).toContainText(g.relay.dnsError);
+    await expect(alert.getByRole('link', { name: 'Internet → Domains' })).toBeVisible();
+  } else if (g.relay?.dnsName && g.relay.dnsOk === true) {
+    await expect(tile.locator('.hz-status-ok', { hasText: 'Zeigt auf den Eingang' })).toBeVisible();
+  }
   await expect(page.getByText('Kein Router-Portforwarding nötig.')).toBeVisible();
   await tile.scrollIntoViewIfNeeded();
   await themes(page, 'game-relay');

@@ -25,6 +25,11 @@ const off = {
   fail2ban: false,
   discordbot: false,
   voice: false,
+  tasks: false,
+  selfheal: false,
+  speedtest: false,
+  domains: false,
+  apps: false,
   cloud: false,
 };
 
@@ -38,6 +43,10 @@ describe('modules', () => {
     expect(moduleOfPath('/network')).toBeUndefined();
     expect(moduleOfPath('/servers')).toBeUndefined();
     expect(moduleOfPath('/homeassistant')).toBeUndefined();
+    expect(moduleOfPath('/apps')).toBe('apps');
+    expect(modulesOfPath('/automation')).toEqual(['tasks', 'selfheal']);
+    expect(modulesOfPath('/internet')).toEqual(['speedtest', 'domains']);
+    expect(modulesOfPath('/constructor')).toEqual([]);
     expect(moduleOfPath('/logs')).toBe('logsearch');
     expect(modulesOfPath('/security')).toEqual(['vulnscan', 'fail2ban']);
     expect(moduleOfPath('/cloud')).toBe('cloud');
@@ -50,6 +59,20 @@ describe('modules', () => {
     expect(ids({ cloud: true })).toContain('cloud');
     expect(isModuleOn(undefined, 'cloud')).toBe(false);
     expect(pageMeta('/cloud', { modules: off }).title.rest).toBe('Cloud-Server ist ausgeschaltet.');
+  });
+
+  it('keeps a page of several modules while any of them is on', () => {
+    expect(anyModuleOn(off, ['tasks', 'selfheal'])).toBe(false);
+    expect(anyModuleOn({ ...off, selfheal: true }, ['tasks', 'selfheal'])).toBe(true);
+    const ids = (m: typeof off) => visibleNavItems(navItems, m).map((i) => i.id);
+    expect(ids(off)).not.toContain('automation');
+    expect(ids(off)).not.toContain('internet');
+    expect(ids(off)).not.toContain('apps');
+    expect(ids({ ...off, selfheal: true })).toContain('automation');
+    expect(ids({ ...off, domains: true })).toContain('internet');
+    expect(ids({ ...off, domains: true })).not.toContain('automation');
+    expect(ids({ ...off, apps: true })).toContain('apps');
+    expect(moduleLabels(['tasks', 'selfheal'])).toBe('Geplante Aufgaben und Selbstheilung');
   });
 
   it('shows Sicherheit while vulnscan or fail2ban is on', () => {
@@ -91,6 +114,13 @@ describe('modules', () => {
     expect(meta.title.rest).toBe('GitHub ist ausgeschaltet.');
     expect(meta.serverSwitch).toBe(false);
     expect(pageMeta('/github', {}).title.rest).toBe('GitHub');
+    expect(pageMeta('/automation', { modules: off }).title.rest).toBe(
+      'Geplante Aufgaben und Selbstheilung sind ausgeschaltet.',
+    );
+    expect(pageMeta('/internet', { modules: off }).sub).toBe(
+      'Internet · Speedtest oder Domains und Zertifikate einschalten unter Einstellungen → Module',
+    );
+    expect(pageMeta('/apps', { modules: off }).title.rest).toBe('App-Store ist ausgeschaltet.');
     expect(pageMeta('/security', { modules: off }).title.rest).toBe(
       'Schwachstellen-Scan und Fail2ban sind ausgeschaltet.',
     );

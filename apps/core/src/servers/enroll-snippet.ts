@@ -46,6 +46,7 @@ export function enrollSnippets(
     ['HZ_AGENT_NAME', name],
     ['HZ_AGENT_TOKEN', token],
     ['HZ_AGENT_ALLOW_TERMINAL', '0'],
+    ['HZ_AGENT_ALLOW_TASKS', '0'],
     ['HZ_AGENT_DATA', '/data'],
     ['HZ_AGENT_HOST_EXEC', 'nsenter'],
     ['HZ_AGENT_HOST_PROC', '/host/proc'],

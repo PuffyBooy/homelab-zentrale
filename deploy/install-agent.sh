@@ -3,13 +3,17 @@
 #
 #   sudo HZ_AGENT_TOKEN=<token> ./deploy/install-agent.sh \
 #     --url wss://heimserver.<tailnet>.ts.net/agent --name oracle-a1 \
-#     [--image <image> | --build-local] [--allow-terminal] [--allow-relay | --no-relay] [--smart]
+#     [--image <image> | --build-local] [--allow-terminal] [--tasks]
+#     [--allow-relay | --no-relay] [--smart]
 #
 # Image: by default the multi-arch image ghcr.io/puffybooy/homelab-agent:latest
 # (amd64 + arm64) is pulled. Pin a build with --image ghcr.io/puffybooy/homelab-agent:sha-<short>
 # or :v<version>. --build-local (or HZ_BUILD_LOCAL=1) builds the image from this checkout
 # instead, as homelab-zentrale/agent:local.
 #
+# --tasks allows scheduled shell commands from the core (M20, task.exec): sets
+# HZ_AGENT_ALLOW_TASKS=1 in agent.env. Like --allow-terminal it is a root shell on
+# the host, started by the core; leave it off unless you need "Befehl ausführen".
 # --allow-relay makes this server a game ingress (M15, HZ_AGENT_ALLOW_RELAY=1): the
 # agent then forwards the public game ports into the tailnet. Only on the server with
 # the public IPv4 whose firewall opens the game ports, never on the home server.
@@ -42,6 +46,7 @@ url=""
 name=""
 image=""
 allow_terminal=0
+tasks=0
 # Empty: keep what agent.env says (0 for a new one); 1/0 from --allow-relay/--no-relay.
 allow_relay=""
 smart=0
@@ -55,7 +60,7 @@ die() {
 }
 
 usage() {
-  sed -n '2,27p' "$0" | sed 's/^# \{0,1\}//'
+  sed -n '2,35p' "$0" | sed 's/^# \{0,1\}//'
   exit "${1:-0}"
 }
 
@@ -66,6 +71,7 @@ while [[ $# -gt 0 ]]; do
     --image) image="${2:-}"; shift 2 ;;
     --build-local) build_local=1; shift ;;
     --allow-terminal) allow_terminal=1; shift ;;
+    --tasks) tasks=1; shift ;;
     --allow-relay) allow_relay=1; shift ;;
     --no-relay) allow_relay=0; shift ;;
     --smart) smart=1; shift ;;
@@ -133,25 +139,29 @@ if [[ -n "$token" || ! -f "$CONF_DIR/agent.env" ]]; then
     printf 'HZ_AGENT_NAME=%s\n' "$name"
     printf 'HZ_AGENT_TOKEN=%s\n' "$token"
     printf 'HZ_AGENT_ALLOW_TERMINAL=%s\n' "$allow_terminal"
+    printf 'HZ_AGENT_ALLOW_TASKS=%s\n' "$tasks"
     printf 'HZ_AGENT_ALLOW_RELAY=%s\n' "${allow_relay:-0}"
   } >"$tmp"
   chmod 0600 "$tmp"
   mv -f "$tmp" "$CONF_DIR/agent.env"
-elif [[ -n "$allow_relay" ]]; then
-  # Existing config, no new token: --allow-relay / --no-relay still switch the
-  # ingress (the token line is copied unchanged, never printed).
-  tmp="$(mktemp "$CONF_DIR/.agent.env.XXXXXX")"
-  grep -v '^HZ_AGENT_ALLOW_RELAY=' "$CONF_DIR/agent.env" >"$tmp" || true
-  # A last line without newline would swallow the new entry.
-  if [[ -s "$tmp" && -n "$(tail -c 1 "$tmp")" ]]; then echo >>"$tmp"; fi
-  printf 'HZ_AGENT_ALLOW_RELAY=%s\n' "$allow_relay" >>"$tmp"
-  chmod 0600 "$tmp"
-  mv -f "$tmp" "$CONF_DIR/agent.env"
-  if [[ $allow_relay -eq 1 ]]; then
-    echo "Game-Relay eingeschaltet (HZ_AGENT_ALLOW_RELAY=1)."
-  else
-    echo "Game-Relay ausgeschaltet (HZ_AGENT_ALLOW_RELAY=0)."
-  fi
+else
+  # Existing configuration without a new token: --allow-terminal / --tasks switch the
+  # flag on, --allow-relay / --no-relay switch the ingress, in place (everything else,
+  # including the agent token, is copied unchanged and never printed).
+  relay_flag=""
+  [[ -n "$allow_relay" ]] && relay_flag="HZ_AGENT_ALLOW_RELAY:$allow_relay:set"
+  for flag in HZ_AGENT_ALLOW_TERMINAL:"$allow_terminal":on HZ_AGENT_ALLOW_TASKS:"$tasks":on $relay_flag; do
+    IFS=: read -r key value mode <<<"$flag"
+    [[ "$mode" == set || "$value" == 1 ]] || continue
+    tmp="$(mktemp "$CONF_DIR/.agent.env.XXXXXX")"
+    grep -v "^${key}=" "$CONF_DIR/agent.env" >"$tmp" || true
+    # A last line without newline would swallow the new entry.
+    if [[ -s "$tmp" && -n "$(tail -c 1 "$tmp")" ]]; then echo >>"$tmp"; fi
+    printf '%s=%s\n' "$key" "$value" >>"$tmp"
+    chmod 0600 "$tmp"
+    mv -f "$tmp" "$CONF_DIR/agent.env"
+    echo "$key=$value in $CONF_DIR/agent.env gesetzt."
+  done
 fi
 umask "$old_umask"
 unset token HZ_AGENT_TOKEN

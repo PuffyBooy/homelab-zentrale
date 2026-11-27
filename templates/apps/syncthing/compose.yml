@@ -1,0 +1,15 @@
+# Syncthing (templates/apps/README.md). Values come from .env.
+services:
+  syncthing:
+    image: syncthing/syncthing:2.1.7
+    restart: unless-stopped
+    hostname: ${APP_ID}
+    environment:
+      PUID: ${PUID}
+      PGID: ${PGID}
+      TZ: ${TZ}
+    ports:
+      - '${BIND}:${WEB_PORT}:8384'
+      - '${BIND}:${SYNC_PORT}:22000/tcp'
+    volumes:
+      - ./data/syncthing:/var/syncthing

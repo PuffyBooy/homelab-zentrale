@@ -26,6 +26,8 @@ export interface ConnectionOptions {
   /** HZ_AGENT_TOKEN (enrollment or agent token). */
   envToken: string | undefined;
   allowTerminal: boolean;
+  /** HZ_AGENT_ALLOW_TASKS=1 (reported as capabilities.tasks). */
+  allowTasks?: boolean;
   /** HZ_AGENT_ALLOW_RELAY=1 (capability relay in hello). */
   allowRelay?: boolean;
   docker: boolean;
@@ -188,6 +190,7 @@ export class AgentConnection {
       capabilities: {
         terminal: this.o.allowTerminal,
         docker: this.o.docker,
+        tasks: this.o.allowTasks === true,
         relay: this.o.allowRelay === true,
       },
     });

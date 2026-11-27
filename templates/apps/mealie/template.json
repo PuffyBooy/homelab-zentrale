@@ -1,0 +1,32 @@
+{
+  "id": "mealie",
+  "name": "Mealie",
+  "description": "Rezeptverwaltung mit Import von Webseiten, Wochenplan und Einkaufsliste.",
+  "category": "werkzeuge",
+  "version": "3.31.0",
+  "website": "https://mealie.io",
+  "arch": [
+    "amd64",
+    "arm64"
+  ],
+  "minRamMb": 512,
+  "params": [
+    {
+      "type": "port",
+      "key": "WEB_PORT",
+      "label": "Web-Oberfläche (Port)",
+      "default": 9925,
+      "protocol": "tcp",
+      "web": true
+    },
+    {
+      "type": "bool",
+      "key": "ALLOW_SIGNUP",
+      "label": "Registrierung erlauben",
+      "default": false
+    }
+  ],
+  "hints": [
+    "Erster Login mit dem Standardzugang aus der Mealie-Doku (changeme@example.com / MyPassword), dann sofort E-Mail und Passwort ändern."
+  ]
+}

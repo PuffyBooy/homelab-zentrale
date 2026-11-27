@@ -5,32 +5,42 @@ import { Tile } from '@hz/ui';
 import { anyModuleOn, MODULE_ICON, MODULE_PAGE, moduleLabels } from '../lib/modules.js';
 import { useModules } from '../lib/useModules.js';
 
+type ModuleRef = ModuleId | readonly ModuleId[];
+
+const asList = (m: ModuleRef): readonly ModuleId[] => (typeof m === 'string' ? [m] : m);
+
 /**
- * Renders the page only while its module is on (or, for a list, any of them);
+ * Renders the page only while its module is on (or, for a list, at least one of them);
  * otherwise a short note with the way back on.
  */
 export function ModuleGate({
   module,
   children,
 }: {
-  module: ModuleId | readonly ModuleId[];
+  module: ModuleRef;
   children: ReactNode;
 }): ReactElement {
   const modules = useModules();
-  const ids: readonly ModuleId[] = typeof module === 'string' ? [module] : module;
-  if (anyModuleOn(modules, ids)) return <>{children}</>;
-  return <ModuleOff module={ids} />;
+  if (anyModuleOn(modules, asList(module))) return <>{children}</>;
+  return <ModuleOff module={module} />;
 }
 
-export function ModuleOff({ module }: { module: ModuleId | readonly ModuleId[] }): ReactElement {
-  const ids: readonly ModuleId[] = typeof module === 'string' ? [module] : module;
-  const first = ids[0] ?? 'games';
+export function ModuleOff({
+  module,
+  title,
+}: {
+  module: ModuleRef;
+  /** Tile title; defaults to the page of the module. */
+  title?: string | undefined;
+}): ReactElement {
+  const list = asList(module);
+  const first = list[0] ?? 'games';
+  const verb = list.length > 1 ? 'sind' : 'ist';
   return (
-    <Tile title={MODULE_PAGE[first]} icon={MODULE_ICON[first]}>
+    <Tile title={title ?? MODULE_PAGE[first]} icon={MODULE_ICON[first]}>
       <div className="app-empty-block" data-testid="module-off">
         <p className="app-empty">
-          Modul ausgeschaltet. {moduleLabels(ids)} {ids.length > 1 ? 'sind' : 'ist'} in dieser
-          Zentrale nicht aktiv.
+          Modul ausgeschaltet. {moduleLabels(list)} {verb} in dieser Zentrale nicht aktiv.
         </p>
         <div>
           <Link className="hz-btn hz-btn-secondary hz-btn-sm" to="/settings#module">
