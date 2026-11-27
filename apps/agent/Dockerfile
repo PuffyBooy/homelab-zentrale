@@ -69,5 +69,11 @@ VOLUME ["/data"]
 # sets `user: "0:0"` explicitly together with a minimal capability set.
 USER node
 # No port: the agent only dials out to the core (docs/NETWORK.md).
-HEALTHCHECK NONE
+# M17: healthy only while the agent is connected to the core. The agent writes
+# /tmp/hz-connected on welcome and removes it on disconnect (src/health.ts); the
+# updater helper waits for "healthy" before it removes the old agent container,
+# else it rolls back. node is the only tool needed (no curl, no shell).
+HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --start-interval=5s --retries=3 \
+  CMD ["node", "-e", "require('node:fs').accessSync('/tmp/hz-connected')"]
+# dist/updater.js is the M17 updater helper's entry (same image, other command).
 CMD ["node", "dist/index.js"]

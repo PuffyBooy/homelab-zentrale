@@ -49,7 +49,7 @@ export interface UpdateInspect {
     Shell?: string[] | null;
   };
   HostConfig: Docker.HostConfig & { Mounts?: Docker.MountSettings[] };
-  Mounts?: { Type: string; Name?: string; Destination: string; RW?: boolean }[];
+  Mounts?: { Type: string; Name?: string; Source?: string; Destination: string; RW?: boolean }[];
   NetworkSettings?: {
     Networks?: Record<
       string,
@@ -275,7 +275,11 @@ export interface UpdateResult {
 const statusOf = (err: unknown) => (err as { statusCode?: number } | null)?.statusCode;
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
-async function pullImage(docker: UpdateDocker, ref: string, timeoutMs: number): Promise<void> {
+export async function pullImage(
+  docker: UpdateDocker,
+  ref: string,
+  timeoutMs: number,
+): Promise<void> {
   const stream = await docker.pull(ref);
   await new Promise<void>((resolve, reject) => {
     const timer = setTimeout(() => {

@@ -193,7 +193,7 @@ test('detail page shows values, cleanup preview and reboot confirmation', async 
   const main = page.getByRole('main');
   await expect(main.getByText('7,8 / 16 GB · 49 %')).toBeVisible();
   await expect(main.getByText('389 / 480 GB · 81 %')).toBeVisible();
-  await expect(main.getByText('44,5 °C')).toBeVisible();
+  await expect(main.getByText('44,5 °C').first()).toBeVisible();
   await expect(main.getByText('6.1.0-28-amd64')).toBeVisible();
   await expect(main.getByText('12 T 4 h')).toBeVisible();
   await expect(main.getByText('100.64.0.20')).toBeVisible();

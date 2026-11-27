@@ -20,6 +20,8 @@ export * from './api/ports.js';
 export * from './api/storage.js';
 export * from './api/backup-target.js';
 export * from './api/game-features.js';
+export * from './api/server-admin.js';
+export * from './api/updates.js';
 export * from './api/relay.js';
 export * from './agent-ops.js';
 export * from './agent-backup-target.js';

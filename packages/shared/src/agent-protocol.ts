@@ -186,8 +186,8 @@ export const containerInfoSchema = z.strictObject({
   cpu: percent.optional(),
   memBytes: nonNeg.optional(),
   restartCount: z.number().int().nonnegative().optional(),
-  /** Value of the label hz.role when it is core or agent (never a throttle target). */
-  role: z.enum(['core', 'agent']).optional(),
+  /** Value of the label hz.role when it is core, agent or updater (M17 helper); never a throttle target. */
+  role: z.enum(['core', 'agent', 'updater']).optional(),
   /** Current --cpus limit (HostConfig.NanoCpus / 1e9), null without a limit. */
   cpuLimit: nonNeg.nullable().optional(),
   /**
@@ -349,8 +349,41 @@ export const inventorySchema = z.strictObject({
   listeningPorts: z.array(listeningPortSchema).max(1000),
   /** M13: md RAID, volumes, disks. Absent from older agents. */
   storage: storageInfoSchema.optional(),
+  /** M16: systemd service units in state `failed` (names only). Absent without systemd. */
+  failedServices: z.array(z.string().max(200)).max(50).optional(),
 });
 export type Inventory = z.infer<typeof inventorySchema>;
+
+/** M17: what an image update replaces. `core` is the container with hz.role=core on this host. */
+export const updateTargetSchema = z.enum(['agent', 'core']);
+export type UpdateTarget = z.infer<typeof updateTargetSchema>;
+
+/** M17: version of an image, from its OCI labels. */
+export const imageVersionSchema = z.strictObject({
+  /** Docker image id (sha256:...). */
+  imageId: z.string().regex(/^sha256:[0-9a-f]{64}$/),
+  /** org.opencontainers.image.revision (git commit). */
+  revision: z
+    .string()
+    .regex(/^[0-9a-f]{7,40}$/)
+    .optional(),
+  /** org.opencontainers.image.version, e.g. sha-1a2b3c4 or v1.2.0. */
+  version: z
+    .string()
+    .regex(/^[A-Za-z0-9][A-Za-z0-9._+-]{0,63}$/)
+    .optional(),
+  /** org.opencontainers.image.created. */
+  created: isoTs.optional(),
+});
+export type ImageVersion = z.infer<typeof imageVersionSchema>;
+
+/**
+ * M17 outcome of an update: updated (new image healthy), up_to_date (nothing to
+ * do), rolled_back (new image failed the health check, old one runs again),
+ * failed (could not update; the old container still runs unless the message says so).
+ */
+export const updateOutcomeSchema = z.enum(['updated', 'up_to_date', 'rolled_back', 'failed']);
+export type UpdateOutcome = z.infer<typeof updateOutcomeSchema>;
 
 export const agentEventSchema = z.strictObject({
   type: z.literal('event'),
@@ -391,6 +424,21 @@ export const agentEventSchema = z.strictObject({
       gameId: gameFolderNameSchema,
       port: z.number().int().min(1024).max(65535),
       protocol: z.enum(['tcp', 'udp']),
+    }),
+    /**
+     * M17: outcome of update.apply. Sent right after the update, or after the
+     * next hello when the connection dropped meanwhile (core restart, agent
+     * replaced). The core ignores unknown or finished runIds.
+     */
+    z.strictObject({
+      kind: z.literal('update_result'),
+      runId: rpcIdSchema,
+      target: updateTargetSchema,
+      outcome: updateOutcomeSchema,
+      from: imageVersionSchema.optional(),
+      to: imageVersionSchema.optional(),
+      /** Short English reason on rolled_back/failed (no secrets, no paths outside the image). */
+      message: z.string().max(300).optional(),
     }),
     z.strictObject({
       kind: z.literal('denied'),
@@ -758,6 +806,91 @@ export const backupFileNameSchema = z
   .regex(/^[a-z0-9](?:[a-z0-9-]{0,30}[a-z0-9])-\d{8}-\d{6}\.tar\.zst$/);
 
 // ---------------------------------------------------------------------------
+// M16 Server-Verwaltung and M17 Auto-Update: params of the new actions.
+
+/** What system.cleanup can clean (system.cleanupPreview lists the same kinds). */
+export const cleanupKindSchema = z.enum([
+  'apt-cache',
+  'old-kernels',
+  'journal',
+  'docker-images',
+  'docker-build-cache',
+]);
+export type CleanupKind = z.infer<typeof cleanupKindSchema>;
+
+/** Host paths system.du never measures (virtual file systems, sockets). */
+export const DU_DENIED_ROOTS = ['/proc', '/sys', '/dev', '/run'] as const;
+
+/**
+ * An absolute, normalized directory on the host for system.du ("größte Ordner").
+ * Read-only: the agent only sums sizes. No control characters, no `.`/`..`
+ * segments, no `//`, no trailing slash (except `/` itself), never below
+ * /proc, /sys, /dev or /run.
+ */
+export const hostDirPathSchema = z
+  .string()
+  .min(1)
+  .max(256)
+  .refine((p) => p.startsWith('/'), { message: 'absolute path required' })
+  .refine((p) => ![...p].some((c) => c.charCodeAt(0) < 0x20 || c.charCodeAt(0) === 0x7f), {
+    message: 'control character in path',
+  })
+  .refine((p) => p === '/' || !p.endsWith('/'), { message: 'path must be normalized' })
+  .refine((p) => !p.includes('//'), { message: 'path must be normalized' })
+  .refine((p) => !p.split('/').some((seg) => seg === '..' || seg === '.'), {
+    message: 'path must be normalized',
+  })
+  .refine((p) => !DU_DENIED_ROOTS.some((r) => p === r || p.startsWith(`${r}/`)), {
+    message: 'path not allowed',
+  });
+
+/**
+ * A systemd service unit the agent may start/stop/restart (system.service).
+ * The agent additionally requires it in HZ_AGENT_SERVICES and refuses the
+ * hard-coded deny list (SERVICE_DENYLIST).
+ */
+export const serviceUnitSchema = z
+  .string()
+  .regex(/^[A-Za-z0-9][A-Za-z0-9@._:-]{0,120}\.service$/)
+  .refine((u) => !u.includes('..'), { message: 'invalid unit' });
+
+/**
+ * Units that are never started, stopped or restarted from the UI, whatever
+ * HZ_AGENT_SERVICES says: stopping them cuts off the agent, the tailnet, SSH or
+ * the host itself. Compared without the `.service` suffix and without an `@instance`.
+ */
+export const SERVICE_DENYLIST = [
+  'tailscaled',
+  'docker',
+  'containerd',
+  'ssh',
+  'sshd',
+  'dbus',
+  'dbus-broker',
+  'systemd-journald',
+  'systemd-logind',
+  'systemd-networkd',
+  'systemd-resolved',
+  'systemd-udevd',
+  'networking',
+  'NetworkManager',
+  'getty',
+  'serial-getty',
+] as const;
+
+/** True when `unit` (e.g. "sshd.service", "getty@tty1.service") is on SERVICE_DENYLIST. */
+export function isDeniedServiceUnit(unit: string): boolean {
+  const noSuffix = unit.endsWith('.service') ? unit.slice(0, -'.service'.length) : unit;
+  const at = noSuffix.indexOf('@');
+  const base = at === -1 ? noSuffix : noSuffix.slice(0, at);
+  return (SERVICE_DENYLIST as readonly string[]).includes(base) || base.startsWith('systemd-');
+}
+
+export const serviceOpSchema = z.enum(['start', 'stop', 'restart']);
+export type ServiceOp = z.infer<typeof serviceOpSchema>;
+
+export const processSortSchema = z.enum(['cpu', 'mem']);
+export type ProcessSort = z.infer<typeof processSortSchema>;
 // M15: game relay
 
 /**
@@ -1034,7 +1167,18 @@ export const rpcParamsByAction = {
    */
   'deploy.key': z.strictObject({ name: fileNameSchema }),
   'system.cleanupPreview': z.strictObject({}),
-  'system.cleanup': z.strictObject({}),
+  /**
+   * M16: `items` picks what to clean (default: everything from the preview).
+   * Never removes containers or volumes.
+   */
+  'system.cleanup': z.strictObject({
+    items: z
+      .array(cleanupKindSchema)
+      .min(1)
+      .max(5)
+      .refine((a) => new Set(a).size === a.length, { message: 'duplicate item' })
+      .optional(),
+  }),
   'system.reboot': z.strictObject({ confirmName: agentNameSchema }),
   /**
    * M14: sends one Wake-on-LAN magic packet (6 x 0xFF + 16 x MAC, 102 bytes) as
@@ -1057,6 +1201,48 @@ export const rpcParamsByAction = {
   'pty.input': z.strictObject({ streamId: streamIdSchema, data: z.string().max(16 * 1024) }),
   'pty.resize': z.strictObject({ streamId: streamIdSchema, ...ptySize }),
   'pty.close': z.strictObject({ streamId: streamIdSchema }),
+
+  // M16 Server-Verwaltung ----------------------------------------------------
+  /**
+   * Sizes of the direct children of one host directory (`du -x -d1`), largest
+   * first, at most 30. Read-only, stays on the file system of `path`.
+   */
+  'system.du': z.strictObject({ path: hostDirPathSchema }),
+  /** Docker disk usage: images, containers, volumes, build cache (read-only). */
+  'system.dockerDf': z.strictObject({}),
+  /** systemd service units of the host with their state (read-only). */
+  'system.services': z.strictObject({}),
+  /** Start/stop/restart one unit listed in HZ_AGENT_SERVICES (never SERVICE_DENYLIST). */
+  'system.service': z.strictObject({ unit: serviceUnitSchema, op: serviceOpSchema }),
+  /** Top processes of the host by CPU or RAM; process names only, never arguments. */
+  'system.processes': z.strictObject({
+    sort: processSortSchema,
+    limit: z.number().int().min(1).max(50),
+  }),
+  /** Powers the host off (`systemctl poweroff`). Same checks as system.reboot. */
+  'system.shutdown': z.strictObject({ confirmName: agentNameSchema }),
+
+  // M17 Auto-Update ----------------------------------------------------------
+  /**
+   * Pulls the image tag of the target container (never a different image) and
+   * compares it with the running one. Changes nothing else.
+   */
+  'update.check': z.strictObject({ target: updateTargetSchema }),
+  /**
+   * Starts the update of the target container and answers at once
+   * ({ accepted: true }). The outcome arrives later as event `update_result`
+   * with the same runId, also after a reconnect (persisted on the agent).
+   * core: the agent recreates the core container with the new image and rolls
+   * back unless the core is healthy within 3 min. agent: a short-lived helper
+   * container (old image, label hz.role=updater) recreates the agent and rolls
+   * back unless the new agent reconnects (healthy) within 3 min.
+   */
+  'update.apply': z.strictObject({ target: updateTargetSchema, runId: rpcIdSchema }),
+  /**
+   * OS packages: `apt-get update` + `apt-get -y upgrade` with fixed arguments
+   * (no dist-upgrade, no removals, keeps changed config files). apt hosts only.
+   */
+  'system.upgrade': z.strictObject({}),
 } as const;
 
 export type RpcAction = keyof typeof rpcParamsByAction;
@@ -1159,7 +1345,7 @@ export type CheckResultData = z.infer<typeof checkResultDataSchema>;
 export const cleanupPreviewDataSchema = z.strictObject({
   items: z.array(
     z.strictObject({
-      kind: z.enum(['apt-cache', 'old-kernels', 'journal', 'docker-images', 'docker-build-cache']),
+      kind: cleanupKindSchema,
       bytes: nonNeg,
       detail: z.string().max(200).optional(),
     }),
@@ -1252,6 +1438,110 @@ export const deployKeyDataSchema = z.strictObject({
     .max(200)
     .regex(/^ssh-ed25519 [A-Za-z0-9+/]+=* homelab-zentrale [A-Za-z0-9._-]+$/),
 });
+
+// M16 / M17 result data -------------------------------------------------------
+
+export const duDataSchema = z.strictObject({
+  path: z.string().max(256),
+  /** Size of `path` itself (all children). */
+  totalBytes: nonNeg,
+  /** Largest first. Names only (one path segment). */
+  entries: z
+    .array(
+      z.strictObject({
+        name: z.string().min(1).max(255),
+        bytes: nonNeg,
+        dir: z.boolean(),
+      }),
+    )
+    .max(30),
+  /** More children than listed, or the scan hit its time limit. */
+  truncated: z.boolean(),
+});
+export type DuData = z.infer<typeof duDataSchema>;
+
+const dfPart = {
+  count: z.number().int().nonnegative(),
+  bytes: nonNeg,
+};
+export const dockerDfDataSchema = z.strictObject({
+  images: z.strictObject({
+    ...dfPart,
+    unusedCount: z.number().int().nonnegative(),
+    unusedBytes: nonNeg,
+  }),
+  containers: z.strictObject({ ...dfPart, running: z.number().int().nonnegative() }),
+  volumes: z.strictObject({
+    ...dfPart,
+    unusedCount: z.number().int().nonnegative(),
+    unusedBytes: nonNeg,
+  }),
+  buildCache: z.strictObject({ ...dfPart, unusedBytes: nonNeg }),
+});
+export type DockerDfData = z.infer<typeof dockerDfDataSchema>;
+
+export const serviceUnitInfoSchema = z.strictObject({
+  name: z.string().max(200),
+  description: z.string().max(200),
+  /** loaded, not-found, masked ... */
+  load: z.string().max(32),
+  /** active, inactive, failed, activating ... */
+  active: z.string().max(32),
+  /** running, exited, dead, failed ... */
+  sub: z.string().max(32),
+  /** Listed in HZ_AGENT_SERVICES and not denied: start/stop/restart allowed. */
+  manageable: z.boolean(),
+});
+export type ServiceUnitInfo = z.infer<typeof serviceUnitInfoSchema>;
+export const servicesDataSchema = z.strictObject({
+  /** False when the host has no systemd (units is empty then). */
+  systemd: z.boolean(),
+  units: z.array(serviceUnitInfoSchema).max(500),
+});
+export type ServicesData = z.infer<typeof servicesDataSchema>;
+
+export const processInfoSchema = z.strictObject({
+  pid: z.number().int().positive(),
+  /** Process name (comm), never the command line: arguments can hold secrets. */
+  name: z.string().max(64),
+  user: z.string().max(64),
+  /** Share of the whole machine, 0..100. */
+  cpu: percent,
+  memBytes: nonNeg,
+  memPct: percent,
+  /** R running, S sleeping, D disk, Z zombie ... */
+  state: z.string().max(16),
+  startedAt: isoTs.optional(),
+  /** Name of the Docker container the process runs in, if known. */
+  container: z.string().max(128).optional(),
+});
+export type ProcessInfo = z.infer<typeof processInfoSchema>;
+export const processesDataSchema = z.strictObject({
+  total: z.number().int().nonnegative(),
+  list: z.array(processInfoSchema).max(50),
+});
+export type ProcessesData = z.infer<typeof processesDataSchema>;
+
+export const updateCheckDataSchema = z.strictObject({
+  target: updateTargetSchema,
+  /** Image reference the container runs (tag), e.g. ghcr.io/owner/homelab-agent:latest. */
+  ref: z.string().max(256),
+  current: imageVersionSchema,
+  /** The freshly pulled image when it differs from the running one, else null. */
+  available: imageVersionSchema.nullable(),
+  /** False when the pull failed (offline, private registry); `available` is null then. */
+  pulled: z.boolean(),
+});
+export type UpdateCheckData = z.infer<typeof updateCheckDataSchema>;
+export const updateApplyDataSchema = z.strictObject({ accepted: z.literal(true) });
+export const systemUpgradeDataSchema = z.strictObject({
+  /** Packages upgraded. */
+  upgraded: z.number().int().nonnegative(),
+  /** Packages kept back (need dist-upgrade or a new dependency). */
+  kept: z.number().int().nonnegative(),
+  rebootRequired: z.boolean(),
+});
+export type SystemUpgradeData = z.infer<typeof systemUpgradeDataSchema>;
 
 /** Parses a raw frame from the agent. Returns null for invalid JSON or schema mismatch. */
 export function parseAgentMessage(raw: string): AgentToCore | null {

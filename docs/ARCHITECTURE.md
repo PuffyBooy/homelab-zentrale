@@ -121,6 +121,8 @@ design/                   Designsystem (nicht von Hand ändern, siehe design/REA
 | `audit_log` | id, ts, actor (`admin`, `anonymous`, `share:<id>`, `system`), action, target, details_json |
 | `schema_migrations` | version, name, applied_at (Migrationen in `apps/core/src/db/migrations.ts`, beim Start angewendet) |
 
+**Migrationen und Auto-Update (M17):** Migrationen sind nur additiv (neue Tabellen und Spalten mit Standardwert, keine Umbenennungen oder Löschungen), damit ein zurückgerollter Core auf der schon migrierten Datenbank weiterläuft. Vor ausstehenden Migrationen legt der Core `backup-before-migration-<von>-to-<nach>.sqlite` (0600, die neuesten 3) in `HZ_DATA_DIR` an.
+
 ## Agent-Protokoll
 
 Eine WebSocket-Verbindung pro Agent zu `wss://<core>/agent`. Nachrichten sind JSON und werden auf beiden Seiten mit zod geprüft (`packages/shared/src/agent-protocol.ts`).
@@ -131,8 +133,8 @@ Die erste Nachricht muss innerhalb von 10 s ein gültiges `hello` sein. Danach a
 
 **Agent → Core**
 - `metrics {ts, cpu, ram, swap, disks[], temp, net}` alle 10 s
-- `inventory {containers[], updates, rebootRequired, sshFailed24h, fail2banBanned, listeningPorts[], storage?}` alle 60 s und bei Docker-Events sofort. `storage` (M13) nur, wenn der Host Platten oder md-RAID hat: `/proc/mdstat`, Mount-Tabelle von PID 1, `/sys/block`, SMART per `smartctl` nur mit `HZ_AGENT_SMART=1` (siehe `deploy/docker-compose.agent.smart.yml`)
-- `event {kind: 'container' | 'oom' | 'game_wake' | 'denied', …}` (`game_wake {gameId, port, protocol}`: ein schlafender Gameserver bekam einen echten Verbindungsversuch, M12; ohne Client-Adresse)
+- `inventory {containers[], updates, rebootRequired, sshFailed24h, fail2banBanned, listeningPorts[], storage?, failedServices?}` alle 60 s und bei Docker-Events sofort. `storage` (M13) nur, wenn der Host Platten oder md-RAID hat: `/proc/mdstat`, Mount-Tabelle von PID 1, `/sys/block`, SMART per `smartctl` nur mit `HZ_AGENT_SMART=1` (siehe `deploy/docker-compose.agent.smart.yml`)
+- `event {kind: 'container' | 'oom' | 'game_wake' | 'update_result' | 'denied', …}` (`update_result {runId, target, outcome, from?, to?, message?}`, M17) (`game_wake {gameId, port, protocol}`: ein schlafender Gameserver bekam einen echten Verbindungsversuch, M12; ohne Client-Adresse)
 - `rpc.result {id, ok, data | error}`
 - `stream.data {streamId, chunk}`, `stream.end {streamId, code}`
 - `transfer.begin {streamId, bytes, sha256, chunks}`, `transfer.chunk {streamId, seq, data}`, `transfer.ack {streamId, seq}`, `transfer.end {streamId, chunks, bytes, sha256}` (M11, nur für offene `game.export`/`game.import`-Streams dieser Verbindung, siehe „Umzug von Gameservern“)
@@ -160,8 +162,16 @@ Die erste Nachricht muss innerhalb von 10 s ein gültiges `hello` sein. Danach a
 | `game.backups.purge` | `{gameId, olderThanDays}` → löscht eigene Backup-Archive dieses Gameservers unter `/opt/homelab/backups/<id>/`, die älter sind (für gelöschte Gameserver nach 30 Tagen) |
 | `deploy.run` | `{dir, repoUrl, sha, method, keyName?}` → Stream |
 | `deploy.key` | `{name}` → `{publicKey}` (ed25519, privater Schlüssel bleibt auf dem Server) |
-| `system.cleanupPreview` / `system.cleanup` | `{}` |
+| `system.cleanupPreview` / `system.cleanup` | `{}` / `{items?}` (M16: Auswahl, nie Container oder Volumes) |
 | `system.reboot` | `{confirmName}` |
+| `system.shutdown` | `{confirmName}` → `systemctl poweroff` (M16) |
+| `system.du` | `{path}` → Größen der direkten Kinder eines Host-Ordners, größte zuerst, höchstens 30, nur lesend (M16) |
+| `system.dockerDf` | `{}` → Docker-Belegung: Images, Container, Volumes, Build-Cache (M16) |
+| `system.services` / `system.service` | `{}` → systemd-Dienste / `{unit, op}` start/stop/restart nur für `HZ_AGENT_SERVICES`, nie `SERVICE_DENYLIST` (M16) |
+| `system.processes` | `{sort, limit}` → Top-Prozesse, nur Namen (M16) |
+| `update.check` | `{target: agent\|core}` → zieht den eigenen Image-Tag des Ziels und vergleicht (M17) |
+| `update.apply` | `{target, runId}` → `{accepted}` sofort; Ergebnis als Event `update_result`, auch nach Neuverbinden (M17) |
+| `system.upgrade` | `{}` → `apt-get update` + `apt-get -y upgrade` mit festen Argumenten (M17) |
 | `check.http` / `check.tcp` / `check.ping` | wie Check-Definition |
 | `logs.search` | `{query, caseSensitive, sinceMinutes, containers?, maxMatches}` → Treffer neueste zuerst: reiner Teilstring (nie RegExp), höchstens `LOG_SEARCH_TAIL` Zeilen pro Container, 4 Container gleichzeitig, nach 25 s `truncated` |
 | `image.scan` | `{id}` → der Agent ermittelt den Registry-Digest selbst und startet das gepinnte Trivy-Image (`HZ_AGENT_TRIVY_IMAGE`) mit `--image-src remote`, ohne Docker-Socket und Host-Pfade, Cache im Volume `hz-trivy-cache`; lokal gebaute Images → `local_image`; ein Scan gleichzeitig (sonst `busy`) |

@@ -61,6 +61,8 @@ export const statusReasonSchema = z.strictObject({
     'temp_warn',
     'security_updates',
     'reboot_required',
+    /** M16: a systemd service unit is in state failed. */
+    'service_failed',
   ]),
   text: z.string(),
 });
@@ -119,6 +121,8 @@ export const serverDetailSchema = z.strictObject({
   sshFailed24h: z.number().int().nullable(),
   fail2banBanned: z.number().int().nullable(),
   listeningPorts: z.array(listeningPortSchema),
+  /** M16: failed systemd units from the last inventory (empty without systemd). */
+  failedServices: z.array(z.string().max(200)).optional(),
 });
 export type ServerDetail = z.infer<typeof serverDetailSchema>;
 
@@ -135,6 +139,8 @@ export const historyPointSchema = z.strictObject({
   netIn: z.number(),
   netOut: z.number(),
   temp: z.number().nullable(),
+  /** M16: highest disk usage in percent, null while unknown. */
+  diskMax: z.number().nullable().optional(),
 });
 export const historyResponseSchema = z.strictObject({
   range: historyRangeSchema,

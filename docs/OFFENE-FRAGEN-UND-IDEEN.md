@@ -160,3 +160,13 @@ Sortiert nach Bereich. Nichts davon ist in den Meilensteinen, alles wäre ein ei
 - Paket-Tracking (Post, DHL) als Kachel.
 - Tailscale-Geräteliste mit „zuletzt online“ und Ablauf der Schlüssel.
 - Zertifikats- und Domain-Übersicht für alle Domains an einem Ort.
+
+## Ideen aus M16/M17 (26.11.2026, Alex fragte „was könnte ich noch einbauen“)
+- „Disk voll in X Tagen“: Vorhersage aus dem Verlauf, Meldung eine Woche vorher.
+- Auto-Update für eigene Container, pro Container einschaltbar, mit demselben Rollback wie bei der Zentrale.
+- Vor einem Update zeigen, was kommt (Commits zwischen den Versionen aus GitHub, wenn das Modul an ist).
+- Gestaffelte Updates: zuerst ein Testserver (z. B. der Pi), die anderen erst am nächsten Tag, wenn der gesund blieb.
+- Prozess beenden mit Step-up.
+- Traffic pro Monat je Server, Warnung vor dem Kontingent der Cloud-VM.
+- Sicherheits-Updates getrennt von allen Updates (über `unattended-upgrades`, falls installiert).
+- Firewall-Übersicht (ufw/nftables) nur lesend.

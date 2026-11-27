@@ -1,8 +1,9 @@
 import { lstat, readdir } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import type { CleanupPreviewData } from '@hz/shared';
+import type { CleanupKind, CleanupPreviewData, RpcParams } from '@hz/shared';
 import { hostPath, type HostContext } from '../host.js';
+import { withHostLock } from './host-lock.js';
 import { ActionError, type ActionContext } from './types.js';
 
 /**
@@ -18,6 +19,9 @@ import { ActionError, type ActionContext } from './types.js';
  *
  * The package list for the purge is computed again on the agent at cleanup
  * time; nothing from the core ends up in a command line.
+ *
+ * M16: `items` picks the kinds to clean (default: all of them). Containers and
+ * volumes are never removed (sleeping game servers are stopped containers).
  */
 
 export const JOURNAL_KEEP_BYTES = 200 * 1024 * 1024;
@@ -175,24 +179,31 @@ export async function cleanupPreview(
   return { items, totalBytes: items.reduce((s, i) => s + i.bytes, 0) };
 }
 
-let running = false;
+export const ALL_CLEANUP_KINDS: readonly CleanupKind[] = [
+  'apt-cache',
+  'old-kernels',
+  'journal',
+  'docker-images',
+  'docker-build-cache',
+];
 
-export async function cleanup(_p: unknown, actx: ActionContext): Promise<{ freedBytes: number }> {
-  if (running) throw new ActionError('busy', 'cleanup already running');
-  running = true;
-  try {
-    return await runCleanup(actx);
-  } finally {
-    running = false;
-  }
+export function cleanup(
+  p: RpcParams<'system.cleanup'>,
+  actx: ActionContext,
+): Promise<{ freedBytes: number }> {
+  const kinds = new Set<CleanupKind>(p.items ?? ALL_CLEANUP_KINDS);
+  return withHostLock('cleanup', () => runCleanup(actx, kinds));
 }
 
-async function runCleanup(actx: ActionContext): Promise<{ freedBytes: number }> {
+async function runCleanup(
+  actx: ActionContext,
+  kinds: ReadonlySet<CleanupKind>,
+): Promise<{ freedBytes: number }> {
   const ctx = actx.host;
   let freed = 0;
   let anything = false;
 
-  const aptBefore = await aptCacheBytes(ctx);
+  const aptBefore = kinds.has('apt-cache') ? await aptCacheBytes(ctx) : null;
   if (aptBefore !== null) {
     const r = await ctx.exec('apt-get', ['clean'], { timeoutMs: 120_000 });
     if (r.code === 0) {
@@ -201,7 +212,9 @@ async function runCleanup(actx: ActionContext): Promise<{ freedBytes: number }> 
     } else actx.log.warn('apt-get clean failed', { code: r.code, error: r.error });
   }
 
-  const kernels = await oldKernels(ctx);
+  const kernels = kinds.has('old-kernels') ? await oldKernels(ctx) : null;
+  // Measurable but nothing to do still counts as "cleaned" (0 bytes).
+  if (kernels && kernels.packages.length === 0) anything = true;
   if (kernels && kernels.packages.length > 0) {
     const r = await ctx.exec('apt-get', ['-y', '-q', 'purge', '--', ...kernels.packages], {
       timeoutMs: 15 * 60_000,
@@ -212,7 +225,8 @@ async function runCleanup(actx: ActionContext): Promise<{ freedBytes: number }> 
     } else actx.log.warn('kernel purge failed', { code: r.code, error: r.error });
   }
 
-  const journalBefore = await journalBytes(ctx);
+  const journalBefore = kinds.has('journal') ? await journalBytes(ctx) : null;
+  if (journalBefore !== null && journalBefore <= JOURNAL_KEEP_BYTES) anything = true;
   if (journalBefore !== null && journalBefore > JOURNAL_KEEP_BYTES) {
     const r = await ctx.exec('journalctl', ['--vacuum-size=200M'], { timeoutMs: 120_000 });
     if (r.code === 0) {
@@ -221,15 +235,23 @@ async function runCleanup(actx: ActionContext): Promise<{ freedBytes: number }> 
     }
   }
 
-  if (ctx.docker) {
+  // Only images and the build cache; never containers or volumes.
+  if (ctx.docker && kinds.has('docker-images')) {
     try {
       const r = await ctx.docker.pruneImages({ filters: { dangling: ['false'] } });
       freed += Math.max(0, r.SpaceReclaimed ?? 0);
+      anything = true;
+    } catch {
+      actx.log.warn('docker image prune failed');
+    }
+  }
+  if (ctx.docker && kinds.has('docker-build-cache')) {
+    try {
       const b = await ctx.docker.pruneBuilder();
       freed += Math.max(0, b.SpaceReclaimed ?? 0);
       anything = true;
     } catch {
-      actx.log.warn('docker prune failed');
+      actx.log.warn('docker build cache prune failed');
     }
   }
 

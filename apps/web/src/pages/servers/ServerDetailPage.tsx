@@ -1,8 +1,8 @@
-import type { HistoryResponse, ServerDetail } from '@hz/shared';
+import type { ServerDetail } from '@hz/shared';
 import { useQuery } from '@tanstack/react-query';
 import { useEffect, useRef, useState, type ReactElement } from 'react';
 import { Link, useLocation, useParams } from 'react-router';
-import { Alert, Button, Metric, Sparkline, StatusDot, Tile, UsageBar } from '@hz/ui';
+import { Alert, Button, Metric, StatusDot, Tile, UsageBar } from '@hz/ui';
 import { FormError } from '../../components/FormError.js';
 import { isApiError } from '../../lib/api.js';
 import { errorText } from '../../lib/errors.js';
@@ -11,25 +11,29 @@ import {
   formatBytesOf,
   formatNumber,
   formatPercent,
-  formatRate,
   formatTemp,
   formatUptime,
 } from '../../lib/format.js';
-import { bucket } from '../../lib/history.js';
 import { useContainers, useServers } from '../../lib/data.js';
 import { useLiveState, useLiveTopic } from '../../lib/live.js';
-import { fetchHistory, fetchServer, historyKey, serverKey } from '../../lib/servers.js';
+import { fetchServer, serverKey } from '../../lib/servers.js';
 import { useNow } from '../../lib/useNow.js';
 import { ContainerGroups } from '../containers/ContainersPage.js';
 import { StorageTile } from '../storage/StorageTile.js';
 import { AutomatikTile } from '../throttle/AutomatikTile.js';
+import { AutoUpdateTile } from './AutoUpdateTile.js';
 import { CleanupDialog } from './CleanupDialog.js';
+import { DockerDfTile } from './DockerDfTile.js';
+import { DuTile } from './DuTile.js';
+import { HistoryTile } from './HistoryTile.js';
 import { OpenPortsTile } from './OpenPortsTile.js';
+import { ProcessesTile } from './ProcessesTile.js';
 import { RebootDialog } from './RebootDialog.js';
+import { ServerSectionNav } from './ServerSectionNav.js';
+import { ServicesTile } from './ServicesTile.js';
+import { ShutdownDialog } from './ShutdownDialog.js';
 import { viaText } from '../../lib/wol.js';
 import { WolTile, useWake, useWol, wakeErrorOf } from './WolTile.js';
-
-const SPARK_BARS = 48;
 
 function pctOf(used: number, total: number): number {
   return total > 0 ? (used / total) * 100 : 0;
@@ -47,12 +51,6 @@ export function ServerDetailPage(): ReactElement | null {
     enabled: id !== '',
     staleTime: live === 'open' ? Infinity : 10_000,
     refetchInterval: live === 'open' ? false : 15_000,
-  });
-  const history = useQuery({
-    queryKey: historyKey(id, '24h'),
-    queryFn: ({ signal }) => fetchHistory(id, '24h', signal),
-    enabled: id !== '',
-    refetchInterval: 5 * 60_000,
   });
 
   if (detail.error) {
@@ -73,14 +71,14 @@ export function ServerDetailPage(): ReactElement | null {
     );
   }
   if (!detail.data) return null;
-  return <Detail d={detail.data} history={history.data} />;
+  return <Detail d={detail.data} />;
 }
 
-function Detail({ d, history }: { d: ServerDetail; history?: HistoryResponse | undefined }) {
+function Detail({ d }: { d: ServerDetail }) {
   const s = d.server;
   const t = d.thresholds;
   const now = useNow(30_000);
-  const [dialog, setDialog] = useState<'cleanup' | 'reboot' | null>(null);
+  const [dialog, setDialog] = useState<'cleanup' | 'reboot' | 'shutdown' | null>(null);
   const { hash } = useLocation();
   const automatik = useRef<HTMLDivElement>(null);
   // Settings → Server links to #automatik.
@@ -133,6 +131,7 @@ function Detail({ d, history }: { d: ServerDetail; history?: HistoryResponse | u
         </div>
       ) : null}
 
+      <ServerSectionNav />
       <div className="hz-grid app-grid">
         <Tile
           title="Auslastung"
@@ -198,7 +197,7 @@ function Detail({ d, history }: { d: ServerDetail; history?: HistoryResponse | u
           </div>
         </Tile>
 
-        <HistoryTile history={history} net={d.net} cpu={s.cpu} ram={s.ramPct} />
+        <HistoryTile detail={d} />
 
         <Tile title="System" icon="server" span={2}>
           <dl className="app-kv">
@@ -306,10 +305,23 @@ function Detail({ d, history }: { d: ServerDetail; history?: HistoryResponse | u
         </Tile>
 
         <StorageTile serverId={s.id} />
+        <DuTile serverId={s.id} offline={offline} />
+        <DockerDfTile serverId={s.id} offline={offline} />
 
         <OpenPortsTile serverId={s.id} serverName={s.name} />
 
+        <ServicesTile
+          serverId={s.id}
+          serverName={s.name}
+          failed={d.failedServices ?? []}
+          offline={offline}
+        />
+        <ProcessesTile serverId={s.id} offline={offline} />
+
         <ServerContainers server={s} />
+
+        {/* One primary per page: Aufräumen on a disk problem wins over "Jetzt aktualisieren". */}
+        <AutoUpdateTile serverId={s.id} primaryAllowed={!diskIssue} />
 
         <div className="hz-span-4 app-anchor" id="automatik" ref={automatik}>
           <AutomatikTile serverId={s.id} serverName={s.name} />
@@ -319,6 +331,7 @@ function Detail({ d, history }: { d: ServerDetail; history?: HistoryResponse | u
 
         <Tile title="Aktionen" icon="power" span={4}>
           <div className="app-actions">
+            <span id="aktionen" className="app-anchor app-anchor-in" />
             <Button
               variant={diskIssue && !offline ? 'primary' : 'secondary'}
               icon="refresh"
@@ -335,10 +348,18 @@ function Detail({ d, history }: { d: ServerDetail; history?: HistoryResponse | u
             >
               Neustart
             </Button>
+            <Button
+              variant="danger"
+              icon="power"
+              disabled={offline}
+              onClick={() => setDialog('shutdown')}
+            >
+              Herunterfahren
+            </Button>
             <span className="app-text">
               {offline
-                ? `Agent offline. Aufräumen und Neustart gehen wieder, sobald ${s.name} sich meldet.`
-                : 'Aufräumen zeigt zuerst, wie viel Platz frei wird. Neustart braucht den Servernamen und einen Code.'}
+                ? `Agent offline. Aufräumen, Neustart und Herunterfahren gehen wieder, sobald ${s.name} sich meldet.`
+                : 'Aufräumen zeigt zuerst, wie viel Platz frei wird. Neustart und Herunterfahren brauchen den Servernamen und einen Code.'}
             </span>
           </div>
         </Tile>
@@ -352,6 +373,12 @@ function Detail({ d, history }: { d: ServerDetail; history?: HistoryResponse | u
       />
       <RebootDialog
         open={dialog === 'reboot'}
+        serverId={s.id}
+        serverName={s.name}
+        onClose={() => setDialog(null)}
+      />
+      <ShutdownDialog
+        open={dialog === 'shutdown'}
         serverId={s.id}
         serverName={s.name}
         onClose={() => setDialog(null)}
@@ -383,65 +410,5 @@ function ServerContainers({ server }: { server: ServerDetail['server'] }): React
       servers={servers.data ?? [server]}
       title={() => 'Container dieses Servers'}
     />
-  );
-}
-
-function SparkRow({
-  label,
-  data,
-  value,
-  tone,
-}: {
-  label: string;
-  data: number[];
-  value: string;
-  tone?: 'accent' | 'ok' | 'info' | 'muted';
-}): ReactElement {
-  return (
-    <div className="app-spark-row">
-      <span className="hz-usage-label">{label}</span>
-      {data.length >= 2 ? (
-        <Sparkline data={data} width={192} height={24} tone={tone} />
-      ) : (
-        <span className="app-spark-empty">zu wenig Daten</span>
-      )}
-      <span className="hz-usage-val">{value}</span>
-    </div>
-  );
-}
-
-function HistoryTile({
-  history,
-  net,
-  cpu,
-  ram,
-}: {
-  history?: HistoryResponse | undefined;
-  net: ServerDetail['net'];
-  cpu: number | null;
-  ram: number | null;
-}): ReactElement {
-  const points = history?.points ?? [];
-  const series = (pick: (p: HistoryResponse['points'][number]) => number): number[] =>
-    bucket(points.map(pick), SPARK_BARS);
-  return (
-    <Tile title="Verlauf 24 h" icon="cpu" span={2}>
-      <div className="app-bars">
-        <SparkRow label="CPU" data={series((p) => p.cpu)} value={formatPercent(cpu)} />
-        <SparkRow label="RAM" data={series((p) => p.ramPct)} value={formatPercent(ram)} />
-        <SparkRow
-          label="Netz ein"
-          data={series((p) => p.netIn)}
-          value={formatRate(net?.rxBps)}
-          tone="info"
-        />
-        <SparkRow
-          label="Netz aus"
-          data={series((p) => p.netOut)}
-          value={formatRate(net?.txBps)}
-          tone="muted"
-        />
-      </div>
-    </Tile>
   );
 }

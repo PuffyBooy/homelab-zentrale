@@ -1,6 +1,7 @@
 import type { FastifyPluginAsync, FastifyRequest } from 'fastify';
 import {
   cleanupPreviewResponseSchema,
+  cleanupRequestSchema,
   cleanupResponseSchema,
   enrollRequestSchema,
   enrollResponseSchema,
@@ -165,9 +166,13 @@ export const serverRoutes: FastifyPluginAsync<ServerRoutesOptions> = async (app,
 
   app.post('/servers/:id/cleanup', async (request) => {
     const row = serverOf(request);
-    audit('server.cleanup', row.id, { name: row.name });
+    // M16: optional `items`; an empty body cleans everything as before.
+    const { items } = cleanupRequestSchema.parse(request.body ?? undefined);
+    audit('server.cleanup', row.id, { name: row.name, ...(items ? { items } : {}) });
     const data = await rpc(() =>
-      o.hub.call(row.id, 'system.cleanup', {}, { timeoutMs: CLEANUP_TIMEOUT }),
+      o.hub.call(row.id, 'system.cleanup', items ? { items } : {}, {
+        timeoutMs: CLEANUP_TIMEOUT,
+      }),
     );
     const parsed = cleanupResponseSchema.safeParse(data);
     if (!parsed.success) throw new HttpError(502, 'agent_error');

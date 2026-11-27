@@ -398,3 +398,49 @@ describe('transfer frames (M11)', () => {
     ]);
   });
 });
+
+describe('M17: ready hook and saved update results', () => {
+  it('onReady fires after welcome, onDisconnect on close; a saved result goes out after reconnect', async () => {
+    const { writeResult, flushResults } = await import('../src/update/results.js');
+    const { readdir } = await import('node:fs/promises');
+    await writeResult(dataDir, {
+      kind: 'update_result',
+      runId: 'run_persist1',
+      target: 'core',
+      outcome: 'updated',
+    });
+    let ready = 0;
+    let down = 0;
+    onConnection = (ws, idx) =>
+      ws.once('message', () => {
+        send(ws, welcome);
+        if (idx === 0) setTimeout(() => ws.close(1001), 30);
+      });
+    const c: AgentConnection = makeConn({
+      onReady: () => {
+        ready += 1;
+        // Offline at the first welcome? The file must stay until a send succeeds.
+        void flushResults(dataDir, (m) => (ready === 1 ? false : c.send(m)));
+      },
+      onDisconnect: () => {
+        down += 1;
+      },
+    });
+    await c.start();
+    await until(() => ready >= 2 && down >= 1);
+    await until(() => (received[1] ?? []).some((m) => m.type === 'event'));
+    const ev = (received[1] ?? []).find((m) => m.type === 'event');
+    expect(ev).toMatchObject({ event: { kind: 'update_result', runId: 'run_persist1' } });
+    expect((received[0] ?? []).some((m) => m.type === 'event')).toBe(false);
+    // Deleted only after the send (unlink right after it).
+    for (
+      let i = 0;
+      i < 100 && (await readdir(dataDir)).some((f) => f.startsWith('update-result-'));
+      i++
+    ) {
+      await new Promise((r) => setTimeout(r, 10));
+    }
+    expect(await readdir(dataDir)).not.toContain('update-result-run_persist1.json');
+    expect(c.isReady()).toBe(true);
+  });
+});

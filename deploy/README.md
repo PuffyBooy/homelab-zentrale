@@ -75,6 +75,7 @@ Beim ersten Verbinden tauscht der Agent das Einmal-Token gegen ein dauerhaftes A
 | `HZ_AGENT_DATA` | Datenordner (`/data`). |
 | `HZ_AGENT_TRIVY_IMAGE` | Scanner für `image.scan` (Schwachstellen-Scan). Nur mit Digest (`repo[:tag]@sha256:…`), sonst nimmt der Agent den eingebauten Standard (`TRIVY_IMAGE_DEFAULT`) und schreibt eine Warnung ins Log. Der Scanner läuft als eigener Container ohne Docker-Socket und ohne Host-Pfade (read-only, `--cap-drop ALL`, 1 GB RAM, 256 PIDs), holt das Image selbst aus der Registry und legt seine Datenbank im Docker-Volume `hz-trivy-cache` ab (wird beim ersten Scan angelegt, löschen mit `docker volume rm hz-trivy-cache`). |
 | `HZ_AGENT_HOST_EXEC` | `nsenter` (Image-Standard), `direct` (Agent direkt auf dem Host, Entwicklung), `none`. |
+| `HZ_AGENT_SERVICES` | M16: systemd-Dienste, die die Zentrale starten, stoppen und neu starten darf, durch Komma getrennt, z. B. `nginx.service,smbd`. Ohne Endung wird `.service` ergänzt. Leer (Standard): nur Anzeige. Ungültige Namen und Dienste der festen Sperrliste (`tailscaled`, `docker`, `containerd`, `ssh`/`sshd`, `dbus`, `systemd-*`, `networking`, `NetworkManager`, `getty` …) ignoriert der Agent mit einer Warnung im Log, egal was hier steht. |
 
 ### NAS und SMART (M13)
 
@@ -164,6 +165,12 @@ Damit laufen die Binaries und Dateien des Hosts, nicht die des Images. Erlaubt s
 | `system.cleanupPreview` | `apt-get -s -q autoremove --purge` (nur Simulation, für alte Kernel), `journalctl --disk-usage`; Größen von `/var/cache/apt`, `/lib/modules/<ver>`, `/boot/*-<ver>` werden direkt gelesen; Docker-Images und Build-Cache über die Docker-API |
 | `system.cleanup` | `apt-get clean`, `apt-get -y -q purge -- <alte Kernel-Pakete>` (nie der laufende Kernel, die Liste berechnet der Agent selbst), `journalctl --vacuum-size=200M`, Docker: ungenutzte Images und Build-Cache löschen |
 | `system.reboot` | `systemctl reboot`, 2 s nach der Antwort, nur wenn `confirmName` gleich `HZ_AGENT_NAME` ist |
+| `system.shutdown` (M16) | `systemctl poweroff`, sonst wie `system.reboot`. Der Server bleibt aus, bis ihn jemand einschaltet (oder Wake-on-LAN). |
+| `system.cleanup { items }` (M16) | wie oben, aber nur die gewählten Arten (`apt-cache`, `old-kernels`, `journal`, `docker-images`, `docker-build-cache`); ohne `items` alles. Container und Volumes löscht der Agent nie. |
+| `system.du` (M16) | `du -x -a -B1 -d1 -0 -- <ordner>`, nur lesend, 60 s Zeitlimit, 8 MiB Ausgabe. Der Pfad wird im Agent **innerhalb des Host-Dateisystems** aufgelöst (jeder Symlink einzeln mit `lstat`/`readlink` unter `/host/proc/1/root`, absolute Ziele beginnen wieder beim Host-`/`) und danach noch einmal gegen `/proc`, `/sys`, `/dev`, `/run` und Pseudo-Dateisysteme (proc, sysfs, cgroup, debugfs …) geprüft. Höchstens 30 Einträge, größte zuerst. |
+| `system.services` / `system.service` (M16) | `systemctl list-units --type=service --all --no-legend --plain --no-pager`; `systemctl <start\|stop\|restart> --no-ask-password -- <unit>` (60 s) nur für Units aus `HZ_AGENT_SERVICES`, nie aus der Sperrliste. Vorher löst der Agent den echten Namen mit `systemctl show -p Id --value -- <unit>` auf und prüft auch ihn gegen die Sperrliste (ein Alias wie `dbus-org.freedesktop.network1.service` → `systemd-networkd.service` wird abgelehnt). Eine Ablehnung geht als `denied` an den Core. Das Inventar enthält `failedServices` aus `systemctl list-units --type=service --state=failed …`. |
+| `system.processes` (M16) | kein Programm: `/proc/<pid>/stat`, `status`, `cgroup` direkt (mit `pid: host` die des Hosts), zwei Messungen im Abstand von 0,5 s. Nur der Prozessname (`comm`), **nie** `/proc/<pid>/cmdline` oder die Umgebung. Benutzername aus der `/etc/passwd` des Hosts, Container aus der cgroup. |
+| `system.upgrade` (M17) | `apt-get update -q`, dann `apt-get -y -q -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold upgrade` mit `DEBIAN_FRONTEND=noninteractive`. Feste Argumente, kein `dist-upgrade`, keine Entfernungen, geänderte Konfigurationsdateien bleiben. Bis zu 40 Min. Nur auf apt-Hosts; nie gleichzeitig mit `system.cleanup`. Mit systemd läuft apt in einer eigenen, kurzlebigen Unit (`systemd-run --unit=hz-upgrade-<zufall> --collect --wait --quiet --service-type=exec --property=StandardOutput=file:/run/hz-upgrade-<zufall>.log … -- /usr/bin/apt-get …`), also außerhalb der cgroup des Agents: Startet das Upgrade Docker, containerd oder tailscaled neu (und damit den Agent), läuft dpkg trotzdem zu Ende. Nach 40 Min hört der Agent auf zu warten, beendet die Unit aber nicht. Ohne systemd oder `systemd-run` wie bisher direkt. |
 
 ### Container (M3)
 
@@ -223,6 +230,21 @@ Der Core setzt dieselben Zeitgrenzen; die des Agents sind die zweite Sicherung. 
 - Alles, was in der Konsole getippt wird, geht als Text über den Agent-WebSocket (Tailscale verschlüsselt ihn). Passwörter tippen ist möglich, aber in der Zentrale gibt es keinen Mitschnitt.
 
 ### Prüfen
+
+### Auto-Update (M17)
+
+Die Zentrale stößt Updates an (Wartungsfenster pro Server). Der Agent zieht dabei **immer nur den Tag, den der Container schon nutzt** (`Config.Image`, z. B. `ghcr.io/puffybooy/homelab-agent:latest`), nie ein Image aus der Anfrage. Läuft ein Container mit nackter Image-ID oder schlägt der Pull fehl (privates Registry ohne Login, nur lokaler Tag aus `--build-local`), meldet `update.check` `pulled: false` und `update.apply` `failed`.
+
+| Ziel | Ablauf |
+| --- | --- |
+| `core` | Nur auf dem Server, auf dem ein Container mit Label `hz.role=core` läuft. Der Agent dieses Servers zieht das Image, benennt den Core-Container um, legt einen neuen mit gleicher Konfiguration an (Volumes, Labels inklusive Compose-Labels, Netz), stoppt den alten, startet den neuen und wartet bis zu 3 Min auf den Docker-Health-Check (`/api/health`). Erst dann wird der alte entfernt; sonst kommt der alte zurück (`rolled_back`). |
+| `agent` | Der Agent kann sich nicht selbst ersetzen. Er startet einen kurzlebigen **Helfer-Container** aus seinem **aktuellen** Image (Label `hz.role=updater`, Befehl `node dist/updater.js`), der den Agent-Container genauso tauscht und bis zu 3 Min wartet, bis der neue Agent „healthy“ ist. Healthy heißt: mit dem Core verbunden (der Agent legt `/tmp/hz-connected` beim `welcome` an und löscht sie beim Trennen; der `HEALTHCHECK` im Image prüft nur diese Datei). Sonst Rollback auf den alten Container. |
+
+**Warum der Helfer den Docker-Socket braucht:** Er muss den Agent-Container umbenennen, neu anlegen, stoppen, starten und entfernen; das geht nur über die Docker-API. Der Socket ist wie beim Agent selbst gleichbedeutend mit root auf dem Host. Darüber hinaus bekommt der Helfer nichts: nur zwei Mounts (Docker-Socket und das Datenvolume `agent-data` für die Ergebnisdatei), kein Netz (`network_mode: none`, der Socket ist ein Unix-Socket), schreibgeschütztes Dateisystem, `cap_drop: ALL`, `no-new-privileges`, nicht privilegiert, 256 MB RAM, 64 Prozesse. Er läuft als Besitzer von `/data` mit der Gruppe des Sockets (keine Capability nötig). Wie Core und Agent ist er geschützt: `container.*` lehnt `hz.role=updater` ab.
+
+**Absturzsicher:** Vor jedem Schritt (umbenennen, anlegen, stoppen, starten) schreibt der Helfer ein kleines Journal nach `/data/update-journal-<runId>.json`. Stirbt er mittendrin, startet Docker ihn neu (`restart: on-failure`, höchstens 3-mal, statt `AutoRemove`). Er behält dann den neuen Agent, wenn der healthy wird, sonst bekommt der alte seinen Namen zurück und startet wieder. Ist der Helfer endgültig weg, erledigt das der Agent, der danach läuft, nach seinem `welcome` (der neue entfernt den alten Container, der alte den neuen). Ein Core-Update journalisiert der Agent genauso und räumt es beim nächsten Start auf, bevor er sich verbindet (der Core ist dann vielleicht gerade aus). Beendete Helfer-Container und erledigte Journale entfernt der Agent nach dem Senden des Ergebnisses. Umbenannte `<name>-hz-old-*`-Container werden nur nach einem erfolgreichen Update gelöscht.
+
+Das Ergebnis (`update_result`) schreibt der Agent bzw. der Helfer zuerst atomar nach `/data/update-result-<runId>.json` und sendet es dann; die Datei wird erst nach dem Senden gelöscht. So kommt es auch an, wenn der Core gerade neu startet oder der Agent ausgetauscht wurde (der neue bzw. wiederhergestellte Agent schickt es nach seinem `welcome`, verbunden prüft er alle 15 s).
 
 ```bash
 docker logs -f homelab-agent        # JSON-Zeilen, ohne Tokens

@@ -66,6 +66,7 @@ import {
   type LogBuffer,
 } from './logs.js';
 import { serverKey, serversKey } from './servers.js';
+import { applyUpdatesPayload } from './updates.js';
 
 /**
  * Live channel to the core (docs/ARCHITECTURE.md, "Live-Daten zum Browser").
@@ -257,6 +258,13 @@ export function applyLiveMessage(qc: QueryClient, msg: LiveServerMessage): Apply
     const parsed = haStateSchema.safeParse(payload);
     if (parsed.success) qc.setQueryData<HaState>(haStateKey, parsed.data);
     else void qc.invalidateQueries({ queryKey: haStateKey, exact: true });
+    return result;
+  }
+
+  if (topic === 'updates') {
+    // Single-object topic: the snapshot and every upsert is the full UpdatesResponse.
+    const payload = msg.type === 'snapshot' ? msg.data : msg.upsert?.[msg.upsert.length - 1];
+    if (payload !== undefined) applyUpdatesPayload(qc, payload);
     return result;
   }
 

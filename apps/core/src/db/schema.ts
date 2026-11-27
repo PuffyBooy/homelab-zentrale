@@ -122,6 +122,8 @@ export const serverState = sqliteTable('server_state', {
   fail2banBanned: integer('fail2ban_banned'),
   listeningPortsJson: text('listening_ports_json'),
   inventoryAt: integer('inventory_at'),
+  /** M16: failed systemd units from the last inventory (JSON array), null = unknown. */
+  failedServicesJson: text('failed_services_json'),
 });
 
 export const agentTokens = sqliteTable(
@@ -953,6 +955,31 @@ export const whitelistRequests = sqliteTable(
   ],
 );
 
+/** M17: one update run (agent, core, os or reboot) of a server; the 200 newest are kept. */
+export const updateRuns = sqliteTable(
+  'update_runs',
+  {
+    id: text('id').primaryKey(),
+    serverId: text('server_id')
+      .notNull()
+      .references(() => servers.id, { onDelete: 'cascade' }),
+    serverName: text('server_name').notNull(),
+    /** agent | core | os | reboot */
+    target: text('target').notNull(),
+    /** schedule | manual */
+    trigger: text('trigger').notNull(),
+    /** running | updated | up_to_date | rolled_back | failed | timeout */
+    status: text('status').notNull(),
+    startedAt: integer('started_at').notNull(),
+    finishedAt: integer('finished_at'),
+    fromText: text('from_text'),
+    toText: text('to_text'),
+    message: text('message'),
+  },
+  (t) => [index('update_runs_started').on(t.startedAt), index('update_runs_status').on(t.status)],
+);
+
+export type UpdateRunRow = typeof updateRuns.$inferSelect;
 // ---- M15: game relay -----------------------------------------------------------
 
 /** A server that relays game ports from its public IPv4 into the tailnet. */

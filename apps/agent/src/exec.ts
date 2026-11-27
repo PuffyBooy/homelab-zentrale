@@ -24,6 +24,10 @@ export const PROGRAMS = new Set([
   'ss',
   'ping',
   'systemctl',
+  // M17 system.upgrade: apt-get in a transient unit outside the agent's cgroup (fixed argv).
+  'systemd-run',
+  // M16 system.du: host `du -x -a -B1 -d1 -- <dir>` (read-only, fixed flags, actions/system-du.ts).
+  'du',
   // Docker CLI in the agent image, only for `docker compose` (actions/compose.ts).
   'docker',
   // git in the agent image, only for deploy.run (actions/deploy.ts, fixed argument builders).

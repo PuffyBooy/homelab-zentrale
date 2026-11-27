@@ -161,6 +161,33 @@ Wunsch des Admins vom 26.11.2026. Vier neue Module (alle standardmäßig aus, Ei
 
 ---
 
+## M16: Server im Detail (Überwachung und Verwaltung)
+_M14 (Anbindungen) und M15 (Game-Relay) entstehen parallel in eigenen Branches._
+
+**Ziel:** Jeder einzelne Server lässt sich in seiner Detailseite überwachen und verwalten, ohne SSH. Baut auf Serverdetail (M2), Aufräumen/Neustart (M2) und Speicher (M13) auf. Schemas: `packages/shared/src/api/server-admin.ts` und der M16-Block in `agent-protocol.ts`.
+
+- **Verlauf:** Zeitraum 1 h / 24 h / 7 Tage / 30 Tage für CPU, RAM, Netz ein/aus, Temperatur und höchste Disk-Belegung (`diskMax`), aus den vorhandenen Rohdaten und Verdichtungen; Min/Ø/Max je Reihe.
+- **Speicher:** Partitionen/Mounts (aus `metrics.disks`) als `UsageBar`, Abschnitt „Speicher“ aus M13 bleibt; **größte Ordner** (`system.du`, nur lesend, `du -x -d1`, höchstens 30 Einträge, zum Hineinklicken, nie unter `/proc`, `/sys`, `/dev`, `/run`); **Docker-Belegung** (`system.dockerDf`: Images, Container, Volumes, Build-Cache, jeweils ungenutzt); **Aufräumen mit Auswahl** (`system.cleanup { items }`: apt-Cache, alte Kernel, Journal, ungenutzte Images, Build-Cache). Container und Volumes werden nie gelöscht (schlafende Gameserver sind gestoppte Container).
+- **Dienste:** systemd-Units mit Zustand, fehlgeschlagene zuerst (`system.services`); fehlgeschlagene Units kommen mit dem Inventar (`failedServices`) und ergeben eine `warn`-Meldung und einen Status-Grund. Starten/Stoppen/Neustarten nur für Units in `HZ_AGENT_SERVICES` auf dem Agent und nie für `SERVICE_DENYLIST` (tailscaled, docker, ssh, systemd-* …).
+- **Prozesse:** Top 25 nach CPU oder RAM (`system.processes`): PID, Name, Benutzer, CPU, RAM, Container. Nur Prozessnamen, nie Kommandozeilen.
+- **Herunterfahren** (`system.shutdown`) neben Neustart: Step-up und Servername eintippen, Hinweis „bleibt aus bis zum Einschalten (oder Wake-on-LAN)“.
+
+**Abnahme:** Im Serverdetail eines Sim-Agents wechselt der Verlauf zwischen 1 h und 30 Tagen, „größte Ordner“ lässt sich bis in einen Unterordner aufklappen, die Docker-Belegung erscheint, Aufräumen mit nur „Build-Cache“ räumt nur den Build-Cache, eine fehlgeschlagene Unit ergibt eine Meldung, ein erlaubter Dienst wird neu gestartet, die Prozessliste sortiert nach RAM, Herunterfahren verlangt Step-up und Namen. Sicherheitstests: Pfadprüfung für `system.du` (auch nach `realpath` im Agent), Units nur mit Allowlist und nie aus der Sperrliste, keine Kommandozeilen in der Prozessliste, Shutdown ohne Step-up oder mit falschem Namen abgelehnt, alle Routen nur mit Admin-Session, Rate-Limit auf `du`.
+
+## M17: Auto-Update
+**Ziel:** Die Zentrale und alle Agents halten sich selbst aktuell, optional auch die Betriebssystem-Pakete, in einem Wartungsfenster pro Server, mit Rollback und Meldung. Schemas: `packages/shared/src/api/updates.ts` und der M17-Block in `agent-protocol.ts`.
+
+- **Richtlinie pro Server** (Einstellung, Standard: Agent und Zentrale an, OS-Pakete aus, Neustart aus, täglich 03:00 für 120 Min in `HZ_TIMEZONE`): Agent, Zentrale (nur der Server mit dem `hz.role=core`-Container), OS-Pakete, Neustart bei Bedarf (Einschalten mit Step-up), Wochentage, Start, Dauer.
+- **Prüfen:** `update.check` holt den Image-Tag, den der Container schon nutzt (nie ein anderes Image), und vergleicht die Image-ID; Versionen aus den OCI-Labels (`org.opencontainers.image.version`/`revision`). Täglich und per Knopf.
+- **Aktualisieren:** `update.apply` antwortet sofort, das Ergebnis kommt als Event `update_result` (auch nach einem Neuverbinden, im Agent gespeichert).
+  - Zentrale: Der Agent auf demselben Server zieht das neue Image, ersetzt den Core-Container (gleiche Konfiguration, Volumes bleiben) und wartet bis zu 3 Min auf den Docker-Health-Check des Cores; sonst kommt der alte Container zurück (`rolled_back`).
+  - Agent: Ein kurzlebiger Helfer-Container aus dem **alten** Image (Label `hz.role=updater`, nur Docker-Socket und Agent-Datenvolume) ersetzt den Agent und wartet bis zu 3 Min, bis der neue Agent mit dem Core verbunden ist (Health-Check im Agent-Image); sonst Rollback.
+  - OS: `system.upgrade` (`apt-get update` + `apt-get -y upgrade`, feste Argumente, keine Entfernungen, Konfigurationsdateien bleiben); danach Neustart im Fenster, wenn eingeschaltet und nötig.
+- **Ablauf im Fenster:** ein Server nach dem anderen, pro Server OS → Agent → Zentrale (der Core-Server zuletzt) → Neustart; jeder Schritt höchstens einmal pro Fenster; ohne Ergebnis nach 15 Min `timeout`.
+- **Meldungen:** `info` bei Erfolg („Agent auf pi aktualisiert: sha-1a2b3c4 → sha-5d6e7f8“), `warn` bei Rollback und Zeitüberschreitung, `crit` wenn nach einem Fehler nichts mehr läuft. Verlauf der letzten 50 Läufe.
+- **Web:** Kachel „Auto-Update“ im Serverdetail (Richtlinie, Versionen, „Jetzt prüfen“, „Jetzt aktualisieren“, letzter Lauf), Abschnitt „Updates“ unter Einstellungen mit allen Servern und dem Verlauf, Live-Topic `updates`.
+
+**Abnahme:** Ein Sim-Agent bekommt ein neueres Agent-Image und läuft danach damit; ein absichtlich kaputtes Image (Health-Check rot) wird zurückgerollt, und es kommt eine `warn`-Meldung; ein Core-Update im Docker-Smoke ersetzt den Core-Container und die Zentrale ist danach wieder erreichbar; außerhalb des Fensters startet kein geplanter Lauf. Sicherheitstests: nur `agent`/`core` als Ziel, nie ein Image aus der Anfrage, Helfer-Container mit minimalen Rechten und geschützt wie Core/Agent, `system.upgrade` mit festen Argumenten, Neustart-Automatik nur mit Step-up, Ergebnis-Events nur für bekannte, laufende Runs, alle Routen nur mit Admin-Session.
 ## M15: Game-Relay (Eingänge) und feste Adressen
 - **Eingang pro Server:** Jeder Server mit öffentlicher IPv4 kann als Eingang markiert werden (Step-up, Portbereich, den man in der Firewall des Anbieters öffnet), auch mehrere. Der Agent dort braucht `HZ_AGENT_ALLOW_RELAY=1`.
 - **Relay pro Gameserver:** Ein Gameserver bekommt einen Eingang. Der Agent am Eingang nimmt die Spielports (gleiche Nummern) an und leitet TCP und UDP über Tailscale zum Server, auf dem das Spiel gerade läuft (`relay.set`). Kein Router-Portforwarding zu Hause nötig. Der Schlafmodus funktioniert durch das Relay (das Wecken kommt am Spielserver an).

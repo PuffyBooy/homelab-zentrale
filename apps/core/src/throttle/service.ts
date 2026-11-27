@@ -137,10 +137,10 @@ function infoOf(row: ContainerRow): Partial<ContainerInfo> {
   return v !== null && typeof v === 'object' ? (v as Partial<ContainerInfo>) : {};
 }
 
-/** hz.role core/agent: always wichtig, never a target. */
+/** hz.role core/agent/updater: always wichtig, never a target. */
 export function isProtected(row: ContainerRow): boolean {
   const role = infoOf(row).role;
-  return role === 'core' || role === 'agent';
+  return role === 'core' || role === 'agent' || role === 'updater';
 }
 
 /** A --cpus value that container.limit accepts, else null (= no limit). */
