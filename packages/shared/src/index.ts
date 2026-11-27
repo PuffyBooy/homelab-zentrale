@@ -34,3 +34,5 @@ export * from './api/speedtest.js';
 export * from './api/domains.js';
 export * from './api/apps.js';
 export * from './api/cloud.js';
+export * from './agent-docker.js';
+export * from './api/docker.js';

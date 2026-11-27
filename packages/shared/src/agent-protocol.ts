@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { backupTargetRpcParams } from './agent-backup-target.js';
 import { opsRpcParams } from './agent-ops.js';
+import { dockerRpcParams } from './agent-docker.js';
 import { automationRpcParams } from './agent-automation.js';
 
 /**
@@ -964,6 +965,8 @@ export const rpcParamsByAction = {
   ...opsRpcParams,
   /** M13b: second copy of backups on a mounted NAS share (agent-backup-target.ts). */
   ...backupTargetRpcParams,
+  /** M23 Docker komplett: details, remove, images, volumes, networks, stacks (agent-docker.ts). */
+  ...dockerRpcParams,
   'container.start': containerIdParams,
   'container.stop': containerIdParams,
   'container.restart': containerIdParams,
@@ -1199,8 +1202,14 @@ export const rpcParamsByAction = {
   'check.http': httpCheckParamsSchema,
   'check.tcp': tcpCheckParamsSchema,
   'check.ping': pingCheckParamsSchema,
-  /** Stream: output of the PTY. Only with HZ_AGENT_ALLOW_TERMINAL=1. */
-  'pty.open': z.strictObject(ptySize),
+  /**
+   * Stream: output of the PTY. Only with HZ_AGENT_ALLOW_TERMINAL=1.
+   * Without `container`: a login shell on the host. M23 with `container`: a shell
+   * inside that running container (`docker exec -it`, bash if present, else sh);
+   * refused with not_allowed for protected containers (hz.role, the agent itself),
+   * busy when it does not run.
+   */
+  'pty.open': z.strictObject({ ...ptySize, container: containerRefSchema.optional() }),
   'pty.input': z.strictObject({ streamId: streamIdSchema, data: z.string().max(16 * 1024) }),
   'pty.resize': z.strictObject({ streamId: streamIdSchema, ...ptySize }),
   'pty.close': z.strictObject({ streamId: streamIdSchema }),

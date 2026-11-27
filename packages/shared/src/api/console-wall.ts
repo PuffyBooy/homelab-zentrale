@@ -18,7 +18,11 @@ const idSchema = z.string().regex(/^[A-Za-z0-9_-]{8,64}$/);
 // the core refuses unless the server has allowTerminal (settings, step-up).
 // Each session is logged (who, when, duration, bytes), never keystrokes or output.
 
-export const consoleQuerySchema = z.strictObject({ serverId: z.string().min(1).max(64) });
+export const consoleQuerySchema = z.strictObject({
+  serverId: z.string().min(1).max(64),
+  /** M23: core container id for a shell inside that container instead of the host. */
+  container: idSchema.optional(),
+});
 
 const ptySize = {
   cols: z.number().int().min(10).max(500),
