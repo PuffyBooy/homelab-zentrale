@@ -206,6 +206,9 @@ jobs:
           test "$(printf '%s' "$key" | base64 -d | wc -c)" = 32
           if grep -qF -- "$key" install.log; then echo "key in output"; exit 1; fi
           curl -fsS http://127.0.0.1:8080/api/health | jq -e '.ok == true'
+          # Normal host: the hardening probe passes and no-new-privileges stays on.
+          grep -q 'mit no-new-privileges' install.log
+          sudo grep -qx -- '      - no-new-privileges:true' /etc/homelab-zentrale/docker-compose.yml
           ip="$(hostname -I | awk '{print $1}')"
           if curl -s -m 3 -o /dev/null "http://$ip:8080/"; then echo "core listens beyond loopback"; exit 1; fi
           echo "$key" | sha256sum > key.sha
@@ -231,6 +234,92 @@ jobs:
         run: |
           cat install.log update.log reinstall.log 2>/dev/null | sed 's/setup#token=[A-Za-z0-9_-]*/setup#token=[redacted]/' || true
           docker ps -a
+
+  installer-confined:
+    # Regression: on hosts whose dockerd runs under an AppArmor profile (Docker as a
+    # snap, Ubuntu in an LXC container) every container with no-new-privileges dies with
+    # "exec /usr/local/bin/docker-entrypoint.sh: operation not permitted". The snap is
+    # the reproducible case on a GitHub runner. Not a gate for publishing images: it
+    # depends on the snap store and on the snap's current AppArmor profile.
+    name: installer on an AppArmor-confined dockerd (docker snap)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - name: Build the core image with the runner's docker
+        run: |
+          docker build -f deploy/Dockerfile.core -t homelab-zentrale/core:local .
+          docker save homelab-zentrale/core:local -o "$HOME/core.tar"
+      - name: Replace docker-ce with the docker snap
+        run: |
+          sudo systemctl stop docker.socket docker.service
+          sudo snap install docker
+          for i in $(seq 1 90); do
+            for s in /run/docker.sock /run/snap.docker/docker.sock; do
+              if sudo docker -H "unix://$s" info > /dev/null 2>&1; then
+                echo "DOCKER_HOST=unix://$s" >> "$GITHUB_ENV"; echo "socket $s"; exit 0
+              fi
+            done
+            sleep 2
+          done
+          echo "docker snap did not come up"; exit 1
+      - name: Load the image into the snap daemon
+        run: |
+          sudo env "DOCKER_HOST=$DOCKER_HOST" docker load -i "$HOME/core.tar"
+          pid="$(pidof dockerd | awk '{print $1}')"
+          echo "dockerd AppArmor label: $(sudo cat /proc/$pid/attr/current)"
+      - name: Reproduce (plain no-new-privileges fails here)
+        run: |
+          if sudo env "DOCKER_HOST=$DOCKER_HOST" docker run --rm --security-opt no-new-privileges:true \
+            homelab-zentrale/core:local node -v 2> err.txt; then
+            echo "no-new-privileges works on this dockerd: scenario not reproduced"; exit 1
+          fi
+          cat err.txt
+          grep -q 'operation not permitted' err.txt
+      - name: Stub tailscale (no tailnet in CI)
+        run: |
+          mkdir -p /tmp/hz-stub
+          cat > /tmp/hz-stub/tailscale <<'EOF'
+          #!/usr/bin/env bash
+          case "$1 ${2:-}" in
+            "status --json") echo '{"BackendState": "Running", "Self": {"DNSName": "heimserver.tail0000.ts.net."}}' ;;
+            "serve status") echo '{}' ;;
+          esac
+          exit 0
+          EOF
+          chmod 0755 /tmp/hz-stub/tailscale
+      - name: The snap's own docker CLI is refused with a clear message
+        run: |
+          if sudo env "PATH=/tmp/hz-stub:/snap/bin:$PATH" ./deploy/install.sh --yes --timezone UTC > snapcli.log 2>&1; then
+            echo "installer accepted the snap CLI"; exit 1
+          fi
+          cat snapcli.log
+          grep -q 'der docker-Befehl ist der Snap' snapcli.log
+      - name: Install explains the cause and starts the core
+        run: |
+          # docker-ce's CLI and compose plugin (/usr/bin) against the snap daemon.
+          sudo env "PATH=/tmp/hz-stub:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
+            "DOCKER_HOST=$DOCKER_HOST" HZ_HEALTH_TIMEOUT=120 \
+            ./deploy/install.sh --yes --allow-no-nnp --image homelab-zentrale/core:local --timezone UTC > install.log 2>&1
+          grep -q 'operation not permitted' install.log
+          grep -q 'als Snap installiert' install.log
+          curl -fsS http://127.0.0.1:8080/api/health | jq -e '.ok == true'
+          # Only no-new-privileges is gone; user, read-only and capabilities stay.
+          f=/etc/homelab-zentrale/docker-compose.yml
+          if sudo grep -q 'no-new-privileges' "$f"; then echo "still in compose"; exit 1; fi
+          sudo grep -qx '    read_only: true' "$f"
+          sudo grep -qx '      - ALL' "$f"
+          id="$(sudo env "DOCKER_HOST=$DOCKER_HOST" docker ps -q --filter label=hz.role=core)"
+          sudo env "DOCKER_HOST=$DOCKER_HOST" docker inspect "$id" \
+            --format '{{.Config.User}} {{.HostConfig.ReadonlyRootfs}} {{.HostConfig.CapDrop}}' | tee insp.txt
+          grep -qx 'node true \[ALL\]' insp.txt
+      - name: Logs on failure
+        if: failure()
+        run: |
+          sed 's/setup#token=[A-Za-z0-9_-]*/setup#token=[redacted]/' install.log 2>/dev/null || true
+          sudo dmesg | grep -i apparmor | tail -20 || true
 
   images:
     name: publish images

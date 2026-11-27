@@ -23,6 +23,8 @@
 #   --domain <name>        with share: public DDNS name for Caddy (e.g. spiel.example.duckdns.org)
 #   --core-url <url>       with share: https://<core>.ts.net
 #   --token-stdin          with share: read the gateway token from stdin
+#   --allow-no-nnp         start without no-new-privileges where the host refuses it
+#                          (docker snap, LXC); asked interactively, never assumed by --yes
 #
 # Secrets: the gateway token is never accepted as an argument (shell history, `ps`):
 # use HZ_SHARE_GATEWAY_TOKEN, --token-stdin or the hidden prompt. A Tailscale auth key
@@ -58,6 +60,7 @@ if [[ "${HZ_INSTALL_ALLOW_NONROOT:-0}" == 1 ]]; then
   APT_BACKUP_DIR="${HZ_APT_BACKUP_DIR:-$APT_BACKUP_DIR}"
 fi
 HEALTH_TIMEOUT="${HZ_HEALTH_TIMEOUT:-90}"
+TLS_TIMEOUT="${HZ_TLS_TIMEOUT:-90}"
 
 CORE_ENV="$CONF_DIR/core.env"
 CORE_COMPOSE="$CONF_DIR/docker-compose.yml"
@@ -103,6 +106,7 @@ purge=0
 domain=""
 core_url_arg=""
 token_stdin=0
+allow_no_nnp=0
 
 need_value() { [[ $# -ge 2 && -n "$2" ]] || die "$1 braucht einen Wert"; }
 
@@ -120,6 +124,7 @@ while [[ $# -gt 0 ]]; do
     --domain) need_value "$@"; domain="$2"; shift 2 ;;
     --core-url) need_value "$@"; core_url_arg="$2"; shift 2 ;;
     --token-stdin) token_stdin=1; shift ;;
+    --allow-no-nnp) allow_no_nnp=1; shift ;;
     --token | --token=* | --auth-key | --auth-key=* | --secret-key | --secret-key=*)
       die "Secrets nie als Argument übergeben (Shell-History, ps), siehe --help" ;;
     -h | --help) usage 0 ;;
@@ -374,6 +379,7 @@ need_docker() {
     install_docker
   fi
   docker info >/dev/null 2>&1 || die "der Docker-Dienst läuft nicht (systemctl start docker)"
+  check_docker_snap
   if ! docker compose version >/dev/null 2>&1; then
     warn "Docker Compose v2 fehlt."
     if [[ "$(os_id)" != unknown ]] && confirm "Paket docker-compose-plugin installieren?" j; then
@@ -382,6 +388,42 @@ need_docker() {
     docker compose version >/dev/null 2>&1 || die "Docker Compose v2 fehlt (Paket docker-compose-plugin)"
   fi
   ok "$(docker --version)"
+}
+
+docker_snap_installed() { command -v snap >/dev/null 2>&1 && snap list docker >/dev/null 2>&1; }
+docker_ce_installed() {
+  [[ "$(dpkg-query -W -f='${Status}' docker-ce 2>/dev/null || true)" == "install ok installed" ]]
+}
+
+# The docker snap (offered by the Ubuntu server installer) runs dockerd under AppArmor
+# confinement; then no container starts with no-new-privileges (see check_hardening).
+# Removing it deletes everything stored in the snap, so it is never the default.
+check_docker_snap() {
+  docker_snap_installed || return 0
+  warn "Docker ist als Snap installiert. Damit starten gehärtete Container (no-new-privileges) nicht."
+  if docker_ce_installed; then
+    info "docker-ce (download.docker.com) ist zusätzlich installiert. Empfohlen: nur docker-ce behalten."
+  else
+    info "Empfohlen: Snap entfernen und Docker aus download.docker.com installieren."
+  fi
+  info "Achtung: Entfernen löscht Container, Images und Volumes, die im Snap-Docker liegen."
+  if ! confirm "Docker-Snap jetzt entfernen (snap remove --purge docker)?" n; then
+    info "Snap bleibt. Von Hand: sudo snap remove --purge docker && sudo systemctl restart docker.socket docker"
+    # The snap's own CLI is confined too and may not read /etc/homelab-zentrale.
+    case "$(command -v docker)" in
+      /snap/*) die "der docker-Befehl ist der Snap ($(command -v docker)); damit geht es nicht. Snap entfernen (siehe oben) oder docker-ce installieren" ;;
+    esac
+    return 0
+  fi
+  snap remove --purge docker || die "snap remove --purge docker ist fehlgeschlagen"
+  hash -r
+  if docker_ce_installed; then
+    systemctl restart docker.socket docker.service || die "docker-ce ließ sich nicht starten (systemctl status docker)"
+  else
+    install_docker
+  fi
+  docker info >/dev/null 2>&1 || die "der Docker-Dienst läuft nicht (systemctl start docker)"
+  ok "Docker-Snap entfernt, docker-ce läuft"
 }
 
 # tailscale status --json | <field of Self>
@@ -458,6 +500,7 @@ setup_serve() {
     return 0
   fi
   no_funnel
+  warn_foreign_443 || true
   if ! timeout 180 tailscale serve --bg --https=443 "$CORE_URL_LOCAL"; then
     warn "tailscale serve ist fehlgeschlagen. Meist sind HTTPS-Zertifikate im Tailnet aus:"
     warn "https://login.tailscale.com/admin/dns -> HTTPS Certificates aktivieren, dann das Skript erneut ausführen."
@@ -465,6 +508,64 @@ setup_serve() {
   fi
   no_funnel
   ok "https://$1 -> $CORE_URL_LOCAL (nur im Tailnet)"
+  verify_serve_tls "$1" || true
+}
+
+# Another service on 0.0.0.0:443 (nginx, Caddy, a NAS UI ...) takes the tailnet IPv4
+# address too; tailscaled then gets only IPv6 and other servers see that service's
+# certificate. Returns 0 when one was found.
+warn_foreign_443() {
+  local others=""
+  command -v ss >/dev/null 2>&1 || return 1
+  others="$(ss -ltnpH 'sport = :443' 2>/dev/null | grep -v tailscaled || true)"
+  [[ -n "$others" ]] || return 1
+  warn "Auf Port 443 hört noch ein anderer Dienst und fängt Anfragen aus dem Tailnet ab:"
+  printf '%s\n' "$others" | awk '{print "      " $4 "  " $6}' >&2
+  info "Diesen Dienst nur an die LAN-IP binden (z. B. nginx: listen 192.168.1.10:443 ssl;)"
+  info "oder abschalten (sudo systemctl disable --now nginx), dann: sudo systemctl restart tailscaled"
+  return 0
+}
+
+# verify_serve_tls <host>: the ts.net name answers with a valid certificate for itself.
+# Agents enroll with `curl https://<host>/install.sh`, so a wrong certificate breaks them.
+# The first request makes tailscaled fetch the certificate (Let's Encrypt), which can take
+# up to a minute.
+verify_serve_tls() {
+  local host="$1" i out=""
+  for ((i = 0; i < TLS_TIMEOUT; i += 3)); do
+    out="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 20 "https://$host/api/health" 2>&1 || true)"
+    if [[ "$out" == 200 ]]; then
+      ok "https://$host hat ein gültiges Zertifikat"
+      return 0
+    fi
+    # A wrong certificate does not fix itself by waiting.
+    case "$out" in *"subject name"* | *"self-signed"* | *"self signed"*) break ;; esac
+    sleep 3
+  done
+  warn "https://$host antwortet nicht mit gültigem Zertifikat:"
+  printf '%s\n' "$out" | grep -v '^[0-9]*$' | tail -n 1 | sed 's/^/      /' >&2
+  explain_tls "$host"
+  return 1
+}
+
+# Why the tailnet name does not answer with its own certificate, as far as this host tells.
+explain_tls() {
+  local host="$1" names="" resolved="" tsip=""
+  warn_foreign_443 || true
+  if command -v openssl >/dev/null 2>&1; then
+    names="$(timeout 15 openssl s_client -connect "$host:443" -servername "$host" </dev/null 2>/dev/null |
+      openssl x509 -noout -subject -ext subjectAltName 2>/dev/null | tr '\n' ' ' || true)"
+    if [[ -n "$names" ]]; then info "Zertifikat dort: $names"; fi
+  fi
+  resolved="$(getent hosts "$host" 2>/dev/null | awk '{print $1; exit}' || true)"
+  tsip="$(tailscale ip -4 2>/dev/null | head -n 1 || true)"
+  if [[ -z "$resolved" ]]; then
+    info "$host lässt sich hier nicht auflösen: MagicDNS ist aus (https://login.tailscale.com/admin/dns)."
+  elif [[ -n "$tsip" && "$resolved" != "$tsip" ]]; then
+    info "$host zeigt auf $resolved, die Tailscale-IP dieses Servers ist $tsip."
+  fi
+  info "In https://login.tailscale.com/admin/dns müssen MagicDNS und HTTPS Certificates an sein."
+  info "Danach erneut prüfen: sudo $0 status"
 }
 
 wait_health() { # wait_health <url> <seconds>
@@ -479,6 +580,89 @@ wait_health() { # wait_health <url> <seconds>
 }
 
 compose() { (cd "$CONF_DIR" && docker compose "$@"); }
+
+# --- container hardening probe -----------------------------------------------
+# Core and share gateway run with no-new-privileges. On some hosts Docker cannot
+# start any container with it: when dockerd itself runs under an AppArmor profile
+# (Docker as a snap, Ubuntu inside an LXC container, e.g. on Proxmox), the kernel
+# refuses the switch to the container's profile under no_new_privs and every start
+# ends in "exec /usr/local/bin/docker-entrypoint.sh: operation not permitted".
+# The probe runs the image once with the same hardening as the compose file, before
+# compose starts it, so such a host gets a clear diagnosis instead of a restart loop.
+
+# probe_image <image> [extra docker run args]: the image's default entrypoint, as its user.
+probe_image() {
+  local img="$1"
+  shift
+  docker run --rm --pull never --network none --read-only --tmpfs /tmp --cap-drop ALL \
+    --label hz.probe=1 "$@" "$img" node -e 'process.exit(0)'
+}
+
+# Why no-new-privileges fails here, as far as the host tells.
+explain_nnp() {
+  local virt="" pid label=""
+  if command -v snap >/dev/null 2>&1 && snap list docker >/dev/null 2>&1; then
+    info "Ursache: Docker ist zusätzlich als Snap installiert und läuft eingesperrt (AppArmor)."
+    info "Besser: Snap entfernen und nur docker-ce nutzen:"
+    info "  sudo snap remove --purge docker && sudo systemctl restart docker"
+    info "Danach dieses Skript erneut starten, dann bleibt no-new-privileges an."
+  fi
+  if command -v systemd-detect-virt >/dev/null 2>&1; then
+    virt="$(systemd-detect-virt --container 2>/dev/null || true)"
+  fi
+  if [[ -n "$virt" && "$virt" != none ]]; then
+    info "Ursache: dieser Server läuft selbst in einem Container ($virt, z. B. Proxmox-LXC)."
+    info "Dort lässt der Kernel no-new-privileges für Docker-Container oft nicht zu."
+  fi
+  pid="$(pidof dockerd 2>/dev/null | awk '{print $1}' || true)"
+  if [[ -n "$pid" && -r "/proc/$pid/attr/current" ]]; then
+    label="$(tr -d '\0' <"/proc/$pid/attr/current" 2>/dev/null || true)"
+    if [[ -n "$label" && "$label" != unconfined ]]; then
+      info "dockerd läuft mit dem AppArmor-Profil: $label"
+    fi
+  fi
+}
+
+# check_hardening <image> <compose file> <name> [subcommand]: keep no-new-privileges
+# when the host allows it; otherwise explain and (with consent) drop only that option.
+check_hardening() {
+  local img="$1" file="$2" name="$3" sub="${4:-}" err
+  step "Härtung prüfen ($name)"
+  if err="$(probe_image "$img" --security-opt no-new-privileges:true 2>&1)"; then
+    ok "$name startet schreibgeschützt, ohne Capabilities und mit no-new-privileges"
+    return 0
+  fi
+  if ! probe_image "$img" >/dev/null 2>&1; then
+    printf '%s\n' "$err" | tail -n 5 >&2
+    die "$name startet auf diesem Server gar nicht (Ausgabe oben). Prüfe: docker run --rm $img node -v"
+  fi
+  # Only the known refusal (AppArmor under no_new_privs) weakens anything.
+  if ! grep -q 'operation not permitted' <<<"$err"; then
+    printf '%s\n' "$err" | tail -n 5 >&2
+    die "$name startet mit no-new-privileges nicht (Ausgabe oben), aus unbekanntem Grund"
+  fi
+  warn "$name startet hier nicht mit no-new-privileges:"
+  printf '%s\n' "$err" | tail -n 2 | sed 's/^/      /' >&2
+  explain_nnp
+  info "Ohne no-new-privileges bleibt der Rest der Härtung: eigener Benutzer (node),"
+  info "keine Capabilities, schreibgeschütztes Dateisystem, nur 127.0.0.1."
+  if [[ $allow_no_nnp -ne 1 ]] && ! confirm "$name ohne no-new-privileges starten?" n; then
+    die "abgebrochen. Ursache beheben (siehe oben) oder bewusst mit --allow-no-nnp starten"
+  fi
+  local tmp
+  tmp="$(mktemp "$file.XXXXXX")"
+  # Drop only that entry; drop the key too when nothing is left under it.
+  awk '
+    /^      - no-new-privileges:true$/ { next }
+    held != "" { if ($0 !~ /^      - /) { held = ""; print; next } print held; held = "" }
+    /^    security_opt:$/ { held = $0; next }
+    { print }
+  ' "$file" >"$tmp"
+  chmod 0644 "$tmp"
+  mv -f "$tmp" "$file"
+  if grep -q 'no-new-privileges' "$file"; then die "no-new-privileges ließ sich nicht aus $file entfernen"; fi
+  warn "$name läuft ohne no-new-privileges. Nach behobener Ursache: sudo $0${sub:+ $sub} update"
+}
 
 # --- core: install ------------------------------------------------------------
 write_core_compose() {
@@ -617,6 +801,7 @@ start_core() {
     info "Lade $image ..."
     compose pull core || die "docker pull ist fehlgeschlagen (Netz? Bei privaten Packages vorher docker login ghcr.io)"
   fi
+  check_hardening "$image" "$CORE_COMPOSE" Core
   started_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   compose up -d --no-build --force-recreate core
   step "Health-Check"
@@ -671,10 +856,8 @@ core_install() {
   start_core
   local base
   base="$(env_get "$CORE_ENV" HZ_BASE_URL)"
+  # Includes the certificate check of the tailnet name (verify_serve_tls).
   setup_serve "${base#https://}"
-  if [[ $serve -eq 1 ]] && ! wait_health "$base" 20; then
-    warn "$base antwortet noch nicht. Das erste Zertifikat kann eine Minute dauern."
-  fi
   show_first_login "$base"
   remind_secret_key
   if [[ $interactive -eq 1 ]] && confirm "Share-Gateway für Freunde ohne Tailscale geplant (öffentlicher Server, optional)?" n; then
@@ -723,6 +906,7 @@ core_status() {
   if command -v tailscale >/dev/null 2>&1; then
     tailscale serve status || true
     no_funnel
+    if [[ "$base" =~ ^https://(.+)$ ]]; then TLS_TIMEOUT=3 verify_serve_tls "${BASH_REMATCH[1]}" || true; fi
   else
     warn "tailscale fehlt"
   fi
@@ -834,6 +1018,7 @@ share_install() {
 
   step "Starten"
   if [[ "$simage" != "$SHARE_LOCAL_IMAGE" ]]; then share_compose pull share; fi
+  check_hardening "$simage" "$SHARE_COMPOSE" Gateway share
   share_compose up -d --no-build --force-recreate share
   local probe code="" i
   probe="http://127.0.0.1:8090/s/$(printf 'a%.0s' {1..43})"
