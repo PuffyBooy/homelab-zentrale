@@ -273,6 +273,11 @@ Wunsch des Admins vom 27.11.2026. Repo-Link einfügen → die Zentrale erkennt C
 
 ---
 
+## M29: App-Store 2.0 mit Suche
+Wunsch des Admins vom 27.11.2026. Rund 80 eingebaute Apps in Kategorien, Suche (deutsch/englisch, tippfehlertolerant) und Filter (Architektur, RAM, installiert), Bundles, optionale Ausnahmen pro Vorlage mit Step-up (nie Docker-Socket oder privileged), optionaler Import von CasaOS-/Umbrel-Katalogen durch dieselbe Prüfung, Backup und Rollback pro App. Details: `docs/M29-APPSTORE-PLAN.md`.
+
+---
+
 ## Definition of Done (für jeden PR)
 - Code, Tests und Doku sind aktuell (`docs/` mitpflegen, wenn sich etwas ändert)
 - Keine `any`, keine auskommentierten Blöcke, keine TODOs ohne Issue

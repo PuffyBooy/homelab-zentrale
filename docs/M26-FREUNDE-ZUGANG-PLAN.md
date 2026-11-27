@@ -14,6 +14,8 @@ Ziel: Der Admin klickt einmal „Freunde-Zugang einrichten“, danach heißt Fre
 
 ## Zwei Wege, der Assistent wählt den passenden
 
+Entscheidung des Admins vom 27.11.2026: vorerst keine eigene Domain, also **Weg A (Tailscale Funnel)**. Weg B bleibt als spätere Option im Plan.
+
 ### Weg A (empfohlen): Tailscale Funnel, ohne Ports, ohne Domain, ohne Oracle
 Das Gateway läuft als eigener Container mit **eigenem Tailscale-Knoten** (`hz-share`, Tag `tag:homelab-share`) auf einem beliebigen Server, auch zu Hause. Nur dieser Knoten bekommt Funnel; die öffentliche Adresse ist `https://hz-share.<tailnet>.ts.net/s/<token>`. Kein Router, keine Portfreigabe, kein DuckDNS, Zertifikat kommt von Tailscale.
 - Die Zentrale erzeugt den Auth-Key über die Tailscale-OAuth-Anbindung aus M11b (einmalig, Tag `tag:homelab-share`, nicht gespeichert).
