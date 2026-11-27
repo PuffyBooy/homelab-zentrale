@@ -19,6 +19,23 @@ Hinweis: Seit Firmware-Ständen ab Anfang 2025 erlaubt Bambu Steuern über Fremd
 - **Verlauf und Statistik:** Drucke mit Dauer, Erfolg/Abbruch, Filament-Verbrauch; optional Stromkosten über eine Shelly-/HA-Steckdose (M8).
 - **Automatik (M20):** z. B. „nach fertigem Druck 10 Min warten, dann Steckdose aus“ über HA.
 
+## Zielgerät und „Konto-mäßig“ (Ergänzung 27.11.2026)
+Der Admin überlegt, einen **Bambu Lab P2S Combo** (mit AMS) zu kaufen. Er ist das Zielgerät für M30. Vor dem Bau prüfen (am echten Gerät oder in der aktuellen Bambu-Doku): LAN-Modus, Entwicklermodus, MQTT-Themen, Kamera-Protokoll (RTSPS wie X1 oder JPEG-Strom wie P1) und Dateipfade auf dem Speicher. Was abweicht, wird über ein Geräteprofil `printerModels` gelöst, nicht im Code verstreut.
+
+„Konto-mäßig“ ist zweideutig, deshalb beides im Plan:
+
+### A) Freunde und Mitbewohner dürfen drucken (wie M26)
+- Neues Recht `print` am Freund (Standard aus, Step-up). Kontingent pro Freund: höchstens N Aufträge pro Woche, höchstens X Stunden pro Druck, höchstens Y g Filament pro Monat, erlaubte Filamente/AMS-Slots.
+- Der Freund lädt auf seiner Link-Seite eine `.3mf` hoch (nur fertig gesliced, Größenlimit), sieht geschätzte Dauer und Filament (aus der 3mf), und der Auftrag landet in der **Warteschlange**.
+- **Freigabe immer durch den Admin** (Push mit Vorschau-Bild aus der 3mf, Annehmen/Ablehnen, Platte geprüft?). Gedruckt wird nie ohne Bestätigung, weil jemand die Platte leeren muss.
+- Der Freund sieht nur seinen eigenen Auftrag: Position in der Schlange, Fortschritt, Restzeit, Kamerabild nur während seines Drucks, Meldung „fertig, abholen“.
+- **Verlauf und Kosten pro Person:** Filament in g, Druckzeit, Kosten (€/kg pro Filament, Strom über Steckdose aus M8), Monatsübersicht zum Abrechnen.
+
+### B) Anbindung über das Bambu-Konto (Cloud)
+Statt LAN-Modus mit dem Bambu-Konto anmelden. Das wäre bequem (kein Entwicklermodus), aber Bambu bietet dafür keine offizielle offene Schnittstelle; inoffizielle Wege können mit jedem Firmware- oder Cloud-Update brechen, und das Konto-Token hätte Zugriff auf alle Drucker des Kontos. **Empfehlung: nicht bauen**, LAN-Modus (oder Home Assistant) nutzen. Falls gewünscht, nur lesend und als eigener, klar markierter Weg.
+
+**Abnahme dazu:** Ein Freund mit `print` lädt eine 3mf hoch, ohne Freigabe startet nichts; nach Freigabe druckt die Attrappe und der Freund sieht nur seinen Auftrag; ein zweiter Auftrag über dem Kontingent wird abgelehnt; der Monatsverlauf zeigt Gramm und Kosten pro Person. **Sicherheitstests:** Upload nur `.3mf`, entpackt nur zur Vorschau mit Größen-/Dateianzahl-Grenze, eingebetteter G-Code wird nicht verändert und nicht angezeigt; Freund ohne `print` = 403; Kamera nur während des eigenen Drucks.
+
 ## Arbeitspakete
 - **WP Schema** (`packages/shared`): `api/printer.ts`, Agent-Aktionen `printer.connect|status|command|upload|files|camera` in `agent-printer.ts`, Modul `printer`.
 - **WP Agent ∥** (`apps/agent/src/printer`): MQTT-Client mit festgenageltem Zertifikat, nur private IPv4-Ziele und die Ports 8883/990/322/6000, Befehls-Allowlist, FTPS-Upload mit Limit, Kamera-Weiterleitung mit Bildraten-Grenze.
@@ -30,6 +47,6 @@ Gegen eine MQTT-/FTPS-Attrappe (Test, e2e): Status und Fortschritt erscheinen li
 **Sicherheitstests:** Zugangscode nie in Antwort/Log; nur private IPs und feste Ports; kein freier G-Code; Upload nur `.3mf`/`.gcode`, kein Pfadausbruch im Namen; Kamera nur über Agent mit Session; Modul aus = 404.
 
 ## Was der Admin liefern muss (nach dem Bauen)
-- Druckermodell (X1C, P1S, P1P, A1, A1 mini, H2D …).
+- Druckermodell: geplant P2S Combo (sonst X1C, P1S, A1 …).
 - Am Drucker: **LAN-Modus** einschalten und **Zugangscode** ablesen (Einstellungen → Netzwerk), für Steuern zusätzlich **Entwicklermodus**. Seriennummer (Einstellungen → Gerät) und IP-Adresse (am besten im Router fest vergeben).
 - Alles trägt er selbst in der Zentrale ein, nicht im Chat. Alternative: vorhandene Bambu-Integration in Home Assistant nutzen.
