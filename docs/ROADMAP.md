@@ -263,6 +263,16 @@ Wunsch des Admins vom 27.11.2026. Assistent „Freunde-Zugang einrichten“ rich
 
 ---
 
+## M27: Gameserver Plus
+Wunsch des Admins vom 27.11.2026. Forge/NeoForge und Ein-Klick-Profile pro Spiel, Modpacks aus Modrinth (`.mrpack`) und CurseForge (eigener API-Key), mehrere Welten pro Server mit Wechsel und ZIP für Freunde, Live-Konsole für Freunde nur mit Befehls-Allowlist, Auto-Skalierung auf eine größere Azure-VM ohne Spieler online und mit gleicher Relay-Adresse. Details: `docs/M27-M28-PLAN.md`.
+
+---
+
+## M28: Projekte hosten
+Wunsch des Admins vom 27.11.2026. Repo-Link einfügen → die Zentrale erkennt Compose, Dockerfile, Node, Python oder statisch, baut auf dem Zielserver und startet; Subdomain mit HTTPS (Standard nur im Tailnet, öffentlich nur mit Step-up), Push to deploy mit Health-Gate und Rollback, Variablen und verschlüsselte Secrets pro Projekt, Logs und Neustart pro Projekt. Details: `docs/M27-M28-PLAN.md`.
+
+---
+
 ## Definition of Done (für jeden PR)
 - Code, Tests und Doku sind aktuell (`docs/` mitpflegen, wenn sich etwas ändert)
 - Keine `any`, keine auskommentierten Blöcke, keine TODOs ohne Issue
