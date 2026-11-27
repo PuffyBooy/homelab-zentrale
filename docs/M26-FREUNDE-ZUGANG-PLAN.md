@@ -38,6 +38,25 @@ Für alle, die eine eigene Adresse wie `spiel.example.duckdns.org` wollen. Der A
 - **Verwalten:** Liste aller Freunde mit zuletzt aktiv, Rechten, Ablauf; Widerruf wirkt sofort; Link neu erzeugen macht den alten ungültig.
 - Bestehende Benutzerlinks bleiben gültig und lassen sich in einen Freund übernehmen. Freunde sind nie Admins und sehen nie Server, IPs oder andere Freunde.
 
+## Freunde dürfen eigene Gameserver erstellen (mit Grenzen)
+Wunsch des Admins vom 27.11.2026: „Ich möchte sie auch so einladen können, dass sie Server erstellen können, mit Beschränkungen.“
+
+- **Recht `create` am Freund** (Standard aus, Einschalten mit Step-up). Dazu ein **Kontingent** pro Freund:
+  - höchstens N Gameserver (Standard 1), höchstens X GB RAM und Y CPU-Kerne zusammen,
+  - erlaubte Spiele (Auswahl aus dem Katalog, Standard: Minecraft, Valheim, Terraria),
+  - erlaubte Server (z. B. nur Heimserver, nur Oracle) und optional „Azure erlaubt“ mit eigenem **€-Budget pro Monat** für diesen Freund (Standard 0 €, aus dem Gesamtbudget aus M22 abgezogen),
+  - Laufzeit pro Monat (Stunden) und Speicher für Welten/Backups,
+  - Ablaufdatum der Einladung und des Kontingents.
+- **Freigabe:** Einstellung pro Freund „sofort“ oder „ich bestätige jeden neuen Server“ (Push an den Admin, Knopf Annehmen/Ablehnen). Standard: bestätigen.
+- **Was der Freund kann:** auf seiner Link-Seite „Server erstellen“ (Spiel, Profil aus M27, Name, Spielerzahl), seine eigenen Server starten/stoppen, Einstellungen aus `settings[]` ändern, Mods aus Modrinth installieren (wenn erlaubt), Backups und Welt-Download, andere Freunde zu **seinem** Server einladen (nur Spielen/Status, nie `create`), löschen (Welt wird vorher gesichert).
+- **Was nie geht:** eigene Compose-Dateien, eigene Images, Ports außerhalb des Freundes-Portbereichs, Konsole außerhalb der Allowlist, Sicht auf andere Server, Container, IPs, Freunde oder die Zentrale; nie Admin-Rechte. Ports kommen aus einem eigenen Bereich pro Server (Standard 25600–25699) und laufen über das Game-Relay (M15), damit keine Heim-IP sichtbar wird.
+- **Vorrang des Admins:** Freundes-Server sind automatisch Priorität `niedrig` und „darf gestoppt werden“ (M10); die RAM-Reserve für `wichtig` gilt immer. Ist das Kontingent oder der Server voll, sagt die Seite das klar („Kein Platz frei, frag den Admin“).
+- **Sofort widerrufen:** Widerruf des Freundes stoppt alle seine Server sofort; danach wahlweise behalten (gehören dann dem Admin), nach 30 Tagen löschen (Backup bleibt) oder sofort löschen (Step-up). Kontingent verringern stoppt nichts Laufendes, verhindert aber neue Starts über der Grenze.
+- **Stärkerer Zugang:** Freunde mit `create` brauchen eine PIN oder einen Passkey auf ihrem Gerät (WebAuthn über das Gateway), weil der Link allein mehr Macht hätte. Mods sind fremder Code: Freundes-Server laufen mit denselben Härtungen wie alle Gameserver (kein privileged, Speicher-/PID-Limit, eigenes Netz ohne Zugriff aufs Heimnetz außer Relay).
+- **Übersicht für den Admin:** Seite „Freunde“ zeigt pro Freund Server, RAM, Laufzeit, Azure-Kosten im Monat und letzte Aktionen (aus `share_audit`).
+
+**Abnahme dazu:** Freund mit Kontingent „1 Server, 4 GB, nur Minecraft, nur Heimserver“ erstellt einen Paper-Server nach Admin-Freigabe; ein zweiter Server und ein Valheim-Server werden abgelehnt; mit 0 € Azure-Budget ist „Azure“ nicht wählbar; Widerruf stoppt den Server sofort. **Sicherheitstests:** keine Vorlage außerhalb der erlaubten Liste, kein Zielserver außerhalb der Liste, Port nur aus dem Bereich, RAM-Limit erzwungen am Container, kein Zugriff auf fremde Server per ID-Raten (403), Gateway-Schemas für `create` streng (nur IDs und Zahlen aus Listen), Azure-Bestellung nie über das Freundes-Budget, `create` ohne PIN/Passkey abgelehnt.
+
 ## Arbeitspakete
 - **WP Schema** (`packages/shared`): `api/friends.ts`, Gateway-Einrichtung (`api/share-setup.ts`: Weg A/B, Schritte mit Status), Agent-Aktionen `share.install`, `share.remove`, `share.firewall` in eigener Datei, Migration nächste freie Nummer.
 - **WP Core ∥** (`apps/core/src/share`, `friends`): Assistent als Zustandsmaschine mit sichtbaren Schritten und Wiederaufnahme nach Fehlern, Tailscale-Auth-Key und ACL (Weg A), DNS über `DomainService`, optional OCI-Client (nur feste Hosts `*.oraclecloud.com`, nur Security-List-Regeln), Freunde mit Mehrfach-Rechten, Einladung, Whitelist-Anfrage.
