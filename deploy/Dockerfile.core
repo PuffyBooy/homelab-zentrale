@@ -32,7 +32,7 @@ ENV NODE_ENV=production \
     HZ_SHARE_UI_DIR=/app/share-ui \
     HZ_GAME_TEMPLATES_DIR=/app/templates/games \
     HZ_APP_TEMPLATES_DIR=/app/templates/apps
-# Debian security fixes newer than the node base image (Trivy fails on fixed HIGH CVEs).
+# Pull Debian security fixes newer than the base image (Trivy gates on fixed CVEs).
 RUN apt-get update && apt-get upgrade -y --no-install-recommends && rm -rf /var/lib/apt/lists/*
 # The runtime never needs npm or corepack; removing them drops their dependency CVEs.
 RUN rm -rf /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/corepack \

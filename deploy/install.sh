@@ -6,6 +6,7 @@
 #   sudo ./deploy/install.sh status          container, health, tailscale serve
 #   sudo ./deploy/install.sh uninstall       stop and remove; data and key stay
 #   sudo ./deploy/install.sh uninstall --purge   also delete the database and the key
+#   sudo ./deploy/install.sh repair-apt      apt update; replace a broken Ubuntu country mirror
 #
 #   sudo ./deploy/install.sh share           share gateway on a public server (optional)
 #   sudo ./deploy/install.sh share update | share status | share uninstall
@@ -47,12 +48,16 @@ REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 CONF_DIR=/etc/homelab-zentrale
 SHARE_DIR=/etc/homelab-share
 CADDY_FILE=/etc/caddy/Caddyfile
+APT_DIR=/etc/apt
+APT_BACKUP_DIR=/var/backups/homelab-zentrale
 # Paths are overridable in test mode only (test/install.security.test.ts), so a stray
 # variable can never point --purge at another directory.
 if [[ "${HZ_INSTALL_ALLOW_NONROOT:-0}" == 1 ]]; then
   CONF_DIR="${HZ_CONF_DIR:-$CONF_DIR}"
   SHARE_DIR="${HZ_SHARE_CONF_DIR:-$SHARE_DIR}"
   CADDY_FILE="${HZ_CADDY_FILE:-$CADDY_FILE}"
+  APT_DIR="${HZ_APT_DIR:-$APT_DIR}"
+  APT_BACKUP_DIR="${HZ_APT_BACKUP_DIR:-$APT_BACKUP_DIR}"
 fi
 HEALTH_TIMEOUT="${HZ_HEALTH_TIMEOUT:-90}"
 TLS_TIMEOUT="${HZ_TLS_TIMEOUT:-90}"
@@ -82,7 +87,7 @@ die() {
 }
 
 usage() {
-  sed -n '2,31p' "$0" | sed 's/^# \{0,1\}//'
+  sed -n '2,32p' "$0" | sed 's/^# \{0,1\}//'
   exit "${1:-0}"
 }
 
@@ -134,7 +139,7 @@ if [[ "${1:-}" == share ]]; then
 fi
 if [[ $# -gt 0 ]]; then
   case "$1" in
-    install | update | status | uninstall) mode="$1"; shift ;;
+    install | update | status | uninstall | repair-apt) mode="$1"; shift ;;
     *) echo "Unbekannter Modus: $1" >&2; usage 2 ;;
   esac
 fi
@@ -247,6 +252,60 @@ new_secret_key() {
   printf '%s' "$k"
 }
 
+# --- apt ----------------------------------------------------------------------
+# Ubuntu country mirrors (<cc>.archive.ubuntu.com) are run by third parties and
+# sometimes stop serving a release ("no longer has a Release file", 404). The main
+# archive always has it, so after asking we switch to archive.ubuntu.com, with a
+# backup of every sources file we change.
+apt_sources_files() {
+  local f
+  for f in "$APT_DIR/sources.list" "$APT_DIR"/sources.list.d/*.list "$APT_DIR"/sources.list.d/*.sources; do
+    [[ -f "$f" ]] && printf '%s\n' "$f"
+  done
+  return 0
+}
+
+# broken_mirror <apt-get update output>: the first country mirror apt reported as failing.
+broken_mirror() {
+  grep -E '^(Err|E|W):' <<<"$1" | grep -oE 'https?://[a-z]{2}\.archive\.ubuntu\.com' | head -n 1 |
+    sed -E 's|^https?://||' || true
+}
+
+switch_mirror() {
+  local host="$1" re backup f rel
+  re="${host//./\\.}"
+  backup="$APT_BACKUP_DIR/apt-sources-$(date +%Y%m%d-%H%M%S)"
+  install -m 0700 -d "$backup"
+  while IFS= read -r f; do
+    grep -qE "://$re" "$f" || continue
+    rel="${f#"$APT_DIR"/}"
+    install -m 0700 -d "$backup/$(dirname "$rel")"
+    cp -p -- "$f" "$backup/$rel"
+    sed -i -E "s#(https?)://$re#\\1://archive.ubuntu.com#g" "$f"
+    info "umgestellt: $f"
+  done < <(apt_sources_files)
+  ok "Sicherung der alten Paketquellen: $backup"
+}
+
+# apt_update: apt-get update; on a broken country mirror offer the switch and retry once.
+apt_update() {
+  local out rc=0 host
+  out="$(apt-get update -q 2>&1)" || rc=$?
+  printf '%s\n' "$out"
+  [[ $rc -ne 0 ]] || return 0
+  host="$(broken_mirror "$out")"
+  [[ -n "$host" ]] || die "apt-get update ist fehlgeschlagen (siehe oben)"
+  warn "Der Ubuntu-Spiegel $host liefert die Paketlisten nicht (mehr)."
+  info "Abhilfe: auf den Hauptserver archive.ubuntu.com umstellen (die alten Dateien werden gesichert)."
+  if ! confirm "Paketquellen jetzt auf archive.ubuntu.com umstellen?" j; then
+    die "abgebrochen. Von Hand: sudo sed -i 's|://$host|://archive.ubuntu.com|g' $APT_DIR/sources.list $APT_DIR/sources.list.d/*.list $APT_DIR/sources.list.d/*.sources"
+  fi
+  switch_mirror "$host"
+  rc=0
+  apt-get update -q || rc=$?
+  [[ $rc -eq 0 ]] || die "apt-get update scheitert auch mit archive.ubuntu.com. Sicherung siehe oben."
+}
+
 # --- system -------------------------------------------------------------------
 os_id() {
   local id="" like=""
@@ -282,14 +341,14 @@ install_docker() {
   [[ "$codename" =~ ^[a-z]+$ ]] || die "Distribution nicht erkannt (VERSION_CODENAME fehlt)"
   arch="$(dpkg --print-architecture)"
   info "Docker aus dem offiziellen Repository (download.docker.com/linux/$id, $codename, $arch)"
-  apt-get update -q
+  apt_update
   apt-get install -y -q ca-certificates curl
   install -m 0755 -d /etc/apt/keyrings
   curl -fsSL "https://download.docker.com/linux/$id/gpg" -o /etc/apt/keyrings/docker.asc
   chmod a+r /etc/apt/keyrings/docker.asc
   printf 'deb [arch=%s signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/%s %s stable\n' \
     "$arch" "$id" "$codename" >/etc/apt/sources.list.d/docker.list
-  apt-get update -q
+  apt_update
   apt-get install -y -q docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
   systemctl enable --now docker
 }
@@ -301,13 +360,13 @@ install_tailscale() {
   codename="$(os_codename)"
   [[ "$codename" =~ ^[a-z]+$ ]] || die "Distribution nicht erkannt (VERSION_CODENAME fehlt)"
   info "Tailscale aus dem offiziellen Repository (pkgs.tailscale.com/stable/$id/$codename)"
-  apt-get update -q
+  apt_update
   apt-get install -y -q ca-certificates curl
   curl -fsSL "https://pkgs.tailscale.com/stable/$id/$codename.noarmor.gpg" \
     -o /usr/share/keyrings/tailscale-archive-keyring.gpg
   curl -fsSL "https://pkgs.tailscale.com/stable/$id/$codename.tailscale-keyring.list" \
     -o /etc/apt/sources.list.d/tailscale.list
-  apt-get update -q
+  apt_update
   apt-get install -y -q tailscale
   systemctl enable --now tailscaled
 }
@@ -1036,6 +1095,8 @@ case "$target:$mode" in
   core:update) core_update ;;
   core:status) core_status ;;
   core:uninstall) core_uninstall ;;
+  core:repair-apt) step "Paketquellen (apt)"; apt_update; ok "apt update läuft durch" ;;
+  share:repair-apt) die "repair-apt gibt es nur ohne 'share': sudo $0 repair-apt" ;;
   share:install | share:update) share_install ;;
   share:status) share_status ;;
   share:uninstall) share_uninstall ;;

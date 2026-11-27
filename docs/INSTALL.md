@@ -42,6 +42,9 @@ Der Assistent macht dann:
 | Neu konfigurieren (z. B. Zeitzone) | `sudo ./deploy/install.sh --timezone Europe/Berlin` |
 | Entfernen, Daten und Schlüssel bleiben | `sudo ./deploy/install.sh uninstall` |
 | Alles löschen (Datenbank und Schlüssel, endgültig) | `sudo ./deploy/install.sh uninstall --purge` |
+| Paketquellen reparieren (kaputter Ubuntu-Länderspiegel) | `sudo ./deploy/install.sh repair-apt` |
+
+Scheitert `apt update` an einem Ubuntu-Länderspiegel (z. B. `at.archive.ubuntu.com`: 404 oder „enthält keine Release-Datei mehr“), bietet der Installer an, auf `archive.ubuntu.com` umzustellen. Die alten Dateien aus `/etc/apt` landen vorher in `/var/backups/homelab-zentrale/`.
 
 Bei lokalem Build vor `update` den Checkout aktualisieren (`git pull`); das Skript baut dann neu. Mit Image aus GHCR reicht `update`.
 
