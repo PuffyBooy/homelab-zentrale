@@ -43,6 +43,7 @@ FROM node:22-bookworm-slim AS runtime
 # tar, zstd:  game.backup (world folder as .tar.zst; tar is in the base image, zstd is not)
 # smartmontools: smartctl for SMART reads (M13, only with HZ_AGENT_SMART=1)
 RUN apt-get update \
+  && apt-get upgrade -y --no-install-recommends \
   && apt-get install -y --no-install-recommends util-linux iproute2 iputils-ping \
      git openssh-client ca-certificates tar zstd smartmontools \
   && rm -rf /var/lib/apt/lists/*
