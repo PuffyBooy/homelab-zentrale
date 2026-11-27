@@ -278,6 +278,11 @@ Wunsch des Admins vom 27.11.2026. Rund 80 eingebaute Apps in Kategorien, Suche (
 
 ---
 
+## M30: 3D-Drucker Bambu Lab
+Wunsch des Admins vom 27.11.2026. Modul `printer` (Standard aus): Anbindung im LAN über den Agent (MQTT/FTPS, Zertifikat festgenagelt) oder über Home Assistant, Kachel mit Status, Fortschritt, Restzeit, Temperaturen, AMS und Kamera (auch Wandmodus), Push bei Fertig/Fehler, Pause/Fortsetzen/Licht, Abbrechen und Drucken mit Step-up, Datei-Upload, Verlauf. Details: `docs/M30-BAMBU-PLAN.md`.
+
+---
+
 ## Definition of Done (für jeden PR)
 - Code, Tests und Doku sind aktuell (`docs/` mitpflegen, wenn sich etwas ändert)
 - Keine `any`, keine auskommentierten Blöcke, keine TODOs ohne Issue
