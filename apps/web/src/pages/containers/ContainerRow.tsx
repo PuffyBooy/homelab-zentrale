@@ -1,10 +1,13 @@
 import type { ContainerSummary } from '@hz/shared';
 import { useState, type ReactElement } from 'react';
-import { useNavigate } from 'react-router';
+import { Link, useNavigate } from 'react-router';
 import { Alert, Button, ServiceRow } from '@hz/ui';
-import { errorText } from '../../lib/errors.js';
 import { ACTION_PENDING, containerMeta, containerSub, isRunning } from '../../lib/containers.js';
+import { removeBlocked, shellAllowed, shellHref } from '../../lib/docker.js';
+import { errorText } from '../../lib/errors.js';
 import { ThrottleBadge } from '../throttle/ThrottleBadge.js';
+import { ContainerDetailsDialog } from './ContainerDetailsDialog.js';
+import { RemoveContainerDialog } from './RemoveContainerDialog.js';
 import { UpdateDialog } from './UpdateDialog.js';
 import { useContainerAction } from './useContainerAction.js';
 
@@ -17,12 +20,15 @@ export interface ContainerRowProps {
   readOnly?: boolean;
   /** The agent is offline: actions are disabled. */
   offline?: boolean;
+  /** The server allows the web console (allowTerminal): offers "Shell" for running containers. */
+  terminal?: boolean;
 }
 
 /**
  * One container as ServiceRow (SPEC 6.1): status with shape and text, name, image and
  * ports, uptime or exit code, CPU/RAM. Ghost buttons with aria-label (design README,
- * Iconografie): Logs, Start or Stop, Neu starten, Image aktualisieren.
+ * Iconografie): Logs, Start or Stop, Neu starten, Image aktualisieren. M23 (SPEC 6.1b):
+ * Details, Shell (console with this container as target) and Entfernen (stopped only).
  */
 export function ContainerRow({
   c,
@@ -30,14 +36,19 @@ export function ContainerRow({
   withServer,
   readOnly,
   offline,
+  terminal,
 }: ContainerRowProps): ReactElement {
   const navigate = useNavigate();
   const action = useContainerAction(c);
   const [updateOpen, setUpdateOpen] = useState(false);
+  const [detailsOpen, setDetailsOpen] = useState(false);
+  const [removeOpen, setRemoveOpen] = useState(false);
   const running = isRunning(c);
   const pending = action.isPending ? action.variables : undefined;
   const busy = pending !== undefined;
   const disabled = busy || offline;
+  const shell = shellAllowed(c, { allowTerminal: !!terminal, connected: !offline });
+  const removable = removeBlocked(c) === null;
 
   const actions = readOnly ? undefined : (
     <>
@@ -88,6 +99,35 @@ export function ContainerRow({
         disabled={disabled}
         onClick={() => setUpdateOpen(true)}
       />
+      <Button
+        size="sm"
+        variant="ghost"
+        aria-label={`Details von ${c.name}`}
+        disabled={offline}
+        onClick={() => setDetailsOpen(true)}
+      >
+        Details
+      </Button>
+      {shell ? (
+        <Link
+          className="hz-btn hz-btn-ghost hz-btn-sm"
+          to={shellHref(c)}
+          aria-label={`Shell in ${c.name}`}
+        >
+          Shell
+        </Link>
+      ) : null}
+      {removable ? (
+        <Button
+          size="sm"
+          variant="ghost"
+          aria-label={`${c.name} entfernen`}
+          disabled={disabled}
+          onClick={() => setRemoveOpen(true)}
+        >
+          Entfernen
+        </Button>
+      ) : null}
     </>
   );
 
@@ -117,7 +157,17 @@ export function ContainerRow({
         </div>
       ) : null}
       {readOnly ? null : (
-        <UpdateDialog open={updateOpen} container={c} onClose={() => setUpdateOpen(false)} />
+        <>
+          <UpdateDialog open={updateOpen} container={c} onClose={() => setUpdateOpen(false)} />
+          <ContainerDetailsDialog
+            open={detailsOpen}
+            container={c}
+            onClose={() => setDetailsOpen(false)}
+          />
+          {removeOpen ? (
+            <RemoveContainerDialog container={c} onClose={() => setRemoveOpen(false)} />
+          ) : null}
+        </>
       )}
     </>
   );

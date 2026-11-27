@@ -6,12 +6,16 @@ import {
   consoleSessionListResponseSchema,
   type ConsoleClientMessage,
   type ConsoleServerMessage,
+  type ContainerSummary,
   type ServerSummary,
 } from '@hz/shared';
 import { api } from './api.js';
 import { plural } from './format.js';
 
-/** Web console (SPEC 11): wss://<host>/console?serverId=<id>, see packages/shared console-wall.ts. */
+/**
+ * Web console (SPEC 11): wss://<host>/console?serverId=<id>[&container=<core container id>],
+ * see packages/shared console-wall.ts and api/docker.ts (M23 container shell).
+ */
 
 export type ConsoleSession = ReturnType<
   typeof consoleSessionListResponseSchema.parse
@@ -31,9 +35,25 @@ export async function fetchConsoleSessions(signal?: AbortSignal): Promise<Consol
 export function consoleUrl(
   serverId: string,
   loc: Pick<Location, 'protocol' | 'host'> = window.location,
+  container?: string | null,
 ): string {
   const proto = loc.protocol === 'https:' ? 'wss' : 'ws';
-  return `${proto}://${loc.host}/console?serverId=${encodeURIComponent(serverId)}`;
+  const ctr = container ? `&container=${encodeURIComponent(container)}` : '';
+  return `${proto}://${loc.host}/console?serverId=${encodeURIComponent(serverId)}${ctr}`;
+}
+
+/**
+ * Containers of one server a shell can open in (M23): running, not protected (hz.role
+ * and the agent close with not_allowed anyway). By name.
+ */
+export function containerTargets(
+  containers: readonly ContainerSummary[],
+  serverId: string | null,
+): ContainerSummary[] {
+  if (!serverId) return [];
+  return containers
+    .filter((c) => c.serverId === serverId && c.state === 'running' && !c.protected)
+    .sort((a, b) => a.name.localeCompare(b.name, 'de-AT'));
 }
 
 export interface ConsoleTarget {
@@ -85,6 +105,23 @@ export function closeReasonText(reason: ConsoleCloseReason, exitCode: number | n
     default:
       return 'Fehler in der Verbindung. Erneut verbinden.';
   }
+}
+
+/** Close text for a shell inside a container: not_allowed means a protected container there. */
+export function containerCloseText(
+  reason: ConsoleCloseReason,
+  exitCode: number | null,
+  name: string,
+): string {
+  if (reason === 'not_allowed') {
+    return `Shell in ${name} nicht erlaubt. Zentrale, Agent und Updater sind geschützt, sonst Konsole des Servers freigeben (Einstellungen → Server).`;
+  }
+  if (reason === 'exit') {
+    return exitCode === null || exitCode === 0
+      ? `Shell in ${name} beendet.`
+      : `Shell in ${name} beendet mit Code ${exitCode}.`;
+  }
+  return closeReasonText(reason, exitCode);
 }
 
 /** "12 Min", "1 Std 4 Min", "40 s". */

@@ -22,6 +22,7 @@ import { systemClock, type Clock } from './clock.js';
 import type { Config } from './config.js';
 import { ContainerLogs } from './containers/logs.js';
 import { containerRoutes } from './containers/routes.js';
+import { dockerRoutes } from './docker/routes.js';
 import { ContainerService } from './containers/service.js';
 import { createSecretBox } from './crypto.js';
 import { openDatabase, type DbHandle } from './db/index.js';
@@ -88,6 +89,7 @@ import { shareRoutes } from './share/routes.js';
 import { ShareService } from './share/service.js';
 import { exportRoutes, removeStaleExports } from './settings/export.js';
 import { consoleApiRoutes, consoleSocketRoutes } from './terminal/routes.js';
+import { consoleContainer } from './docker/console.js';
 import { ConsoleService, type ConsoleOptions } from './terminal/service.js';
 import { wallRoutes } from './wall/routes.js';
 import { WallService } from './wall/service.js';
@@ -637,6 +639,7 @@ export async function buildApp(config: Config, deps: AppDeps = {}): Promise<Fast
     hub,
     sessions: auth.sessions,
     terminalAllowed: (id) => servers.terminalAllowed(id),
+    container: (id) => consoleContainer(containers.row(id)),
     log: app.log.child({ mod: 'console' }),
     ...(deps.consoleOptions ? { options: deps.consoleOptions } : {}),
   });
@@ -1045,6 +1048,15 @@ export async function buildApp(config: Config, deps: AppDeps = {}): Promise<Fast
   await app.register(backupTargetRoutes, { prefix: '/api', backupTarget, now });
   await app.register(alertRoutes, { prefix: '/api', db: db.db, now, alerts });
   await app.register(containerRoutes, {
+    prefix: '/api',
+    db: db.db,
+    now,
+    containers,
+    servers,
+    hub,
+    gameIdOf: (row) => throttle.control(row).gameId,
+  });
+  await app.register(dockerRoutes, {
     prefix: '/api',
     db: db.db,
     now,

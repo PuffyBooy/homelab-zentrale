@@ -11,29 +11,48 @@ import { ALL_SERVERS } from '../../lib/servers.js';
 import { useNow } from '../../lib/useNow.js';
 import { NoServers } from '../servers/ServerListTile.js';
 import { ContainerRow } from './ContainerRow.js';
+import { ContainersNav } from './ContainersNav.js';
+import { StackActions } from './StackActions.js';
 
-/** Compose project heading inside a server tile. */
+/** Compose project heading inside a server tile, with the stack actions (M23). */
 function ProjectRows({
   group,
   now,
   offline,
+  terminal,
   showHeading,
+  serverId,
+  serverName,
 }: {
   group: ProjectGroup;
   now: Date;
   offline: boolean;
+  terminal: boolean;
   showHeading: boolean;
+  serverId: string;
+  serverName: string;
 }): ReactElement {
   return (
     <div className="app-ctr-group" role="group" aria-label={projectLabel(group)}>
       {showHeading ? (
-        <div className="hz-label app-ctr-head" aria-hidden={true}>
-          {projectLabel(group)}
-          <span className="app-ctr-head-n">{runningCount(group.containers)}</span>
+        <div className="app-ctr-head">
+          <span className="hz-label app-ctr-head-label" aria-hidden={true}>
+            {projectLabel(group)}
+            <span className="app-ctr-head-n">{runningCount(group.containers)}</span>
+          </span>
+          {group.project ? (
+            <StackActions
+              serverId={serverId}
+              serverName={serverName}
+              project={group.project}
+              containers={group.containers}
+              offline={offline}
+            />
+          ) : null}
         </div>
       ) : null}
       {group.containers.map((c) => (
-        <ContainerRow key={c.id} c={c} now={now} offline={offline} />
+        <ContainerRow key={c.id} c={c} now={now} offline={offline} terminal={terminal} />
       ))}
     </div>
   );
@@ -69,6 +88,7 @@ export function ContainerGroups({
       {groups.map((g) => {
         const server = servers.find((s) => s.id === g.serverId);
         const offline = server ? !server.connected : false;
+        const terminal = server?.allowTerminal ?? false;
         const single = g.projects.length === 1 && g.projects[0]?.project === null;
         const count = runningCount(g.projects.flatMap((p) => p.containers));
         return (
@@ -88,7 +108,10 @@ export function ContainerGroups({
                 group={p}
                 now={now}
                 offline={offline}
+                terminal={terminal}
                 showHeading={!single}
+                serverId={g.serverId}
+                serverName={g.serverName}
               />
             ))}
           </Tile>
@@ -144,12 +167,15 @@ export function ContainersPage(): ReactElement | null {
   if (list.length === 0) {
     const name = one ? servers.data.find((s) => s.id === one)?.name : undefined;
     return (
-      <Tile title="Container" icon="container" count="0">
-        <p className="app-empty">
-          {name ? `${name} meldet keine Container.` : 'Kein Server meldet Container.'} Der Agent
-          zeigt sie, sobald er den Docker-Socket lesen darf.
-        </p>
-      </Tile>
+      <>
+        <ContainersNav />
+        <Tile title="Container" icon="container" count="0">
+          <p className="app-empty">
+            {name ? `${name} meldet keine Container.` : 'Kein Server meldet Container.'} Der Agent
+            zeigt sie, sobald er den Docker-Socket lesen darf.
+          </p>
+        </Tile>
+      </>
     );
   }
 
@@ -164,6 +190,9 @@ export function ContainersPage(): ReactElement | null {
   );
   return (
     <div className="hz-grid app-grid">
+      <div className="hz-span-4">
+        <ContainersNav />
+      </div>
       <ContainerAlerts alerts={open} />
       <ContainerGroups containers={list} servers={servers.data} />
     </div>

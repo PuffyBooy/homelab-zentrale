@@ -129,6 +129,17 @@ Das Serverdetail ersetzt für die tägliche Pflege den SSH-Login. Es baut auf 5.
 Aktionen: Logs (live, `Terminal`, die letzten 500 Zeilen plus Folgen), Start, Stop, Neustart, „Image aktualisieren“ (pull + recreate, für Compose-Projekte über `docker compose pull && up -d`).
 Compose-Projekte werden als Gruppe erkannt (Label `com.docker.compose.project`).
 
+### 6.1b Docker komplett (M23)
+Alles, was man sonst per SSH mit `docker` erledigt, geht in der Zentrale, auf jedem angebundenen Server:
+- **Details pro Container:** Image, Status, Laufzeit oder Exit-Code, Neustart-Regel, Ports, Mounts (rw/ro), Netzwerke mit IP, Namen der Umgebungsvariablen (die Werte verlassen den Agent nie), eine Messung von CPU, RAM mit Limit, Netz, Disk-IO und Prozessen.
+- **Entfernen** eines gestoppten Containers: Name eintippen und Step-up; auf Wunsch mit seinen anonymen Volumes, benannte Volumes bleiben immer.
+- **Shell im Container:** über die Konsole (SPEC 11) mit Ziel „Container“: `docker exec` mit bash, sonst sh. Gleiche Regeln wie das Host-Terminal (`HZ_AGENT_ALLOW_TERMINAL=1`, Step-up, Limits, Protokoll ohne Tastenanschläge).
+- **Stacks:** Jedes Compose-Projekt, auch eines, das nicht die Zentrale angelegt hat: Start, Stopp, Neustart, Aktualisieren (pull + up), Entfernen (down, Projektname eintippen, Volumes bleiben). Liegt das Projekt unter `/opt/homelab/`, läuft `docker compose` im Agent, sonst über `nsenter` mit dem `docker compose` des Hosts. Die Zentrale schickt nur den Projektnamen; Ordner und Dateien liest der Agent aus den Labels der Container.
+- **Images:** Liste mit Tags, Größe, Alter, Nutzern; Image ziehen; Entfernen (nicht, solange es benutzt wird).
+- **Volumes:** Liste mit Größe, Projekt und Nutzern; Entfernen nur unbenutzt, mit Namen und Step-up.
+- **Netzwerke:** Liste mit Treiber und Containern; Entfernen nur unbenutzt, nie `bridge`, `host`, `none`.
+- **Nie:** Zentrale, Agent und Updater (`hz.role`) samt ihren Images, Volumes und Netzwerken werden nie entfernt, gestoppt oder per Shell betreten. Nichts wird erzwungen (`force`), Aufräumen in großem Stil bleibt bei „Aufräumen“ (M16). Gameserver-Container laufen weiter über die Gameserver-Seite. Jede Änderung steht im Audit-Log.
+
 ### 6.2 Gameserver anlegen
 „Neuer Gameserver“ öffnet `GameTemplates`:
 
@@ -253,7 +264,7 @@ Drei optionale Module (Einstellungen → Module, ab Werk aus). Ein ausgeschaltet
 
 ## 11. Konsole
 
-- Web-Terminal (xterm.js) zu einem Server über den Agent (PTY).
+- Web-Terminal (xterm.js) zu einem Server über den Agent (PTY), wahlweise auf dem Host oder als Shell in einem laufenden Container (M23). Es braucht keinen offenen SSH-Port: der Agent baut die Verbindung zur Zentrale selbst auf.
 - Nur für Server mit `HZ_AGENT_ALLOW_TERMINAL=1` und nur nach erneuter TOTP-Eingabe (gilt 15 Min).
 - Jede Sitzung wird protokolliert (wer, wann, Dauer; keine Tastenanschläge).
 

@@ -404,6 +404,20 @@ export class ContainerService {
     return result.changed;
   }
 
+  /**
+   * M23: the admin removed the container through the core. Its row goes at once
+   * (the next inventory would drop it too) and an open alert is resolved, so a
+   * removed container neither lingers in the list nor keeps alerting.
+   */
+  forget(id: string): void {
+    const row = this.row(id);
+    if (!row) return;
+    this.deps.db.delete(containers).where(eq(containers.id, id)).run();
+    const active = this.deps.alerts.active(containerAlertKey(row.serverId, row.name));
+    if (active) this.deps.alerts.resolveById(active.id);
+    this.emit(id, true);
+  }
+
   /** Before a server is deleted (its rows go with ON DELETE CASCADE). */
   removeServer(serverId: string): string[] {
     const ids = this.deps.db

@@ -745,6 +745,69 @@ body,
   padding: 0 var(--space-3) var(--space-2);
 }
 
+/* ---------- M23: stack actions, container details, Docker resources ---------- */
+.app-ctr-head {
+  align-items: center;
+  flex-wrap: wrap;
+}
+.app-ctr-head-label {
+  display: flex;
+  gap: var(--space-3);
+  align-items: baseline;
+}
+.app-stack-actions {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1);
+}
+.app-stack-note {
+  font-size: 12px;
+  color: var(--ink-faint);
+}
+.app-stack-error {
+  flex-basis: 100%;
+  padding: 0;
+}
+.app-details-head {
+  margin: var(--space-4) 0 var(--space-2);
+}
+.app-details-list {
+  display: grid;
+  gap: var(--space-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--ink-muted);
+}
+.app-details-env {
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+}
+.app-docker-pick {
+  max-width: 320px;
+}
+.app-docker-pull {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--line);
+}
+.app-docker-pull .hz-field {
+  flex: 1 1 280px;
+}
+.app-docker-pull > .hz-btn {
+  margin-top: 22px;
+}
+.app-docker-pull-state {
+  flex-basis: 100%;
+}
+.app-docker-pull-state:empty {
+  display: none;
+}
+
 /* ---------- Terminal (proposed: design/components.css has no hz-term styles) ---------- */
 /*
  * The terminal stays dark in every theme (Terminal.md). Its outer box keeps the
@@ -1292,6 +1355,19 @@ body,
   gap: var(--space-2);
   min-width: 0;
 }
+.app-console-pick {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: var(--space-2) var(--space-3);
+}
+.app-console-pick .hz-field {
+  flex: 1 1 260px;
+  max-width: 420px;
+}
+.app-console-pick > .hz-btn {
+  margin-top: 22px;
+}
 .app-xterm {
   height: max(320px, calc(100vh - 300px));
   padding: var(--space-2) var(--space-3);
@@ -1489,6 +1565,10 @@ body,
 .app-settings-link:focus-visible {
   outline: none;
   box-shadow: var(--focus-ring);
+}
+.app-settings-link[aria-current='page'] {
+  border-color: var(--accent);
+  color: var(--accent-ink);
 }
 .app-rows {
   display: grid;

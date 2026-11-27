@@ -90,6 +90,7 @@ async function main(): Promise<void> {
         host,
         streams,
         log,
+        dockerSocket: config.dockerSocket,
       })
     : undefined;
   // Only constructed with HZ_AGENT_ALLOW_TASKS=1 (task.exec).
@@ -148,6 +149,7 @@ async function main(): Promise<void> {
       allowTerminal: config.allowTerminal,
       homelabRoot: config.homelabRoot,
       host,
+      hostExec: config.hostExec,
       log,
       later: (fn, ms) => {
         const t = setTimeout(() => {

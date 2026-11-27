@@ -29,6 +29,10 @@ const ConsolePage = page(
   () => import('../pages/console/ConsolePage.js'),
   (m) => m.ConsolePage,
 );
+const DockerResourcesPage = page(
+  () => import('../pages/containers/DockerResourcesPage.js'),
+  (m) => m.DockerResourcesPage,
+);
 const WallPage = page(
   () => import('../pages/wall/WallPage.js'),
   (m) => m.WallPage,
@@ -202,6 +206,7 @@ export function AppRoutes(): ReactElement {
         <Route path="servers" element={<ServersPage />} />
         <Route path="servers/:id" element={<ServerDetailPage />} />
         <Route path="containers" element={<ContainersPage />} />
+        <Route path="containers/docker" element={<L c={DockerResourcesPage} />} />
         <Route path="containers/:id/logs" element={<ContainerLogsPage />} />
         <Route path="vms" element={<G m="proxmox" c={VmsPage} />} />
         <Route path="games" element={<G m="games" c={GamesPage} />} />

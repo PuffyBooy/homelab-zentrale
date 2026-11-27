@@ -30,6 +30,15 @@ import { consoleSessions, servers, sessions } from '../db/schema.js';
 
 export type ConsoleSession = z.infer<typeof consoleSessionSchema>;
 
+/** M23: what the console needs to know about a target container. */
+export interface ConsoleContainer {
+  serverId: string;
+  dockerId: string;
+  name: string;
+  /** hz.role container (core, agent, updater): never a shell. */
+  protected: boolean;
+}
+
 /**
  * Largest browser frame accepted: one input of 16 Ki chars, each JSON-escaped to at
  * most 6 chars (control characters as \u00XX), plus the envelope.
@@ -61,6 +70,8 @@ interface Client {
   authSessionId: string;
   ip: string;
   serverId: string;
+  /** M23: core container id for a shell inside that container, else null (host). */
+  containerId: string | null;
   state: State;
   connectedAt: number;
   /** console_sessions.id once `open` was accepted. */
@@ -132,6 +143,8 @@ export class ConsoleService {
       hub: AgentHub;
       sessions: SessionStore;
       terminalAllowed: (serverId: string) => boolean;
+      /** M23: looks up a container by its core id (console into a container). */
+      container?: (id: string) => ConsoleContainer | null;
       log: FastifyBaseLogger;
       options?: ConsoleOptions;
     },
@@ -164,13 +177,17 @@ export class ConsoleService {
     return this.clients.size;
   }
 
-  handleSocket(ws: WebSocket, ctx: { authSessionId: string; ip: string; serverId: string }): void {
+  handleSocket(
+    ws: WebSocket,
+    ctx: { authSessionId: string; ip: string; serverId: string; container?: string },
+  ): void {
     const now = this.deps.now();
     const c: Client = {
       ws,
       authSessionId: ctx.authSessionId,
       ip: ctx.ip,
       serverId: ctx.serverId,
+      containerId: ctx.container ?? null,
       state: 'idle',
       connectedAt: now,
       id: null,
@@ -256,18 +273,35 @@ export class ConsoleService {
     if (!s || s.expiresAt <= now) return 'closed';
     if (s.stepUpUntil === null || s.stepUpUntil <= now) return 'step_up_required';
     if (!this.deps.terminalAllowed(c.serverId)) return 'not_allowed';
+    if (c.containerId !== null) {
+      // The container must belong to this server and must not be protected.
+      const target = this.target(c);
+      if (!target || target.protected) return 'not_allowed';
+    }
     if (!this.deps.hub.isConnected(c.serverId)) return 'agent_offline';
     if (!this.deps.hub.capabilities(c.serverId)?.terminal) return 'terminal_disabled';
     if (this.activeCount(c.serverId) >= CONSOLE_MAX_PER_SERVER) return 'busy';
     return null;
   }
 
+  /** The target container of a container console (null: none, or of another server). */
+  private target(c: Client): ConsoleContainer | null {
+    if (c.containerId === null) return null;
+    const t = this.deps.container?.(c.containerId) ?? null;
+    return t && t.serverId === c.serverId ? t : null;
+  }
+
   private open(c: Client, cols: number, rows: number): void {
     const refused = this.refusal(c);
     if (refused) return this.finish(c, refused, null);
+    const target = this.target(c);
     let stream: RpcStream;
     try {
-      stream = this.deps.hub.stream(c.serverId, 'pty.open', { cols, rows });
+      stream = this.deps.hub.stream(c.serverId, 'pty.open', {
+        cols,
+        rows,
+        ...(target ? { container: target.dockerId } : {}),
+      });
     } catch (err) {
       return this.finish(c, reasonOfRpcError(err), null);
     }
@@ -285,9 +319,17 @@ export class ConsoleService {
       actor: 'admin',
       action: 'console.open',
       target: c.serverId,
-      details: { console: c.id, ip: c.ip, session: c.authSessionId },
+      details: {
+        console: c.id,
+        ip: c.ip,
+        session: c.authSessionId,
+        ...(target ? { containerId: c.containerId, container: target.name } : {}),
+      },
     });
-    this.deps.log.info({ serverId: c.serverId, console: c.id }, 'console opened');
+    this.deps.log.info(
+      { serverId: c.serverId, console: c.id, ...(target ? { container: target.name } : {}) },
+      'console opened',
+    );
 
     stream.on('data', (chunk: { chunk: string }) => this.output(c, chunk.chunk));
     stream.on('end', (info: StreamEndInfo) => {

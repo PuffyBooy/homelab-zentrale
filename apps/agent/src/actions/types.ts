@@ -1,5 +1,5 @@
 import type { RpcAction, RpcErrorCode, RpcParams } from '@hz/shared';
-import type { RunOptions, RunResult, Spawner } from '../exec.js';
+import type { HostExecMode, RunOptions, RunResult, Spawner } from '../exec.js';
 import type { HostContext } from '../host.js';
 import type { Logger } from '../log.js';
 import type { StreamManager } from '../streams.js';
@@ -28,6 +28,8 @@ export interface ActionContext {
   allowTerminal: boolean;
   homelabRoot: string;
   host: HostContext;
+  /** HZ_AGENT_HOST_EXEC (stack.op on the host refuses 'none' up front). Missing = unknown. */
+  hostExec?: HostExecMode;
   log: Logger;
   /** Schedules work after the rpc.result was sent (e.g. the reboot itself). */
   later: (fn: () => void, ms: number) => void;

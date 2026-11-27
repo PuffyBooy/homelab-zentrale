@@ -19,10 +19,12 @@ export interface ConsoleRoutesOptions {
 interface Pending {
   authSessionId: string;
   serverId: string;
+  /** M23: core container id for a shell inside that container. */
+  container?: string;
 }
 
 /**
- * WS /console?serverId=<id> for the web terminal. Like /live, the upgrade needs a
+ * WS /console?serverId=<id>[&container=<core container id>] for the web terminal. Like /live, the upgrade needs a
  * valid admin session (401) and a same-origin Origin (403), both checked before the
  * handshake, plus a valid query (400). Step-up, allowTerminal, agent and limits are
  * checked by ConsoleService on the socket (`closed` with the reason), so the page
@@ -43,7 +45,11 @@ export const consoleSocketRoutes: FastifyPluginAsync<ConsoleRoutesOptions> = asy
     if (!originAllowed(request, o.baseUrl)) return sendError(reply, 403, 'bad_origin');
     const q = consoleQuerySchema.safeParse(request.query ?? {});
     if (!q.success) return sendError(reply, 400, 'invalid_input');
-    pending.set(request.raw, { authSessionId: auth.session.id, serverId: q.data.serverId });
+    pending.set(request.raw, {
+      authSessionId: auth.session.id,
+      serverId: q.data.serverId,
+      ...(q.data.container !== undefined ? { container: q.data.container } : {}),
+    });
     return undefined;
   }
 

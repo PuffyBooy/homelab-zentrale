@@ -37,6 +37,8 @@ export function errorText(err: unknown): string {
       return 'Agent offline. Die Aktion geht wieder, sobald sich der Server meldet.';
     case 'agent_error':
       return 'Agent hat die Aktion abgelehnt oder sie ist fehlgeschlagen. Log des Agents prüfen.';
+    case 'agent_outdated':
+      return 'Agent zu alt, bitte aktualisieren.';
     case 'agent_timeout':
       return 'Agent hat nicht rechtzeitig geantwortet. Status prüfen und erneut versuchen.';
     case 'busy':

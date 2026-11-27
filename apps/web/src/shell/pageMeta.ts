@@ -225,6 +225,14 @@ export function pageMeta(pathname: string, data: PageData = {}): PageMeta {
     return { title: containerSentence(list), sub: liveSub('Container', data), serverSwitch: true };
   }
 
+  if (pathname === '/containers/docker') {
+    return {
+      title: plain('Images, Volumes, Netzwerke'),
+      sub: 'Container · Docker-Ressourcen eines Servers · Entfernen nur, was nichts benutzt',
+      serverSwitch: false,
+    };
+  }
+
   const logsId = containerLogsId(pathname);
   if (logsId) {
     const c = data.containers?.find((x) => x.id === logsId);

@@ -5,8 +5,12 @@ export interface Schema<T> {
   parse(data: unknown): T;
 }
 
-/** Server error codes plus two client-side ones. */
-export type ApiErrorCode = ErrorCode | 'network' | 'bad_response';
+/**
+ * Server error codes plus two client-side ones. `agent_outdated` (409, M23 docker
+ * routes: the agent does not know the action yet) is read even while the shared
+ * errorCodeSchema does not list it.
+ */
+export type ApiErrorCode = ErrorCode | 'network' | 'bad_response' | 'agent_outdated';
 
 export class ApiError extends Error {
   readonly status: number;
@@ -95,6 +99,14 @@ function fallbackCode(status: number): ErrorCode {
   return 'internal';
 }
 
+function isAgentOutdated(data: unknown): boolean {
+  return (
+    typeof data === 'object' &&
+    data !== null &&
+    (data as { error?: unknown }).error === 'agent_outdated'
+  );
+}
+
 function parseRetryAfter(header: string | null): number | undefined {
   if (!header) return undefined;
   const n = Number(header);
@@ -149,7 +161,11 @@ export async function api<T>(path: string, opts: RequestOptions<T>): Promise<T> 
 
   if (!res.ok) {
     const parsed = errorResponseSchema.safeParse(data);
-    const code = parsed.success ? parsed.data.error : fallbackCode(res.status);
+    const code: ApiErrorCode = parsed.success
+      ? parsed.data.error
+      : isAgentOutdated(data)
+        ? 'agent_outdated'
+        : fallbackCode(res.status);
     const retryAfter =
       (parsed.success ? parsed.data.retryAfter : undefined) ??
       parseRetryAfter(res.headers.get('Retry-After'));

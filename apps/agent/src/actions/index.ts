@@ -17,6 +17,18 @@ import { composeDown, composePull, composeUp, composeWrite } from './compose.js'
 import { containerRestart, containerStart, containerStop } from './container.js';
 import { containerLimit } from './container-limit.js';
 import { containerUpdate } from './container-update.js';
+import { containerInspect } from './container-inspect.js';
+import { containerRemove } from './container-remove.js';
+import {
+  dockerImages,
+  dockerNetworks,
+  dockerVolumes,
+  imagePull,
+  imageRemove,
+  networkRemove,
+  volumeRemove,
+} from './docker-resources.js';
+import { stackOp } from './stack.js';
 import { containerLogs } from './logs.js';
 import { logsSearch } from './logs-search.js';
 import { imageScan } from './image-scan.js';
@@ -119,6 +131,17 @@ export const handlers: ActionHandlers = {
   'backup.target.status': (p, ctx) => backupTargetStatus(p, ctx),
   'backup.target.sync': (p, ctx) => backupTargetSync(p, ctx),
   'backup.target.store': (p, ctx, id) => backupTargetStore(p, ctx, id),
+  // M23 Docker komplett
+  'container.remove': containerRemove,
+  'container.inspect': (p, ctx) => containerInspect(p, ctx),
+  'docker.images': dockerImages,
+  'image.pull': (p, ctx) => imagePull(p, ctx),
+  'image.remove': imageRemove,
+  'docker.volumes': dockerVolumes,
+  'volume.remove': volumeRemove,
+  'docker.networks': dockerNetworks,
+  'network.remove': networkRemove,
+  'stack.op': stackOp,
 };
 
 export function hasGitSegment(p: unknown): boolean {

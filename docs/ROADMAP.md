@@ -246,6 +246,16 @@ Wunsch des Admins vom 26.11.2026: Azure-Konto einmal verknüpfen, dann bestellt 
 
 **Abnahme:** Gegen eine Azure-Attrappe (Test und e2e) wird eine Maschine mit Minecraft bestellt (empfohlen B2ms, nicht die größte), der simulierte Agent meldet sich, der Gameserver entsteht darauf; nach der Leerlaufzeit wird die VM deallocated, ein Start über den Benutzerlink startet zuerst die VM; das Budget warnt und sperrt automatische Starts; Löschen verlangt Step-up und Namen. Sicherheitstests: Modul aus = 404, nur feste Azure-Hosts (Override nur mit `HZ_DEMO=1` auf 127.0.0.1), keine Pfadteile aus Eingaben ohne Prüfung, Secrets nie in Antwort, Log oder Fehler, Secret verworfen bei Wechsel von Tenant/App/Abo, keine Bestellung ohne passenden bestätigten Preis, NSG nur Spielports (kein SSH, kein RCON), VM ohne Passwort.
 
+## M23: Docker komplett
+Wunsch des Admins vom 27.11.2026: „alle Docker-Sachen steuern und ein SSH-Terminal drinnen“. Das Host-Terminal gibt es seit M9; M23 schließt die Docker-Lücken (SPEC 6.1b). Schemas: `packages/shared/src/agent-docker.ts`, `packages/shared/src/api/docker.ts`.
+
+- **WP Schema** (`packages/shared`): Agent-Aktionen `container.remove`, `container.inspect`, `docker.images|volumes|networks`, `image.pull|remove`, `volume.remove`, `network.remove`, `stack.op`; `pty.open` mit optionalem `container`; REST-Routen und Konsolen-Ziel.
+- **WP Agent ∥** (`apps/agent`): Handler mit Schutz für `hz.role`, nie `force`, Env-Werte nie im Ergebnis, Stacks außerhalb `/opt/homelab/` über den Host-Compose, Container-Shell per `docker exec` mit fester Argumentliste.
+- **WP Core ∥** (`apps/core/src/docker`, `terminal`): Routen mit Step-up und Namensbestätigung, Absichten (keine Fehlalarme bei Stopp), Audit, Konsole mit Container-Ziel, „Agent zu alt“ für alte Agents.
+- **WP Web ∥** (`apps/web`): Details, Entfernen, Shell-Knopf, Stack-Aktionen, Bereich Images/Volumes/Netzwerke, Ziel-Auswahl in der Konsole.
+
+**Abnahme:** Gegen den simulierten Agent: Details zeigen Mounts und nur Env-Namen; Images, Volumes und Netzwerke werden gelistet; Stack-Neustart und Container-Entfernen laufen durch. Sicherheitstests: ohne Session 401, Entfernen ohne Step-up 403, falscher Name 400, geschützte Container/Images/Volumes/Netzwerke abgelehnt, Gameserver 409, kein `force`, keine Pfade oder Befehle vom Draht, Shell-Argumente fest, Env-Werte nie in Antwort oder Log.
+
 ---
 
 ## Definition of Done (für jeden PR)

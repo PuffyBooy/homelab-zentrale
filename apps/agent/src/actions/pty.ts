@@ -4,10 +4,12 @@ import { createRequire } from 'node:module';
 import path from 'node:path';
 import type * as NodePty from '@homebridge/node-pty-prebuilt-multiarch';
 import { MAX_CHUNK_CHARS, type RpcParams } from '@hz/shared';
-import { CHILD_ENV } from '../exec.js';
+import { CHILD_ENV, PROGRAMS } from '../exec.js';
 import { hostPath, type HostContext } from '../host.js';
 import type { Logger } from '../log.js';
 import type { StreamManager, StreamSink } from '../streams.js';
+import { statusOf } from './docker-common.js';
+import { isProtectedContainer } from './protected.js';
 import { ActionError, type ActionContext } from './types.js';
 
 /**
@@ -32,6 +34,14 @@ import { ActionError, type ActionContext } from './types.js';
  *   to every process of the pty's session, SIGKILL after KILL_GRACE_MS.
  * - Logged: open/close with stream id, reason, duration and byte counts. Never the
  *   input or the output.
+ *
+ * M23 pty.open with `container`: a shell INSIDE that container instead of the host
+ * shell. The agent inspects the container itself (not found -> not_found, protected
+ * -> not_allowed, not running -> busy) and starts the docker CLI of the agent image
+ * with a fixed argument list and the container's full id from the inspect, never the
+ * ref the core sent:
+ *   docker exec -i -t -e TERM=xterm-256color -e LANG=C.UTF-8 <64-hex id> /bin/sh -c '<bash or sh>'
+ * Environment: PTY_ENV plus DOCKER_HOST, nothing else. All limits above apply alike.
  */
 
 export const MAX_PTYS = 3;
@@ -87,6 +97,46 @@ export interface PtyCommand {
 }
 
 const HOST_SHELLS = ['/bin/bash', '/bin/sh'] as const;
+
+/** A container the console enters (resolved by ptyOpen from Docker's inspect). */
+export interface PtyContainerTarget {
+  /** Full 64-hex container id. */
+  id: string;
+  name: string;
+}
+
+const FULL_ID = /^[0-9a-f]{64}$/;
+/** Runs bash if the image has one, else sh. A constant, never built from input. */
+export const CONTAINER_SHELL_SCRIPT =
+  'if [ -x /bin/bash ]; then exec /bin/bash; else exec /bin/sh; fi';
+
+/** The fixed docker CLI call of a container console. Only the full id varies. */
+export function buildContainerPtyCommand(containerId: string): PtyCommand {
+  if (!FULL_ID.test(containerId)) throw new ActionError('failed', 'invalid container id', false);
+  if (!PROGRAMS.has('docker')) throw new ActionError('failed', 'docker cli not allowed', false);
+  return {
+    file: 'docker',
+    args: [
+      'exec',
+      '-i',
+      '-t',
+      '-e',
+      'TERM=xterm-256color',
+      '-e',
+      'LANG=C.UTF-8',
+      containerId,
+      '/bin/sh',
+      '-c',
+      CONTAINER_SHELL_SCRIPT,
+    ],
+    shell: 'container',
+  };
+}
+
+/** PTY_ENV plus the Docker socket for the CLI; no agent variable reaches the child. */
+export function containerPtyEnv(dockerSocket: string): Readonly<Record<string, string>> {
+  return Object.freeze({ ...PTY_ENV, DOCKER_HOST: `unix://${dockerSocket}` });
+}
 
 async function exists(p: string, mode = fsConstants.F_OK): Promise<boolean> {
   try {
@@ -232,6 +282,8 @@ export interface PtyManagerOptions {
   host: Pick<HostContext, 'hostRoot'>;
   streams: StreamManager;
   log: Logger;
+  /** Docker socket for container consoles (DOCKER_HOST of the docker CLI). */
+  dockerSocket?: string;
   spawner?: PtySpawner;
   killSession?: SessionKiller;
   /** Test seam: replaces buildPtyCommand. */
@@ -273,7 +325,12 @@ export class PtyManager {
     return s;
   }
 
-  async open(id: string, cols: number, rows: number): Promise<{ streamId: string }> {
+  async open(
+    id: string,
+    cols: number,
+    rows: number,
+    container?: PtyContainerTarget,
+  ): Promise<{ streamId: string }> {
     this.gate();
     const max = this.o.maxPtys ?? MAX_PTYS;
     if (this.sessions.size + this.reserved >= max) {
@@ -281,16 +338,22 @@ export class PtyManager {
     }
     this.reserved += 1;
     let cmd: PtyCommand;
+    let env: Readonly<Record<string, string>> = PTY_ENV;
     let sink: StreamSink;
     try {
-      cmd = await (this.o.command ?? (() => buildPtyCommand(this.o.hostExec, this.o.host)))();
+      if (container) {
+        cmd = buildContainerPtyCommand(container.id);
+        env = containerPtyEnv(this.o.dockerSocket ?? '/var/run/docker.sock');
+      } else {
+        cmd = await (this.o.command ?? (() => buildPtyCommand(this.o.hostExec, this.o.host)))();
+      }
       sink = this.o.streams.open(id);
     } finally {
       this.reserved -= 1;
     }
     let proc: PtyProcess;
     try {
-      proc = this.spawner({ file: cmd.file, args: cmd.args, cols, rows, cwd: '/', env: PTY_ENV });
+      proc = this.spawner({ file: cmd.file, args: cmd.args, cols, rows, cwd: '/', env });
     } catch (err) {
       this.o.log.warn('terminal could not start', {
         streamId: id,
@@ -329,7 +392,13 @@ export class PtyManager {
       () => this.terminate(s, 'max_duration'),
       this.o.maxSessionMs ?? MAX_SESSION_MS,
     );
-    this.o.log.info('terminal opened', { streamId: id, shell: cmd.shell, cols, rows });
+    this.o.log.info('terminal opened', {
+      streamId: id,
+      shell: cmd.shell,
+      cols,
+      rows,
+      ...(container ? { container: container.id.slice(0, 12), name: container.name } : {}),
+    });
     return { streamId: id };
   }
 
@@ -458,7 +527,40 @@ export async function ptyOpen(
   ctx: ActionContext,
   rpcId: string,
 ): Promise<{ streamId: string }> {
-  return manager(ctx).open(rpcId, p.cols, p.rows);
+  const m = manager(ctx);
+  if (p.container === undefined) return m.open(rpcId, p.cols, p.rows);
+  return m.open(rpcId, p.cols, p.rows, await containerTarget(p.container, ctx));
+}
+
+interface ExecInspect {
+  Id?: string;
+  Name?: string;
+  State?: { Running?: boolean; Paused?: boolean; Restarting?: boolean } | null;
+  Config?: { Labels?: Record<string, string> | null } | null;
+}
+
+/** Resolves the console's container through Docker; only its full id is used afterwards. */
+async function containerTarget(ref: string, ctx: ActionContext): Promise<PtyContainerTarget> {
+  const docker = ctx.host.docker;
+  if (!docker) throw new ActionError('failed', 'docker not available', false);
+  let info: ExecInspect;
+  try {
+    info = (await docker.getContainer(ref).inspect()) as ExecInspect;
+  } catch (err) {
+    if (statusOf(err) === 404) throw new ActionError('not_found', 'container not found', false);
+    throw new ActionError('failed', 'container inspect failed', false);
+  }
+  const id = info.Id ?? '';
+  if (!FULL_ID.test(id)) throw new ActionError('failed', 'unexpected inspect data', false);
+  if (isProtectedContainer({ id, labels: info.Config?.Labels })) {
+    throw new ActionError('not_allowed', 'no console into the agent or the core');
+  }
+  const st = info.State;
+  if (st?.Running !== true || st.Paused === true || st.Restarting === true) {
+    throw new ActionError('busy', 'container is not running', false);
+  }
+  const name = (info.Name ?? '').replace(/^\//, '').slice(0, 128) || id.slice(0, 12);
+  return { id, name };
 }
 
 export async function ptyInput(p: RpcParams<'pty.input'>, ctx: ActionContext): Promise<null> {

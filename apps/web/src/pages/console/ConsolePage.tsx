@@ -3,19 +3,22 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } 
 import { Link, useSearchParams } from 'react-router';
 import { Badge, Button, StatusDot, Tile } from '@hz/ui';
 import { FormError } from '../../components/FormError.js';
+import { SelectField } from '../../components/SelectField.js';
 import { requestStepUp } from '../../lib/api.js';
 import {
   closeReasonText,
   consoleSessionsKey,
   consoleTargets,
   consoleUrl,
+  containerCloseText,
+  containerTargets,
   ConsoleSocket,
   fetchConsoleSessions,
   formatSessionDuration,
   type ConsoleCloseReason,
   type ConsoleSession,
 } from '../../lib/console.js';
-import { useServers } from '../../lib/data.js';
+import { useContainers, useServers } from '../../lib/data.js';
 import { errorText } from '../../lib/errors.js';
 import { formatBytes, formatDateTime } from '../../lib/format.js';
 import { useAuthState } from '../../lib/useAuthState.js';
@@ -34,26 +37,54 @@ function stepUpActive(until: string | undefined): boolean {
   return !!until && new Date(until).getTime() - Date.now() > 5_000;
 }
 
-/** /console (SPEC 11): web terminal to one server through its agent (PTY). */
+/**
+ * /console (SPEC 11): web terminal to one server through its agent (PTY). M23: the
+ * target is the host or one running container of that server (docker exec).
+ * /console?server=<id>[&container=<core container id>] connects right away.
+ */
 export function ConsolePage(): ReactElement {
   const servers = useServers();
+  const containers = useContainers();
   const auth = useAuthState();
   const [theme] = useTheme();
   const qc = useQueryClient();
   const [params, setParams] = useSearchParams();
   const targets = useMemo(() => consoleTargets(servers.data ?? []), [servers.data]);
   const wanted = params.get('server');
+  const wantedContainer = params.get('container');
   const [phase, setPhase] = useState<Phase>({ kind: 'idle' });
   const [serverId, setServerId] = useState<string | null>(() => params.get('server'));
+  /** Core container id of the shell target; null = the host. */
+  const [target, setTarget] = useState<string | null>(() => params.get('container'));
+  /** Target of the current or last session (for the header and "Neu verbinden"). */
+  const [session, setSession] = useState<{ serverId: string; container: string | null } | null>(
+    null,
+  );
   const [termError, setTermError] = useState<string | null>(null);
   const [termReady, setTermReady] = useState(false);
   const hostRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<TermHandle | null>(null);
   const socketRef = useRef<ConsoleSocket | null>(null);
   const autoRef = useRef<string | null>(null);
-  const connectRef = useRef<((id: string, retried: boolean) => Promise<void>) | null>(null);
+  const connectRef = useRef<
+    ((id: string, container: string | null, retried: boolean) => Promise<void>) | null
+  >(null);
 
   const server = targets.find((t) => t.server.id === serverId)?.server ?? null;
+  // The picker works on the chosen server, else on the first usable one.
+  const pickServer = server ?? targets.find((t) => t.usable)?.server ?? null;
+  const pickUsable = !!targets.find((t) => t.server.id === pickServer?.id)?.usable;
+  const shells = useMemo(
+    () => containerTargets(containers.data ?? [], pickServer?.id ?? null),
+    [containers.data, pickServer?.id],
+  );
+  const nameOf = useCallback(
+    (id: string | null): string | null =>
+      id ? (containers.data?.find((c) => c.id === id)?.name ?? 'Container') : null,
+    [containers.data],
+  );
+  const sessionServer = targets.find((t) => t.server.id === session?.serverId)?.server ?? server;
+  const sessionContainer = nameOf(session?.container ?? null);
 
   const ensureTerm = useCallback(async (): Promise<TermHandle | null> => {
     if (termRef.current) return termRef.current;
@@ -76,11 +107,14 @@ export function ConsolePage(): ReactElement {
   }, []);
 
   const connect = useCallback(
-    async (id: string, retried = false): Promise<void> => {
+    async (id: string, container: string | null = null, retried = false): Promise<void> => {
       socketRef.current?.close();
       socketRef.current = null;
       setServerId(id);
+      setTarget(container);
+      setSession({ serverId: id, container });
       setTermError(null);
+      const ctrName = nameOf(container);
       if (!retried && !stepUpActive(auth.data?.stepUpUntil)) {
         setPhase({ kind: 'stepup' });
         if (!(await requestStepUp())) {
@@ -101,7 +135,7 @@ export function ConsolePage(): ReactElement {
       term.reset();
       term.fit();
       const socket = new ConsoleSocket({
-        url: consoleUrl(id),
+        url: consoleUrl(id, window.location, container),
         cols: term.cols,
         rows: term.rows,
         onEvent: (e) => {
@@ -117,7 +151,7 @@ export function ConsolePage(): ReactElement {
             if (e.reason === 'step_up_required' && !retried) {
               setPhase({ kind: 'stepup' });
               void requestStepUp().then((ok) => {
-                if (ok) void connectRef.current?.(id, true);
+                if (ok) void connectRef.current?.(id, container, true);
                 else
                   setPhase({
                     kind: 'closed',
@@ -127,7 +161,9 @@ export function ConsolePage(): ReactElement {
               });
               return;
             }
-            const text = closeReasonText(e.reason, e.exitCode);
+            const text = ctrName
+              ? containerCloseText(e.reason, e.exitCode, ctrName)
+              : closeReasonText(e.reason, e.exitCode);
             term.writeNote(text);
             setPhase({ kind: 'closed', reason: e.reason, text });
           }
@@ -135,23 +171,41 @@ export function ConsolePage(): ReactElement {
       });
       socketRef.current = socket;
     },
-    [auth.data?.stepUpUntil, ensureTerm, qc],
+    [auth.data?.stepUpUntil, ensureTerm, qc, nameOf],
   );
 
   useEffect(() => {
     connectRef.current = connect;
   }, [connect]);
 
-  // /console?server=<id> (command palette "Konsole <server>") connects right away.
+  // /console?server=<id> (command palette "Konsole <server>") connects right away;
+  // with &container=<id> (container row "Shell") into that container.
   useEffect(() => {
-    if (!wanted || autoRef.current === wanted) return;
+    const key = `${wanted ?? ''}/${wantedContainer ?? ''}`;
+    if (!wanted || autoRef.current === key) return;
     const t = targets.find((x) => x.server.id === wanted);
     if (!t) return;
-    autoRef.current = wanted;
+    if (wantedContainer && !containers.data) return;
+    autoRef.current = key;
     setParams({}, { replace: true });
-    // Out of the effect body: connect() sets state.
-    if (t.usable) queueMicrotask(() => void connect(wanted));
-  }, [wanted, targets, connect, setParams]);
+    const ctr = wantedContainer
+      ? (containerTargets(containers.data ?? [], wanted).find((c) => c.id === wantedContainer) ??
+        null)
+      : null;
+    // Out of the effect body: connect() and setState.
+    queueMicrotask(() => {
+      setServerId(wanted);
+      if (wantedContainer && !ctr) {
+        setTarget(null);
+        setTermError(
+          'Dieser Container ist nicht wählbar: er läuft nicht oder ist geschützt. Ziel wählen.',
+        );
+        return;
+      }
+      setTarget(ctr?.id ?? null);
+      if (t.usable) void connect(wanted, ctr?.id ?? null);
+    });
+  }, [wanted, wantedContainer, targets, containers.data, connect, setParams]);
 
   useEffect(
     () => () => {
@@ -209,7 +263,7 @@ export function ConsolePage(): ReactElement {
                     icon="terminal"
                     disabled={!t.usable || current}
                     aria-label={`Konsole ${t.server.name} ${current ? 'verbunden' : 'verbinden'}`}
-                    onClick={() => void connect(t.server.id)}
+                    onClick={() => void connect(t.server.id, null)}
                   >
                     {current ? 'Verbunden' : 'Verbinden'}
                   </Button>
@@ -221,12 +275,33 @@ export function ConsolePage(): ReactElement {
       </Tile>
 
       <div className="app-console-term" data-hz-terminal="">
+        {pickServer ? (
+          <TargetPicker
+            serverName={pickServer.name}
+            shells={shells.map((c) => ({ id: c.id, name: c.name }))}
+            value={
+              pickServer.id === serverId && target && shells.some((c) => c.id === target)
+                ? target
+                : ''
+            }
+            disabled={!pickUsable}
+            onChange={(v) => {
+              setServerId(pickServer.id);
+              setTarget(v || null);
+            }}
+            onConnect={(v) => void connect(pickServer.id, v || null)}
+          />
+        ) : null}
         {/* The terminal stays dark (design/README.md): in the light theme its subtree uses the
             dark tokens, so ANSI and status colours keep their contrast on terminal-bg. */}
         <div className="hz-term" data-theme={theme === 'light' ? 'dark' : undefined}>
           <div className="hz-term-head">
-            <span>konsole</span>
-            <span className="hz-term-host">{server ? server.name : 'kein Server'}</span>
+            <span data-testid="console-target-head">
+              {sessionContainer ? `Shell in ${sessionContainer}` : 'konsole · Host'}
+            </span>
+            <span className="hz-term-host">
+              {sessionServer ? sessionServer.name : 'kein Server'}
+            </span>
           </div>
           <div ref={hostRef} className="app-xterm" hidden={phase.kind === 'idle' && !termReady} />
           {phase.kind === 'idle' && !termReady ? (
@@ -238,15 +313,69 @@ export function ConsolePage(): ReactElement {
         </div>
         <StatusLine
           phase={phase}
-          serverName={server?.name ?? null}
+          serverName={
+            sessionServer
+              ? sessionContainer
+                ? `${sessionContainer} auf ${sessionServer.name}`
+                : sessionServer.name
+              : null
+          }
           onDisconnect={disconnect}
-          onReconnect={serverId ? () => void connect(serverId) : undefined}
-          canReconnect={!!targets.find((t) => t.server.id === serverId)?.usable}
+          onReconnect={
+            session ? () => void connect(session.serverId, session.container) : undefined
+          }
+          canReconnect={!!targets.find((t) => t.server.id === session?.serverId)?.usable}
         />
         {termError ? <FormError title={termError} /> : null}
       </div>
 
       <SessionsTile />
+    </div>
+  );
+}
+
+/** Target of the next session: the host or one running container of the server (M23). */
+export function TargetPicker({
+  serverName,
+  shells,
+  value,
+  disabled,
+  onChange,
+  onConnect,
+}: {
+  serverName: string;
+  shells: readonly { id: string; name: string }[];
+  value: string;
+  disabled: boolean;
+  onChange: (v: string) => void;
+  onConnect: (v: string) => void;
+}): ReactElement {
+  return (
+    <div className="app-console-pick">
+      <SelectField
+        label={`Ziel auf ${serverName}`}
+        value={value}
+        disabled={disabled}
+        onChange={(e) => onChange(e.target.value)}
+        options={[
+          { value: '', label: `Host · ${serverName}` },
+          ...shells.map((c) => ({ value: c.id, label: `Container · ${c.name}` })),
+        ]}
+        hint={
+          shells.length
+            ? 'Shell im Container mit bash, sonst sh. Geschützte Container fehlen in der Liste.'
+            : 'Kein laufender Container für eine Shell.'
+        }
+      />
+      <Button
+        size="sm"
+        variant="secondary"
+        icon="terminal"
+        disabled={disabled}
+        onClick={() => onConnect(value)}
+      >
+        {value ? 'Shell öffnen' : 'Verbinden'}
+      </Button>
     </div>
   );
 }
