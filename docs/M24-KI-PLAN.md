@@ -80,3 +80,22 @@ Stufe-1-Regeln, jede mit Test und Begründungstext:
 ## Was der Admin liefern muss
 - **Einen API-Key**, erst wenn M24 gemergt ist, eingetragen unter Einstellungen → KI (nie im Chat, nie im Repo). Empfehlung: Anthropic-Key (console.anthropic.com → API Keys) oder OpenAI-Key (platform.openai.com → API keys), beide mit Ausgabenlimit beim Anbieter. Ohne Key laufen die Regel-Vorschläge trotzdem. Kostenlos geht auch Ollama auf einem eigenen Rechner im Tailnet (dann schwächere Vorschläge).
 - Entscheidungen (sonst gelten die Annahmen): Anbieter (Annahme: Anthropic), Monatsbudget (Annahme: 5 €), Server-/Containernamen pseudonymisieren (Annahme: an), tägliche Auto-Analyse (Annahme: aus).
+
+## Weitere Ideen (nach Nutzen sortiert, nicht Teil von M24)
+Ergänzt am 27.11.2026 auf Wunsch des Admins. Bereits gesammelte Ideen aus `docs/OFFENE-FRAGEN-UND-IDEEN.md` sind hier nicht wiederholt. Der Admin wählt aus, was in M24 oder einen eigenen Meilenstein kommt.
+
+| # | Idee | KI? | Nutzen | Aufwand |
+|---|------|-----|--------|---------|
+| 1 | **„Warum?“ an jeder Meldung:** Bei WARN/CRIT erklärt die KI die wahrscheinliche Ursache aus Metriken, Ereignissen und geschwärzten Log-Zeilen (Vorschau, was rausgeht) und schlägt den nächsten Schritt vor. | ja | hoch | mittel |
+| 2 | **Testwelt per Klick:** Gameserver aus dem letzten Backup als Kopie auf freiem Port starten, z. B. um ein Mod- oder Versions-Update zu testen; danach übernehmen oder wegwerfen. | nein | hoch | mittel |
+| 3 | **Server-Rezept als Datei:** alles, was die Zentrale auf einem Server angelegt hat (Apps, Stacks, Gameserver, Aufgaben, Checks), als YAML exportieren und auf einem neuen Server einspielen. Schnellster Neuaufbau und Umzug. | nein | hoch | mittel |
+| 4 | **Spieleabend planen:** „Freitag 20:00, Minecraft“: Server wird vorher geweckt, RAM-Reserve geprüft, Backup gemacht, Discord-Ankündigung, danach wieder Schlaf. | nein | hoch | klein |
+| 5 | **Wunschliste für Freunde:** Über den Benutzerlink schlagen Freunde Mods, Einstellungen oder Spiele vor und stimmen ab; der Admin nimmt an oder lehnt ab. | nein | mittel | klein |
+| 6 | **Modpack-Assistent:** „Survival mit Technik und Performance“ → passende, untereinander kompatible Modrinth-Liste für Version und Loader, Installation per Bestätigung. | ja | mittel | mittel |
+| 7 | **KI-Befehle in der Befehlspalette:** „Starte Minecraft“, „Warum ist der Pi langsam?“, Antwort mit Aktionsknopf (gleiche Regeln wie M24). | ja | mittel | klein (nach M24) |
+| 8 | **Wochenbericht mit Zusammenfassung:** Sonntag eine Push mit dem Wichtigsten der Woche in drei Sätzen plus offenen Vorschlägen. | ja | mittel | klein |
+| 9 | **Drift-Erkennung:** Meldung, wenn ein Stack außerhalb der Zentrale geändert wurde (Compose-Datei oder Image-Digest weicht von der letzten Revision ab), mit „Zurücksetzen“ oder „Als neue Version übernehmen“. | nein | mittel | klein |
+| 10 | **Compose-Importer:** eine Compose-Datei aus dem Internet einfügen, die KI erklärt sie, die Zentrale prüft sie wie im App-Store und macht eine sichere eigene Vorlage daraus. | ja | mittel | mittel |
+| 11 | **Backup-Probe für Gameserver:** einmal pro Woche ein Backup in einem Wegwerf-Container starten und prüfen, ob die Welt lädt; Anzeige „letztes geprüftes Backup vor 3 Tagen“. | nein | mittel | mittel |
+| 12 | **Live-Karte:** BlueMap für Minecraft als Zusatz, Link auch im Benutzerlink für Freunde. | nein | niedrig | klein |
+| 13 | **Log-Muster:** wiederkehrende Fehlermeldungen über alle Container gruppieren („seit gestern 400× dieselbe Zeile in nextcloud“). | teils | niedrig | mittel |
