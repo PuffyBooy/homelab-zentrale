@@ -283,6 +283,11 @@ Wunsch des Admins vom 27.11.2026. Modul `printer` (Standard aus): Anbindung im L
 
 ---
 
+## M31: Tür und Gegensprechanlage
+Wunsch des Admins vom 27.11.2026 (BTicino Classe 100X mit WLAN plus zweite Station ohne WLAN). Modul `door` über Home Assistant (Rückfall: Shelly am Türkontakt): Klingeln als Push mit Bild, Wandkachel und Echo-Ansage, Öffnen nur mit Bestätigung und Step-up, Wandgerät nur mit ausdrücklicher Freigabe, „Tür öffnen?“-Push bei Ankunft (nie automatisch), Verlauf mit Bildern. Details: `docs/M31-TUER-PLAN.md`.
+
+---
+
 ## Definition of Done (für jeden PR)
 - Code, Tests und Doku sind aktuell (`docs/` mitpflegen, wenn sich etwas ändert)
 - Keine `any`, keine auskommentierten Blöcke, keine TODOs ohne Issue
