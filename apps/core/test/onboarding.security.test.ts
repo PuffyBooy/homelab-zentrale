@@ -312,11 +312,12 @@ describe('install.sh', () => {
       expect(body, secret.slice(0, 4)).not.toContain(secret);
     }
     expect(body).not.toContain('evil.example');
-    // Every URL in the script is the hub or a documentation link.
+    // Every URL in the script is the hub, a documentation link or the Docker installer.
     const urls = [...body.matchAll(/https?:\/\/[A-Za-z0-9][^\s'"$)]*/g)].map((m) => m[0]);
     for (const u of urls) {
       expect(
         u.startsWith(HUB) ||
+          u === 'https://get.docker.com' ||
           ['https://docs.docker.com/', 'https://tailscale.com/'].some((p) => u.startsWith(p)),
         u,
       ).toBe(true);

@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { and, count, eq, gt, isNull, lt } from 'drizzle-orm';
 import {
   agentCoreUrlSchema,
+  buildBootstrapCommand,
   buildOneLiner,
   formatOnboardingCode,
   hubOriginSchema,
@@ -118,6 +119,20 @@ export class OnboardingError extends Error {
   }
 }
 
+/** The same onboarding, with a minted single-use Tailscale auth key in the command. */
+export function withAuthKey(
+  res: OnboardingCreateResponse,
+  hubOrigin: string,
+  authKey: string,
+): OnboardingCreateResponse {
+  return {
+    ...res,
+    oneLiner: buildBootstrapCommand({ hubOrigin, code: res.code, hostname: res.name, authKey }),
+    tailscale: 'auto',
+    tailscaleNote: null,
+  };
+}
+
 export type ExchangeResult =
   { ok: true; id: string; response: OnboardingExchangeResponse } | { ok: false };
 
@@ -224,7 +239,15 @@ export class OnboardingService {
           name,
           code: display,
           expiresAt: new Date(expiresAt).toISOString(),
-          oneLiner: buildOneLiner(hub.origin, display),
+          oneLiner: buildBootstrapCommand({
+            hubOrigin: hub.origin,
+            code: display,
+            hostname: name,
+            authKey: null,
+          }),
+          plainOneLiner: buildOneLiner(hub.origin, display),
+          tailscale: 'login',
+          tailscaleNote: null,
         };
       } catch (err) {
         if (attempt >= 4) throw err;

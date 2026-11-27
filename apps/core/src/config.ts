@@ -102,6 +102,8 @@ export const configSchema = z.object({
   HZ_AZURE_LOGIN_URL: optionalEnv(z.string().max(100)),
   HZ_AZURE_MANAGEMENT_URL: optionalEnv(z.string().max(100)),
   HZ_AZURE_PRICES_URL: optionalEnv(z.string().max(100)),
+  /** Tailscale API base for tests/e2e: only with HZ_DEMO=1 and http://127.0.0.1:<port>. */
+  HZ_TAILSCALE_API_URL: optionalEnv(z.string().max(100)),
   NODE_ENV: z.enum(['development', 'production', 'test']).default('production'),
 });
 
@@ -130,6 +132,7 @@ export interface Config {
   initialModules: Partial<Record<ModuleId, boolean>> | undefined;
   /** Raw Azure endpoint overrides; cloud/azure.ts decides whether they apply. */
   azureOverrides: { login?: string; management?: string; prices?: string };
+  tailscaleApiOverride?: string;
 }
 
 export function isLoopback(host: string): boolean {
@@ -186,5 +189,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
       ...(c.HZ_AZURE_MANAGEMENT_URL !== undefined ? { management: c.HZ_AZURE_MANAGEMENT_URL } : {}),
       ...(c.HZ_AZURE_PRICES_URL !== undefined ? { prices: c.HZ_AZURE_PRICES_URL } : {}),
     },
+    ...(c.HZ_TAILSCALE_API_URL !== undefined
+      ? { tailscaleApiOverride: c.HZ_TAILSCALE_API_URL }
+      : {}),
   };
 }

@@ -34,7 +34,12 @@ describe('POST /api/servers/onboarding', () => {
     expect(res.statusCode).toBe(201);
     const body = onboardingCreateResponseSchema.parse(res.json());
     expect(body.name).toBe('pi');
-    expect(body.oneLiner).toBe(`curl -fsSL ${HUB}/install.sh | sudo sh -s -- ${body.code}`);
+    expect(body.plainOneLiner).toBe(`curl -fsSL ${HUB}/install.sh | sudo sh -s -- ${body.code}`);
+    // No Tailscale client stored: the command joins with the interactive login.
+    expect(body.tailscale).toBe('login');
+    expect(body.oneLiner).toContain('tailscale up --hostname=pi ||');
+    expect(body.oneLiner).not.toContain('--auth-key');
+    expect(body.oneLiner.endsWith(`sh "$f" ${body.code}; r=$?; rm -f "$f"; exit $r'`)).toBe(true);
     expect(Date.parse(body.expiresAt) - t.clock.t).toBe(15 * MIN);
     const audit = t.db.sqlite
       .prepare(
@@ -42,7 +47,10 @@ describe('POST /api/servers/onboarding', () => {
       )
       .all() as { target: string; d: string }[];
     expect(audit).toEqual([
-      { target: body.id, d: JSON.stringify({ name: 'pi', location: 'Keller' }) },
+      {
+        target: body.id,
+        d: JSON.stringify({ name: 'pi', location: 'Keller', tailscale: 'login' }),
+      },
     ]);
     const all = JSON.stringify(t.db.sqlite.prepare('SELECT * FROM onboarding_codes').all());
     expect(all).not.toContain(body.code);

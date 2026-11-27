@@ -34,6 +34,7 @@ import { ShareGatewayTile } from './ShareGatewayTile.js';
 import { IngressTile } from './RelayTiles.js';
 import { ModulesTile } from './ModulesTile.js';
 import { UpdatesSettingsTile } from './UpdatesSettingsTile.js';
+import { TailscaleTile } from './TailscaleTile.js';
 import { DiscordBotTile } from './DiscordBotTile.js';
 import { VoiceTile } from './VoiceTile.js';
 import { enabledIntegrations, IntegrationTiles } from './IntegrationTiles.js';
@@ -52,6 +53,7 @@ export const SETTINGS_SECTIONS: readonly {
   { id: 'module', label: 'Module' },
   { id: 'server', label: 'Server' },
   { id: 'agents', label: 'Agents' },
+  { id: 'tailscale', label: 'Tailscale' },
   { id: 'updates', label: 'Updates' },
   { id: 'github', label: 'GitHub', module: 'github' },
   { id: 'checks', label: 'Checks' },
@@ -126,6 +128,9 @@ export function SettingsPage(): ReactElement {
         </Anchor>
         <Anchor id="agents">
           <AgentsSettingsTile />
+        </Anchor>
+        <Anchor id="tailscale" wide>
+          <TailscaleTile />
         </Anchor>
         <Anchor id="updates" wide>
           <UpdatesSettingsTile />

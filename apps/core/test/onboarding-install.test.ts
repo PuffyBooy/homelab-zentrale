@@ -137,7 +137,9 @@ function run(cmd: string[], env: Record<string, string>): Promise<Run> {
 
 /** The one-liner from the UI, without sudo (the id stub says root). */
 function runOneLiner(oneLiner: string, sb: Sandbox): Promise<Run> {
-  const cmd = oneLiner.replace('| sudo sh -s --', '| sh -s --');
+  const cmd = oneLiner
+    .replace('| sudo sh -s --', '| sh -s --')
+    .replace(/^ sudo sh -c '/, "sh -c '");
   expect(cmd).not.toContain('sudo');
   return run(['sh', '-c', cmd], sb.env);
 }
@@ -159,8 +161,9 @@ describe('install.sh end to end (real curl + sh against the live app)', () => {
     const live = await liveApp();
     t = live.t;
     const o = await createOnboarding(t, live.cookie, 'pi');
-    expect(o.oneLiner).toBe(`curl -fsSL ${live.origin}/install.sh | sudo sh -s -- ${o.code}`);
+    expect(o.plainOneLiner).toBe(`curl -fsSL ${live.origin}/install.sh | sudo sh -s -- ${o.code}`);
     const sb = sandbox();
+    // The full command from the UI (Tailscale is connected in the stub: no login).
     const r = await runOneLiner(o.oneLiner, sb);
     expect(r.code, r.stderr).toBe(0);
     expect(r.stdout).toContain('Agent "pi" läuft.');
@@ -251,7 +254,7 @@ describe('install.sh end to end (real curl + sh against the live app)', () => {
     t = live.t;
     const o = await createOnboarding(t, live.cookie, 'edge');
     const sb = sandbox();
-    const r = await runOneLiner(`${o.oneLiner} --allow-relay`, sb);
+    const r = await runOneLiner(`${o.plainOneLiner} --allow-relay`, sb);
     expect(r.code, r.stderr).toBe(0);
     const env = readEnv(join(sb.conf, 'agent.env'));
     expect(env).toMatchObject({ HZ_AGENT_ALLOW_RELAY: '1', HZ_AGENT_ALLOW_TERMINAL: '0' });
@@ -349,5 +352,149 @@ describe('install.sh paths', () => {
     } finally {
       await app.close();
     }
+  });
+});
+
+/*
+ * M11b: the full command from the UI on a "fresh" server. PATH holds only the stubs
+ * and the few real tools the scripts need, so a missing docker/tailscale is real.
+ */
+const TOOLS = [
+  'sh',
+  'cat',
+  'grep',
+  'sed',
+  'tr',
+  'mktemp',
+  'rm',
+  'mv',
+  'install',
+  'head',
+  'uname',
+  'getent',
+  'sleep',
+  'mkdir',
+  'touch',
+  'printf',
+];
+
+function freshSandbox(opts: { docker: boolean; snap?: boolean }): Sandbox {
+  const sb = sandbox();
+  const bin = join(sb.dir, 'fresh-bin');
+  mkdirSync(bin);
+  const stub = (name: string, body: string): void => {
+    const file = join(bin, name);
+    writeFileSync(file, `#!/bin/sh\n${body}\n`);
+    chmodSync(file, 0o755);
+  };
+  for (const tool of TOOLS) {
+    // The system binary, not a shell wrapper or alias that the runner may put first.
+    let path = ['/usr/bin', '/bin'].map((d) => join(d, tool)).find((f) => existsSync(f)) ?? '';
+    if (!path) {
+      try {
+        path = real(tool);
+      } catch {
+        continue;
+      }
+    }
+    if (path.startsWith('/')) stub(tool, `exec ${path} "$@"`);
+  }
+  const stubs = join(sb.dir, 'bin');
+  stub('id', 'echo 0');
+  stub('chmod', 'exec /bin/chmod "$@"');
+  // Tailscale is "installed" by its installer and connected only after `up`.
+  const tsState = join(sb.dir, 'ts-up');
+  stub(
+    'tailscale',
+    [
+      'printf "tailscale %s\\n" "$*" >>"$HZ_STUB_LOG"',
+      'case "$1" in',
+      `  status) [ -f ${tsState} ] ;;`,
+      `  up) touch ${tsState} ;;`,
+      '  *) exit 0 ;;',
+      'esac',
+    ].join('\n'),
+  );
+  // curl: the two public installers are fakes, everything else is the real curl.
+  const tsInstaller = '# fake tailscale installer\necho "tailscale installed"';
+  stub(
+    'curl',
+    [
+      'case "$*" in',
+      `  *tailscale.com/install.sh*) printf '%s\\n' '${tsInstaller}'; exit 0 ;;`,
+      '  *get.docker.com*)',
+      '    out=""; prev=""',
+      '    for a in "$@"; do [ "$prev" = "-o" ] && out=$a; prev=$a; done',
+      `    printf '#!/bin/sh\\necho "docker installed" >>"$HZ_STUB_LOG"\\ncp ${join(stubs, 'docker')} ${join(bin, 'docker')}\\n' >"$out"`,
+      '    exit 0 ;;',
+      'esac',
+      `exec ${real('curl')} "$@"`,
+    ].join('\n'),
+  );
+  if (opts.docker) stub('docker', `exec ${join(stubs, 'docker')} "$@"`);
+  if (opts.snap) stub('snap', '[ "$1 $2" = "list docker" ]');
+  // `cp` for the fake Docker installer.
+  stub('cp', 'exec /bin/cp "$@"');
+  return { ...sb, env: { ...sb.env, PATH: bin } };
+}
+
+describe('the full command on a fresh server (M11b)', () => {
+  it(
+    'joins Tailscale with the key, installs Docker, starts the agent',
+    { timeout: 20000 },
+    async () => {
+      const live = await liveApp();
+      t = live.t;
+      const o = await createOnboarding(t, live.cookie, 'oracle');
+      const key = ['tskey', 'auth', 'kTest1CNTRL-abcdefghijklmnop'].join('-');
+      const { withAuthKey } = await import('../src/servers/onboarding.js');
+      const cmd = withAuthKey(o, live.origin, key).oneLiner;
+      const sb = freshSandbox({ docker: false });
+      const r = await runOneLiner(cmd, sb);
+      expect(r.code, r.stderr).toBe(0);
+      expect(r.stdout).toContain('Docker fehlt, wird installiert');
+      expect(r.stdout).toContain('Agent "oracle" läuft.');
+      const log = readFileSync(sb.log, 'utf8');
+      expect(log).toContain(`tailscale up --auth-key=${key} --hostname=oracle\n`);
+      expect(log).toContain('docker installed');
+      expect(log).toContain(`${sb.conf}|compose up -d --no-build --force-recreate agent`);
+      expect(existsSync(join(sb.conf, 'agent.env'))).toBe(true);
+      // The key is in no output and the temp install.sh is gone.
+      expect(r.stdout + r.stderr).not.toContain(key);
+    },
+  );
+
+  it('without a key: interactive tailscale up (login link), then the same install', async () => {
+    const live = await liveApp();
+    t = live.t;
+    const o = await createOnboarding(t, live.cookie, 'pi');
+    const sb = freshSandbox({ docker: true });
+    const r = await runOneLiner(o.oneLiner, sb);
+    expect(r.code, r.stderr).toBe(0);
+    expect(readFileSync(sb.log, 'utf8')).toContain('tailscale up --hostname=pi\n');
+  });
+
+  it('docker snap without a terminal: refused before the code is used', async () => {
+    const live = await liveApp();
+    t = live.t;
+    const o = await createOnboarding(t, live.cookie, 'pi');
+    const sb = freshSandbox({ docker: true, snap: true });
+    const r = await runOneLiner(o.oneLiner, sb);
+    expect(r.code).toBe(1);
+    expect(r.stderr).toContain('Docker ist als Snap installiert');
+    expect(r.stderr).toContain('Docker-Snap bleibt.');
+    expect(await onboardingState(t, live.cookie, o.id)).toMatchObject({ state: 'waiting' });
+  });
+
+  it('an unsupported CPU is refused with a clear German message', async () => {
+    const live = await liveApp();
+    t = live.t;
+    const o = await createOnboarding(t, live.cookie, 'pi');
+    const sb = freshSandbox({ docker: true });
+    writeFileSync(join(sb.env.PATH ?? '', 'uname'), '#!/bin/sh\necho armv7l\n');
+    const r = await runOneLiner(o.oneLiner, sb);
+    expect(r.code).toBe(1);
+    expect(r.stderr).toContain('Diese CPU (armv7l) wird nicht unterstützt.');
+    expect(await onboardingState(t, live.cookie, o.id)).toMatchObject({ state: 'waiting' });
   });
 });

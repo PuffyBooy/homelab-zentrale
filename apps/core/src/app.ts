@@ -79,6 +79,7 @@ import { serverAdminRoutes } from './servers/admin-routes.js';
 import { setupUpdates } from './updates/index.js';
 import { installScriptRoutes, onboardingRoutes } from './servers/onboarding-routes.js';
 import { OnboardingService } from './servers/onboarding.js';
+import { tailscaleApiBase, TailscaleJoin, type TailscaleFetch } from './servers/tailscale.js';
 import { PortAuditService } from './servers/ports.js';
 import { portRoutes } from './servers/ports-routes.js';
 import { ServerService } from './servers/service.js';
@@ -158,6 +159,8 @@ export interface AppDeps {
   features?: FeatureDeps;
   /** M22: transport to Azure (tests: a fake Azure). */
   cloudFetch?: AzureFetch;
+  /** M11b: transport to the Tailscale API (tests: a fake). */
+  tailscaleFetch?: TailscaleFetch;
 }
 
 /** Core services, decorated on the app as `hzCore` (routes, tests). */
@@ -656,6 +659,13 @@ export async function buildApp(config: Config, deps: AppDeps = {}): Promise<Fast
 
   // ---- M11: onboarding, port audit ----------------------------------------------
   const onboarding = new OnboardingService({ db: db.db, now, tokens, config });
+  const tailscale = new TailscaleJoin({
+    db: db.db,
+    box,
+    now,
+    base: tailscaleApiBase(config),
+    ...(deps.tailscaleFetch ? { fetch: deps.tailscaleFetch } : {}),
+  });
   const ports = new PortAuditService({
     db: db.db,
     now,
@@ -1036,7 +1046,7 @@ export async function buildApp(config: Config, deps: AppDeps = {}): Promise<Fast
     scheduler,
   });
   if (config.demo) seedDemoUpdates({ db: db.db, now, updates, serverIds: demoIds });
-  await app.register(onboardingRoutes, { prefix: '/api', db: db.db, now, onboarding });
+  await app.register(onboardingRoutes, { prefix: '/api', db: db.db, now, onboarding, tailscale });
   await app.register(installScriptRoutes, { onboarding });
   await app.register(portRoutes, { prefix: '/api', db: db.db, now, servers, ports });
   await app.register(moduleRoutes, { prefix: '/api', db: db.db, now, modules });

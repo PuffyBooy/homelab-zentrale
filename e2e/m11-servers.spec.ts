@@ -150,13 +150,13 @@ test('Server hinzufügen: code and one-liner, the agent connects with the code o
   const step = dialog.getByTestId('onboarding');
   await expect(step).toHaveAttribute('data-state', 'waiting');
   await expect(step).toContainText('Wartet auf den Server …');
-  await expect(step).toContainText('Braucht Docker und Tailscale am neuen Server.');
+  await expect(step).toContainText('zeigt dabei einen Login-Link');
   await expect(step).toContainText(/noch 1[45]:\d\d/);
   const code = (await step.locator('.hz-metric-value .hz-num').textContent())?.trim() ?? '';
   expect(code).toMatch(/^[2-9A-HJKMNP-Z]{4}-[2-9A-HJKMNP-Z]{4}$/);
   const oneLiner = (await step.locator('pre.app-copy-code').textContent())?.trim() ?? '';
-  expect(oneLiner).toMatch(/^curl -fsSL \S+\/install\.sh \| sudo sh -s -- /);
-  expect(oneLiner.endsWith(code)).toBe(true);
+  expect(oneLiner).toMatch(/^sudo sh -c 'command -v tailscale /);
+  expect(oneLiner).toContain(`sh "$f" ${code}; r=$?`);
   await shots(page, 'onboarding-code', dialog);
 
   // install.sh is the same for every server: no code, no token.

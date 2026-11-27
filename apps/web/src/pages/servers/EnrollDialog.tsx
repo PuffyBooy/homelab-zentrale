@@ -8,8 +8,8 @@ import {
 } from '@hz/shared';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactElement } from 'react';
-import { useNavigate } from 'react-router';
-import { Button, Metric, StatusDot } from '@hz/ui';
+import { Link, useNavigate } from 'react-router';
+import { Alert, Button, Metric, StatusDot } from '@hz/ui';
 import { CopyBlock } from '../../components/CopyBlock.js';
 import { Dialog } from '../../components/Dialog.js';
 import { Field } from '../../components/Field.js';
@@ -193,7 +193,7 @@ function CodeFlow({
   }
   return (
     <ServerNameForm
-      intro={`Die Zentrale zeigt einen Code und einen Einzeiler. Auf dem neuen Server ausgeführt, startet er den Agent, der sich über Tailscale verbindet. Der Code gilt einmal und ${ONBOARDING_TTL_MINUTES} Min. Code erzeugen braucht einen frischen Code aus der Authenticator-App.`}
+      intro={`Die Zentrale zeigt einen Code und einen Befehl. Auf dem neuen Server ausgeführt, bringt er ihn ins Tailnet, installiert Docker, falls nötig, und startet den Agent. Der Code gilt einmal und ${ONBOARDING_TTL_MINUTES} Min. Code erzeugen braucht einen frischen Code aus der Authenticator-App.`}
       submitLabel="Code erzeugen"
       pending={create.isPending}
       error={create.error}
@@ -300,10 +300,27 @@ export function CodeStepView({
             className="app-onboard-code"
           />
           <CopyBlock label="Auf dem neuen Server ausführen" text={res.oneLiner} />
-          <p className="hz-dialog-text">
-            Braucht Docker und Tailscale am neuen Server. Der Code wird nur jetzt angezeigt;
-            Abbrechen verwirft ihn.
-          </p>
+          {res.tailscale === 'auto' ? (
+            <p className="hz-dialog-text">
+              Ein Befehl für alles: meldet den Server selbst bei Tailscale an (Einweg-Schlüssel),
+              installiert Docker, falls es fehlt, und startet den Agent. Code und Schlüssel werden
+              nur jetzt angezeigt; Abbrechen verwirft sie.
+            </p>
+          ) : (
+            <>
+              <p className="hz-dialog-text">
+                Installiert Tailscale und Docker, falls sie fehlen, und startet den Agent. Tailscale
+                zeigt dabei einen Login-Link: einmal öffnen und bestätigen. Ganz ohne Klick geht es
+                mit einem Tailscale-Zugang unter <Link to="/settings#tailscale">Einstellungen</Link>
+                . Der Code wird nur jetzt angezeigt; Abbrechen verwirft ihn.
+              </p>
+              {res.tailscaleNote ? (
+                <Alert tone="warn" title={res.tailscaleNote}>
+                  Darum mit Login-Link. Einstellungen → Tailscale prüfen.
+                </Alert>
+              ) : null}
+            </>
+          )}
         </>
       ) : state === 'installing' ? (
         <p className="hz-dialog-text">

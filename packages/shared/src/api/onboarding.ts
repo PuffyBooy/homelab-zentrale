@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { agentNameSchema, agentTokenSchema } from '../agent-protocol.js';
 import { enrollRequestSchema } from './servers.js';
+import { onboardingTailscaleModeSchema, TAILSCALE_AUTH_KEY_RE } from './tailscale.js';
 
 /**
  * M11: add a server in one step (ROADMAP M11, SPEC 5.3).
@@ -97,6 +98,68 @@ export function buildOneLiner(hubOrigin: string, code: string): string {
   return `curl -fsSL ${hubOrigin.replace(/\/$/, '')}${INSTALL_SCRIPT_PATH} | sudo sh -s -- ${code}`;
 }
 
+/** Official Tailscale installer for Linux (public, works before the tailnet). */
+export const TAILSCALE_INSTALL_URL = 'https://tailscale.com/install.sh';
+
+const HUB_ORIGIN_SHAPE = /^(https?):\/\/([A-Za-z0-9.-]{1,253})(?::([0-9]{1,5}))?$/;
+const HOSTNAME_SHAPE = /^[a-z0-9][a-z0-9-]{0,62}$/;
+
+export interface BootstrapInput {
+  hubOrigin: string;
+  /** Display form XXXX-XXXX. */
+  code: string;
+  /** Tailscale host name of the new server (the agent name). */
+  hostname: string;
+  /** Single-use auth key, or null for the interactive login. */
+  authKey: string | null;
+}
+
+/**
+ * The command for a fresh server (M11b). One `sudo sh -c '...'`:
+ *  1. installs Tailscale with the official script if `tailscale` is missing,
+ *  2. joins the tailnet unless already connected: with the single-use auth key, or
+ *     interactively (tailscale prints a login link and waits),
+ *  3. fetches install.sh of the hub over the tailnet into a temp file. For a *.ts.net
+ *     hub the address comes from `tailscale ip` (curl --resolve), so a server whose
+ *     MagicDNS is not ready yet (or switched off) still reaches the hub,
+ *  4. runs it with the code (install.sh does Docker, DNS, the agent).
+ * It starts with a space: bash with HISTCONTROL=ignorespace/ignoreboth (Debian and
+ * Ubuntu default) keeps it out of the history. Every value is checked against a strict
+ * pattern without quotes, spaces or `$`, so nothing can leave the single quotes.
+ */
+export function buildBootstrapCommand(input: BootstrapInput): string {
+  const m = HUB_ORIGIN_SHAPE.exec(input.hubOrigin.replace(/\/$/, ''));
+  if (!m) throw new Error('invalid hub origin');
+  const [, proto, host = '', port] = m;
+  if (!ONBOARDING_CODE_DISPLAY_RE.test(input.code)) throw new Error('invalid code');
+  if (!HOSTNAME_SHAPE.test(input.hostname)) throw new Error('invalid hostname');
+  if (input.authKey !== null && !TAILSCALE_AUTH_KEY_RE.test(input.authKey)) {
+    throw new Error('invalid auth key');
+  }
+  const origin = `${proto}://${host}${port ? `:${port}` : ''}`;
+  const up =
+    input.authKey === null
+      ? `tailscale up --hostname=${input.hostname}`
+      : `tailscale up --auth-key=${input.authKey} --hostname=${input.hostname}`;
+  const tsnet = proto === 'https' && host.endsWith('.ts.net');
+  const short = host.split('.')[0] ?? '';
+  const fetchHub = tsnet
+    ? `ip=$(tailscale ip -4 ${short} 2>/dev/null | head -n 1); curl -fsS --proto =https \${ip:+--resolve ${host}:${port ?? '443'}:$ip} -o "$f" ${origin}${INSTALL_SCRIPT_PATH}`
+    : `curl -fsS -o "$f" ${origin}${INSTALL_SCRIPT_PATH}`;
+  const script = [
+    `command -v tailscale >/dev/null 2>&1 || curl -fsSL ${TAILSCALE_INSTALL_URL} | sh`,
+    `command -v tailscale >/dev/null 2>&1 || { echo "Fehler: Tailscale ließ sich nicht installieren." >&2; exit 1; }`,
+    `tailscale status >/dev/null 2>&1 || ${up} || { echo "Fehler: Anmeldung bei Tailscale fehlgeschlagen. Bitte in der Zentrale einen neuen Code erzeugen." >&2; exit 1; }`,
+    `f=$(mktemp)`,
+    `${fetchHub} || { rm -f "$f"; echo "Fehler: Die Zentrale ist über Tailscale nicht erreichbar (${origin})." >&2; exit 1; }`,
+    `sh "$f" ${input.code}`,
+    `r=$?`,
+    `rm -f "$f"`,
+    `exit $r`,
+  ].join('; ');
+  return ` sudo sh -c '${script}'`;
+}
+
 export const onboardingIdSchema = z.string().regex(/^[A-Za-z0-9_-]{8,64}$/);
 export const onboardingIdParamsSchema = z.strictObject({ id: onboardingIdSchema });
 
@@ -110,8 +173,14 @@ export const onboardingCreateResponseSchema = z.strictObject({
   code: z.string().regex(ONBOARDING_CODE_DISPLAY_RE),
   /** now + ONBOARDING_TTL_MINUTES. */
   expiresAt: z.iso.datetime(),
-  /** buildOneLiner(HZ_BASE_URL, code). */
-  oneLiner: z.string().max(400),
+  /** buildBootstrapCommand(...): joins Tailscale, then runs install.sh. Shown once. */
+  oneLiner: z.string().max(1500),
+  /** buildOneLiner(HZ_BASE_URL, code): for a server that is already in the tailnet. */
+  plainOneLiner: z.string().max(400),
+  /** auto: the command carries a single-use auth key; login: Tailscale shows a link. */
+  tailscale: onboardingTailscaleModeSchema,
+  /** Why it is `login` although a Tailscale client is stored (fixed German text). */
+  tailscaleNote: z.string().max(200).nullable(),
 });
 export type OnboardingCreateResponse = z.infer<typeof onboardingCreateResponseSchema>;
 

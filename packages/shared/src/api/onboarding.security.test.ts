@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  buildBootstrapCommand,
   buildOneLiner,
   formatOnboardingCode,
   hubOriginSchema,
@@ -104,6 +105,9 @@ describe('onboarding create', () => {
       code: 'ABCD-EFGH',
       expiresAt: '2026-11-26T10:15:00.000Z',
       oneLiner: line,
+      plainOneLiner: line,
+      tailscale: 'login',
+      tailscaleNote: null,
     });
     expect(Object.keys(res)).not.toContain('token');
     expect(onboardingCreateResponseSchema.safeParse({ ...res, code: 'ABCDEFGH' }).success).toBe(
@@ -148,5 +152,76 @@ describe('onboarding exchange response', () => {
     expect(parseOnboardingEnv(`${env}HZ_EXTRA=1\n`)).toBeNull();
     expect(parseOnboardingEnv(lines.slice(1).join('\n'))).toBeNull();
     expect(parseOnboardingEnv([lines[1], lines[0], lines[2], lines[3]].join('\n'))).toBeNull();
+  });
+});
+
+describe('bootstrap command (M11b)', () => {
+  const base = {
+    hubOrigin: 'https://zentrale.tail1234.ts.net',
+    code: 'ABCD-EFGH',
+    hostname: 'oracle',
+  };
+  const KEY = ['tskey', 'auth', 'kAbC123CNTRL-0123456789abcdef'].join('-');
+
+  it('has the documented shape: one sudo sh -c, history-safe leading space', () => {
+    const cmd = buildBootstrapCommand({ ...base, authKey: KEY });
+    expect(cmd.startsWith(" sudo sh -c '")).toBe(true);
+    expect(cmd.endsWith("'")).toBe(true);
+    // Only the two wrapping single quotes: nothing can close them early.
+    expect(cmd.split("'").length).toBe(3);
+    expect(cmd).toContain(`tailscale up --auth-key=${KEY} --hostname=oracle ||`);
+    expect(cmd.split(KEY).length).toBe(2);
+    // Tailscale only when missing, join only when not connected.
+    expect(cmd).toContain(
+      'command -v tailscale >/dev/null 2>&1 || curl -fsSL https://tailscale.com/install.sh | sh;',
+    );
+    expect(cmd).toContain('tailscale status >/dev/null 2>&1 || tailscale up');
+    // *.ts.net hub: address from the netmap, https only, so DNS is not needed yet.
+    expect(cmd).toContain(
+      'ip=$(tailscale ip -4 zentrale 2>/dev/null | head -n 1); curl -fsS --proto =https ${ip:+--resolve zentrale.tail1234.ts.net:443:$ip} -o "$f" https://zentrale.tail1234.ts.net/install.sh',
+    );
+    expect(cmd).toContain('sh "$f" ABCD-EFGH; r=$?; rm -f "$f"; exit $r');
+  });
+
+  it('without a key: interactive login, no --auth-key', () => {
+    const cmd = buildBootstrapCommand({ ...base, authKey: null });
+    expect(cmd).toContain('tailscale up --hostname=oracle ||');
+    expect(cmd).not.toContain('--auth-key');
+    expect(cmd).not.toContain('tskey');
+  });
+
+  it('refuses every value that could break out of the quotes', () => {
+    const bad: Partial<Parameters<typeof buildBootstrapCommand>[0]>[] = [
+      { hubOrigin: "https://x.ts.net'; id; '" },
+      { hubOrigin: 'https://x.ts.net/$(id)' },
+      { hubOrigin: 'https://x.ts.net path' },
+      { hubOrigin: 'ftp://x.ts.net' },
+      { code: "ABCD-EFGH'" },
+      { code: 'ABCD-EFG$' },
+      { code: 'abcd-efgh' },
+      { hostname: 'Oracle' },
+      { hostname: "o';id;'" },
+      { hostname: 'a b' },
+      { authKey: "tskey-auth-abcdefgh'" },
+      { authKey: 'tskey-auth-abc$(id)defgh' },
+      { authKey: 'tskey-client-abcdefghij' },
+      { authKey: '' },
+    ];
+    for (const b of bad) {
+      expect(
+        () => buildBootstrapCommand({ ...base, authKey: null, ...b }),
+        JSON.stringify(b),
+      ).toThrow();
+    }
+  });
+
+  it('a non-ts.net hub (dev, 127.0.0.1) is fetched without --resolve', () => {
+    const cmd = buildBootstrapCommand({
+      ...base,
+      hubOrigin: 'http://127.0.0.1:8080',
+      authKey: null,
+    });
+    expect(cmd).toContain('curl -fsS -o "$f" http://127.0.0.1:8080/install.sh');
+    expect(cmd).not.toContain('--resolve');
   });
 });

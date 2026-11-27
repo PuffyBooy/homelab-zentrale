@@ -6,6 +6,9 @@ import {
   type OnboardingCreateResponse,
   type OnboardingState,
   type OnboardingStatusResponse,
+  tailscaleSettingsSchema,
+  type TailscaleSettings,
+  type TailscaleSettingsRequest,
 } from '@hz/shared';
 import type { Status } from '@hz/ui';
 import { api } from './api.js';
@@ -87,4 +90,26 @@ export function countdown(expiresAt: string, now: Date): string {
   const m = Math.floor(left / 60);
   const s = left % 60;
   return `${m}:${String(s).padStart(2, '0')}`;
+}
+
+// ---- M11b: Tailscale OAuth client for the automatic join ----------------------
+
+export const tailscaleKey = ['tailscale'] as const;
+
+export function fetchTailscale(signal?: AbortSignal): Promise<TailscaleSettings> {
+  return api('/api/tailscale', { schema: tailscaleSettingsSchema, signal });
+}
+
+/** Needs step-up; api() asks for the code and retries once. Checks right away. */
+export function saveTailscale(body: TailscaleSettingsRequest): Promise<TailscaleSettings> {
+  return api('/api/tailscale', { method: 'PUT', body, schema: tailscaleSettingsSchema });
+}
+
+export function testTailscale(): Promise<TailscaleSettings> {
+  return api('/api/tailscale/test', { method: 'POST', body: {}, schema: tailscaleSettingsSchema });
+}
+
+/** Needs step-up. */
+export function clearTailscale(): Promise<TailscaleSettings> {
+  return api('/api/tailscale', { method: 'DELETE', schema: tailscaleSettingsSchema });
 }

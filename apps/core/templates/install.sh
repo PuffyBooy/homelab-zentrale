@@ -15,7 +15,9 @@
 # and swapped for an enrollment token over the tailnet.
 #
 # What it does:
-#   1. checks root, the code format, Docker (with Compose v2), Tailscale and curl,
+#   1. checks root, the code format, the CPU, Tailscale (and the hub's name; pins it
+#      in /etc/hosts without MagicDNS), installs Docker (get.docker.com) and Compose v2
+#      if missing, refuses the docker snap unless the admin agrees to remove it,
 #   2. swaps the code for the agent settings (POST @@HZ_EXCHANGE_PATH@@),
 #   3. writes /etc/homelab-agent/agent.env (mode 0600, outside /opt/homelab so no
 #      agent action can rewrite it) and the compose file, like deploy/install-agent.sh,
@@ -68,12 +70,93 @@ printf '%s\n' "$code" | grep -Eq "$CODE_RE" || die "Der Code hat ein ungültiges
 [ "$(id -u)" -eq 0 ] || die "bitte als root ausführen (sudo)"
 
 # --- requirements -------------------------------------------------------------
-command -v curl >/dev/null 2>&1 || die "curl fehlt"
-command -v docker >/dev/null 2>&1 || die "Docker fehlt (https://docs.docker.com/engine/install/)"
-docker info >/dev/null 2>&1 || die "der Docker-Dienst läuft nicht"
-docker compose version >/dev/null 2>&1 || die "Docker Compose v2 fehlt (Paket docker-compose-plugin)"
-command -v tailscale >/dev/null 2>&1 || die "Tailscale fehlt (https://tailscale.com/download/linux)"
-tailscale status >/dev/null 2>&1 || die "Tailscale ist nicht verbunden (tailscale up)"
+info() { printf '%s\n' "$*"; }
+warn() { printf 'Achtung: %s\n' "$*" >&2; }
+# Yes/no on the terminal (the script itself may come over stdin). Default: no.
+# Without a terminal the answer is no.
+# (Only regular builtins with redirects: a failed redirect on `exec` would end sh.)
+ask() {
+  printf '%s [j/N] ' "$1" 2>/dev/null >/dev/tty || return 1
+  answer=''
+  read -r answer 2>/dev/null </dev/tty || return 1
+  case "$answer" in j | J | ja | Ja | y | Y | yes) return 0 ;; *) return 1 ;; esac
+}
+
+command -v curl >/dev/null 2>&1 || die "curl fehlt (z. B. apt-get install curl)"
+case "$(uname -m)" in
+  x86_64 | amd64 | aarch64 | arm64) ;;
+  *) die "Diese CPU ($(uname -m)) wird nicht unterstützt. Der Agent läuft auf x86_64 und arm64 (Raspberry Pi: 64-Bit-System nötig)." ;;
+esac
+
+# Tailscale: the command from "Server hinzufügen" installs and joins it first.
+command -v tailscale >/dev/null 2>&1 || die "Tailscale fehlt. Bitte den ganzen Befehl aus der Zentrale (Server hinzufügen) verwenden, der installiert Tailscale mit."
+tailscale status >/dev/null 2>&1 || die "Tailscale ist nicht verbunden. Bitte den ganzen Befehl aus der Zentrale verwenden oder 'sudo tailscale up' ausführen."
+
+# The agent reaches the hub by name. Without MagicDNS on this server (DNS not
+# accepted, e.g. a Pi-hole host with --accept-dns=false) the name is pinned in
+# /etc/hosts to the hub's Tailscale address (stable for the hub's node).
+hub_host=${HUB#*://}
+hub_host=${hub_host%%/*}
+hub_host=${hub_host%%:*}
+case "$HUB" in
+  https://*.ts.net | https://*.ts.net:*)
+    if ! getent hosts "$hub_host" >/dev/null 2>&1; then
+      hub_ip=$(tailscale ip -4 "${hub_host%%.*}" 2>/dev/null | head -n 1 || true)
+      case "$hub_ip" in
+        100.*) ;;
+        *) die "$hub_host lässt sich nicht auflösen. Ist dieser Server im selben Tailnet wie die Zentrale? (tailscale status)" ;;
+      esac
+      printf '%s %s # homelab-zentrale (MagicDNS fehlt hier)\n' "$hub_ip" "$hub_host" >>/etc/hosts
+      info "MagicDNS fehlt hier: $hub_host -> $hub_ip in /etc/hosts eingetragen."
+    fi
+    ;;
+esac
+
+# Docker. The docker snap (Ubuntu server installer) runs dockerd under AppArmor
+# confinement; then the agent (no-new-privileges) does not start. Removing the snap
+# deletes everything stored in it, so it is only done on an explicit yes.
+if command -v snap >/dev/null 2>&1 && snap list docker >/dev/null 2>&1; then
+  warn "Docker ist als Snap installiert. Damit startet der Agent nicht."
+  warn "Entfernen löscht Container, Images und Volumes im Snap-Docker."
+  if ask "Docker-Snap entfernen und Docker von docker.com installieren?"; then
+    snap remove --purge docker || die "snap remove --purge docker ist fehlgeschlagen"
+    hash -r 2>/dev/null || true
+  else
+    die "Docker-Snap bleibt. Von Hand: sudo snap remove --purge docker, dann diesen Befehl erneut ausführen."
+  fi
+fi
+if ! command -v docker >/dev/null 2>&1; then
+  info "Docker fehlt, wird installiert (get.docker.com) ..."
+  docker_installer=$(mktemp)
+  if ! curl -fsSL --proto '=https' https://get.docker.com -o "$docker_installer"; then
+    rm -f "$docker_installer"
+    die "Docker-Installer nicht erreichbar (https://get.docker.com). Docker bitte von Hand installieren: https://docs.docker.com/engine/install/"
+  fi
+  sh "$docker_installer" || { rm -f "$docker_installer"; die "Docker ließ sich nicht installieren (siehe oben)."; }
+  rm -f "$docker_installer"
+  hash -r 2>/dev/null || true
+  command -v docker >/dev/null 2>&1 || die "Docker ließ sich nicht installieren (siehe oben)."
+fi
+if ! docker info >/dev/null 2>&1; then
+  systemctl enable --now docker >/dev/null 2>&1 || true
+  i=0
+  until docker info >/dev/null 2>&1; do
+    i=$((i + 1))
+    [ "$i" -lt 15 ] || die "Der Docker-Dienst läuft nicht (sudo systemctl status docker)."
+    sleep 2
+  done
+fi
+if ! docker compose version >/dev/null 2>&1; then
+  info "Docker Compose v2 fehlt, wird installiert ..."
+  if command -v apt-get >/dev/null 2>&1; then
+    DEBIAN_FRONTEND=noninteractive apt-get update -qq >/dev/null 2>&1 || true
+    DEBIAN_FRONTEND=noninteractive apt-get install -y -qq docker-compose-plugin >/dev/null 2>&1 \
+      || DEBIAN_FRONTEND=noninteractive apt-get install -y -qq docker-compose-v2 >/dev/null 2>&1 || true
+  elif command -v dnf >/dev/null 2>&1; then
+    dnf install -y -q docker-compose-plugin >/dev/null 2>&1 || true
+  fi
+  docker compose version >/dev/null 2>&1 || die "Docker Compose v2 fehlt (Paket docker-compose-plugin)."
+fi
 
 if [ -f "$CONF_DIR/agent.env" ] || docker inspect "$CONTAINER" >/dev/null 2>&1; then
   die "Auf diesem Server ist schon ein Agent eingerichtet. Zum Neu-Einrichten erst 'cd $CONF_DIR && docker compose down' ausführen und $CONF_DIR/agent.env löschen."
@@ -106,6 +189,8 @@ case "$HUB" in
 esac
 code=$(printf '%s' "$code" | tr 'abcdefghijklmnopqrstuvwxyz' 'ABCDEFGHIJKLMNOPQRSTUVWXYZ')
 # The code goes over stdin, so it is not in curl's arguments (ps).
+curl -fsS --proto "$proto" --max-time 15 -o /dev/null "$HUB/api/health" \
+  || die "Die Zentrale ist nicht erreichbar ($HUB). Läuft sie, und ist dieser Server im selben Tailnet?"
 status=$(printf '{"code":"%s"}' "$code" | curl -sS --proto "$proto" --max-time 30 \
   -o "$resp" -w '%{http_code}' -X POST -H 'Content-Type: application/json' \
   --data-binary @- "$HUB$EXCHANGE_PATH") || die "Die Zentrale ist nicht erreichbar ($HUB)."

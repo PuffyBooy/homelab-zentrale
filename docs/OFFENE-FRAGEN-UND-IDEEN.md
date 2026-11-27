@@ -58,6 +58,13 @@ Alles hier braucht deine Zugänge oder ist nicht rückgängig zu machen. Bis dah
 
     In der Zentrale unter Einstellungen → Module „Cloud-Server“ einschalten (TOTP), dann auf der Seite „Cloud“ Tenant-ID, App-ID, Secret, Abo-ID, Ressourcengruppe `homelab-zentrale`, Region und Tailscale-Key eintragen und „Verbindung testen“. Danach beim Anlegen eines Gameservers als Ziel „Neuer Azure-Server“ wählen. Hinweis: Das Startguthaben eines Azure-Free-Kontos gilt 30 Tage; danach muss das Konto auf „Pay-As-You-Go“ umgestellt werden, sonst schaltet Azure die VMs ab. Die Free-Tier-Größe `B2ats_v2` (1 GB RAM, 750 h/Monat für 12 Monate) reicht nur für sehr kleine Spiele.
 
+28. **Server mit einem Befehl anbinden, ohne Login-Klick (ab M11b):** Einmalig in der Tailscale-Konsole (login.tailscale.com/admin):
+    - Access controls: in `tagOwners` den Eintrag `"tag:homelab-server": ["autogroup:admin"]` ergänzen und speichern (die Zentrale zeigt das Snippet unter Einstellungen → Tailscale). Wenn du eigene ACLs hast: `tag:homelab-server` muss die Zentrale auf Port 443 erreichen.
+    - Settings → OAuth clients (neuere Konsole: Trust credentials) → „Generate OAuth client“: Scope **Auth Keys** mit **Write**, Tag `tag:homelab-server` auswählen, erzeugen. Client-ID und Secret (`tskey-client-…`, nur einmal sichtbar) kopieren.
+    - In der Zentrale unter Einstellungen → Tailscale Client-ID und Secret eintragen, Speichern (fragt nach dem TOTP-Code). Status muss „bereit“ zeigen.
+
+    Danach unter Server → „Server hinzufügen“ den angezeigten Befehl auf dem neuen Server einfügen. Er installiert Tailscale und Docker, meldet den Server mit einem Einweg-Schlüssel an (gilt 15 Min) und startet den Agent. Ohne diesen Schritt geht es auch: dann zeigt der Befehl einen Login-Link, den du einmal öffnest.
+
 ## Entschieden (26.11.2026)
 
 - Ein PR pro Meilenstein auf dem festen Arbeitsbranch bleibt so.

@@ -52,6 +52,7 @@ export async function makeApp(
     features?: AppDeps['features'];
     discordFetch?: AppDeps['discordFetch'];
     cloudFetch?: AppDeps['cloudFetch'];
+    tailscaleFetch?: AppDeps['tailscaleFetch'];
     haOptions?: AppDeps['haOptions'];
     consoleOptions?: AppDeps['consoleOptions'];
     /**
@@ -96,6 +97,7 @@ export async function makeApp(
     ...(opts.features ? { features: opts.features } : {}),
     discordFetch: opts.discordFetch ?? (() => Promise.reject(new Error('no network in tests'))),
     cloudFetch: opts.cloudFetch ?? (() => Promise.reject(new Error('no network in tests'))),
+    tailscaleFetch: opts.tailscaleFetch ?? (() => Promise.reject(new Error('no network in tests'))),
     pushTransport: opts.pushTransport ?? {
       send: () => Promise.reject(new Error('no network in tests')),
     },

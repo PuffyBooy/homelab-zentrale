@@ -48,7 +48,7 @@ Scheitert `apt update` an einem Ubuntu-Länderspiegel (z. B. `at.archive.ubuntu.
 
 Bei lokalem Build vor `update` den Checkout aktualisieren (`git pull`); das Skript baut dann neu. Mit Image aus GHCR reicht `update`.
 
-Agents für weitere Server (und für den Server der Zentrale selbst) kommen über die Zentrale: **Server hinzufügen** zeigt einen Einzeiler mit Einmal-Code.
+Agents für weitere Server (und für den Server der Zentrale selbst) kommen über die Zentrale: **Server hinzufügen** zeigt einen Befehl mit Einmal-Code. Er installiert auf dem neuen Server Tailscale und Docker, falls sie fehlen, meldet ihn im Tailnet an und startet den Agent. Ganz ohne Login-Klick geht das mit einem Tailscale-OAuth-Client unter **Einstellungen → Tailscale** (Anleitung steht dort).
 
 ## Ohne Fragen (Automatisierung)
 

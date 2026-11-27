@@ -1,4 +1,5 @@
 import type { OnboardingCreateResponse, PortAuditResponse } from '@hz/shared';
+import { buildBootstrapCommand } from '@hz/shared';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { ReactElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
@@ -28,7 +29,15 @@ const res: OnboardingCreateResponse = {
   name: 'pi-garage',
   code: 'ABCD-EFGH',
   expiresAt: '2026-11-26T22:19:00.000Z',
-  oneLiner: 'curl -fsSL https://hub.tail1234.ts.net/install.sh | sudo sh -s -- ABCD-EFGH',
+  oneLiner: buildBootstrapCommand({
+    hubOrigin: 'https://hub.tail1234.ts.net',
+    code: 'ABCD-EFGH',
+    hostname: 'pi-garage',
+    authKey: null,
+  }),
+  plainOneLiner: 'curl -fsSL https://hub.tail1234.ts.net/install.sh | sudo sh -s -- ABCD-EFGH',
+  tailscale: 'login',
+  tailscaleNote: null,
 };
 
 function step(
@@ -58,9 +67,10 @@ describe('Server hinzufügen: code step', () => {
     expect(out).toContain('hz-status-busy');
     expect(out).toContain('>ABCD-EFGH<');
     expect(out).toContain('noch 14:32 · gilt einmal, bis 23:19');
-    expect(out).toContain('sudo sh -s -- ABCD-EFGH');
+    expect(out).toContain(' sudo sh -c &#x27;command -v tailscale');
+    expect(out).toContain('sh &quot;$f&quot; ABCD-EFGH');
     expect(out).toContain('Kopieren');
-    expect(out).toContain('Braucht Docker und Tailscale am neuen Server.');
+    expect(out).toContain('zeigt dabei einen Login-Link');
     expect(out).toContain('>Abbrechen<');
     // No main action while waiting.
     expect(out).not.toContain('hz-btn-primary');

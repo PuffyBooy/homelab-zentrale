@@ -6,23 +6,34 @@ import {
   ONBOARDING_INVALID_MESSAGE,
   onboardingCreateRequestSchema,
   onboardingCreateResponseSchema,
+  type OnboardingCreateResponse,
   onboardingExchangeRequestSchema,
   onboardingExchangeToEnv,
   onboardingIdParamsSchema,
   onboardingStatusResponseSchema,
   okResponseSchema,
+  ONBOARDING_TTL_MINUTES,
+  tailscaleSettingsRequestSchema,
+  tailscaleSettingsSchema,
 } from '@hz/shared';
 import { requireStepUp } from '../auth/index.js';
 import type { Clock } from '../clock.js';
 import { writeAudit } from '../db/audit.js';
 import type { Db } from '../db/index.js';
 import { HttpError, sendError } from '../http/errors.js';
-import { ExchangeLimiter, OnboardingError, type OnboardingService } from './onboarding.js';
+import {
+  ExchangeLimiter,
+  OnboardingError,
+  withAuthKey,
+  type OnboardingService,
+} from './onboarding.js';
+import { TailscaleError, type TailscaleJoin } from './tailscale.js';
 
 export interface OnboardingRoutesOptions {
   db: Db;
   now: Clock;
   onboarding: OnboardingService;
+  tailscale: TailscaleJoin;
 }
 
 const NOT_CONFIGURED_MESSAGE =
@@ -36,10 +47,13 @@ const TOO_MANY_MESSAGE = 'Zu viele offene Codes. Einen davon abbrechen oder abla
 export const onboardingRoutes: FastifyPluginAsync<OnboardingRoutesOptions> = async (app, o) => {
   const stepUp = requireStepUp(o.now);
   const limiter = new ExchangeLimiter(o.now);
+  /** Onboarding id -> id of its unused Tailscale key (revoked on cancel; in memory). */
+  const pendingKeys = new Map<string, string>();
 
   app.post('/servers/onboarding', { preHandler: stepUp }, async (request, reply) => {
     const body = onboardingCreateRequestSchema.parse(request.body);
-    let created;
+    if (pendingKeys.size > 100) pendingKeys.clear();
+    let created: OnboardingCreateResponse;
     try {
       created = o.onboarding.create(body.name, body.location);
     } catch (err) {
@@ -49,13 +63,49 @@ export const onboardingRoutes: FastifyPluginAsync<OnboardingRoutesOptions> = asy
         throw new HttpError(409, 'conflict', undefined, TOO_MANY_MESSAGE);
       throw new HttpError(409, 'conflict', undefined, NOT_CONFIGURED_MESSAGE);
     }
+    // M11b: a single-use Tailscale auth key for exactly this onboarding (never stored).
+    const hub = o.onboarding.hub();
+    if (hub && o.tailscale.configured()) {
+      try {
+        const key = await o.tailscale.mint(body.name, ONBOARDING_TTL_MINUTES * 60);
+        if (key) {
+          created = withAuthKey(created, hub.origin, key.key);
+          pendingKeys.set(created.id, key.id);
+        }
+      } catch (err) {
+        if (!(err instanceof TailscaleError)) throw err;
+        created = { ...created, tailscaleNote: `Tailscale-Schlüssel ging nicht: ${err.text}` };
+      }
+    }
     writeAudit(o.db, o.now(), {
       actor: 'admin',
       action: 'server.onboarding_created',
       target: created.id,
-      details: { name: body.name, location: body.location },
+      details: { name: body.name, location: body.location, tailscale: created.tailscale },
     });
     return reply.code(201).send(onboardingCreateResponseSchema.parse(created));
+  });
+
+  app.get('/tailscale', async () => tailscaleSettingsSchema.parse(o.tailscale.view()));
+
+  app.put('/tailscale', { preHandler: stepUp }, async (request) => {
+    const body = tailscaleSettingsRequestSchema.parse(request.body);
+    const fields = o.tailscale.update(body);
+    writeAudit(o.db, o.now(), {
+      actor: 'admin',
+      action: 'tailscale.settings_changed',
+      details: { fields },
+    });
+    // Check right away, so the tile shows whether minting works.
+    return tailscaleSettingsSchema.parse(await o.tailscale.test());
+  });
+
+  app.post('/tailscale/test', async () => tailscaleSettingsSchema.parse(await o.tailscale.test()));
+
+  app.delete('/tailscale', { preHandler: stepUp }, async () => {
+    o.tailscale.clear();
+    writeAudit(o.db, o.now(), { actor: 'admin', action: 'tailscale.settings_cleared' });
+    return tailscaleSettingsSchema.parse(o.tailscale.view());
   });
 
   app.get('/servers/onboarding/:id', async (request) => {
@@ -70,6 +120,9 @@ export const onboardingRoutes: FastifyPluginAsync<OnboardingRoutesOptions> = asy
     const r = o.onboarding.cancel(id);
     if (r === null) throw new HttpError(404, 'not_found');
     if (r === 'connected') throw new HttpError(409, 'conflict');
+    const keyId = pendingKeys.get(id);
+    pendingKeys.delete(id);
+    if (keyId && r === 'waiting') void o.tailscale.revoke(keyId);
     if (r === 'waiting' || r === 'installing') {
       writeAudit(o.db, o.now(), {
         actor: 'admin',
