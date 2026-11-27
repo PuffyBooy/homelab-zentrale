@@ -345,6 +345,10 @@ check_docker_snap() {
   info "Achtung: Entfernen löscht Container, Images und Volumes, die im Snap-Docker liegen."
   if ! confirm "Docker-Snap jetzt entfernen (snap remove --purge docker)?" n; then
     info "Snap bleibt. Von Hand: sudo snap remove --purge docker && sudo systemctl restart docker.socket docker"
+    # The snap's own CLI is confined too and may not read /etc/homelab-zentrale.
+    case "$(command -v docker)" in
+      /snap/*) die "der docker-Befehl ist der Snap ($(command -v docker)); damit geht es nicht. Snap entfernen (siehe oben) oder docker-ce installieren" ;;
+    esac
     return 0
   fi
   snap remove --purge docker || die "snap remove --purge docker ist fehlgeschlagen"

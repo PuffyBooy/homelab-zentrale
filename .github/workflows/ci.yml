@@ -289,9 +289,18 @@ jobs:
           exit 0
           EOF
           chmod 0755 /tmp/hz-stub/tailscale
+      - name: The snap's own docker CLI is refused with a clear message
+        run: |
+          if sudo env "PATH=/tmp/hz-stub:/snap/bin:$PATH" ./deploy/install.sh --yes --timezone UTC > snapcli.log 2>&1; then
+            echo "installer accepted the snap CLI"; exit 1
+          fi
+          cat snapcli.log
+          grep -q 'der docker-Befehl ist der Snap' snapcli.log
       - name: Install explains the cause and starts the core
         run: |
-          sudo env "PATH=/tmp/hz-stub:$PATH" "DOCKER_HOST=$DOCKER_HOST" HZ_HEALTH_TIMEOUT=120 \
+          # docker-ce's CLI and compose plugin (/usr/bin) against the snap daemon.
+          sudo env "PATH=/tmp/hz-stub:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
+            "DOCKER_HOST=$DOCKER_HOST" HZ_HEALTH_TIMEOUT=120 \
             ./deploy/install.sh --yes --image homelab-zentrale/core:local --timezone UTC > install.log 2>&1
           grep -q 'operation not permitted' install.log
           grep -q 'als Snap installiert' install.log
