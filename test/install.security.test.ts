@@ -26,6 +26,14 @@ case "$1" in
   --version) echo "Docker version 29.0.0, build stub"; exit 0 ;;
   volume) [[ "\${STUB_VOLUME:-0}" == 1 ]] && exit 0 || exit 1 ;;
   inspect) echo "2026-11-26T10:00:00Z"; exit 0 ;;
+  run)
+    # Hardening probe: a host whose dockerd is AppArmor-confined (snap, LXC) refuses
+    # no-new-privileges with exactly this error.
+    if [[ "\${STUB_RUN_FAIL:-0}" == 1 ]]; then echo "exec format error" >&2; exit 1; fi
+    if [[ "\${STUB_NNP_FAIL:-0}" == 1 && "$*" == *no-new-privileges* ]]; then
+      echo "exec /usr/local/bin/docker-entrypoint.sh: operation not permitted" >&2; exit 1
+    fi
+    exit 0 ;;
   compose)
     shift
     case "$1" in
@@ -252,6 +260,79 @@ describe('deploy/install.sh (core)', () => {
     expect(res.stdout + res.stderr).not.toContain(old);
   });
 
+  it('probes the image with the compose hardening before starting it', () => {
+    const r = run(['--yes', '--timezone', 'UTC']);
+    expect(r.code, r.out).toBe(0);
+    const probe = r.calls.split('\n').find((l) => l.startsWith('docker run '));
+    expect(probe).toBeDefined();
+    for (const flag of ['--rm', '--read-only', '--cap-drop ALL', '--network none']) {
+      expect(probe).toContain(flag);
+    }
+    expect(probe).toContain('--security-opt no-new-privileges:true');
+    expect(probe).toContain('ghcr.io/puffybooy/homelab-core:latest');
+    // Probe before start, and the hardening stays in the installed compose file.
+    expect(r.calls.indexOf('docker run ')).toBeLessThan(r.calls.indexOf('compose up'));
+    expect(readFileSync(join(env.conf, 'docker-compose.yml'), 'utf8')).toContain(
+      '      - no-new-privileges:true',
+    );
+  });
+
+  it('host refuses no-new-privileges (confined dockerd): explains, drops only that option', () => {
+    const r = run(['--yes', '--timezone', 'UTC'], { STUB_NNP_FAIL: '1' });
+    expect(r.code, r.out).toBe(0);
+    expect(r.out).toContain('operation not permitted');
+    expect(r.out).toContain('ohne no-new-privileges');
+    const compose = readFileSync(join(env.conf, 'docker-compose.yml'), 'utf8');
+    expect(compose).not.toContain('no-new-privileges');
+    expect(compose).not.toContain('security_opt');
+    // The rest of the hardening is untouched.
+    expect(compose).toMatch(/read_only: true\n/);
+    expect(compose).toMatch(/cap_drop:\n\s+- ALL\n/);
+    expect(compose).toContain('HZ_HOST: 127.0.0.1');
+    expect(r.calls).toContain('compose up -d --no-build --force-recreate core');
+
+    // Once the host is fixed, an update restores no-new-privileges.
+    const u = run(['update', '--yes'], { STUB_ADMIN: '1' });
+    expect(u.code, u.out).toBe(0);
+    expect(readFileSync(join(env.conf, 'docker-compose.yml'), 'utf8')).toContain(
+      '      - no-new-privileges:true',
+    );
+  });
+
+  it('without consent the hardening is never weakened and nothing starts', () => {
+    // No terminal, no --yes: confirm says no. Prepare the config first.
+    expect(run(['--yes', '--timezone', 'UTC']).code).toBe(0);
+    writeFileSync(env.log, '');
+    const r = run(['update'], { STUB_NNP_FAIL: '1' });
+    expect(r.code).not.toBe(0);
+    expect(r.out).toContain('abgebrochen');
+    expect(r.calls).not.toContain('compose up');
+    expect(readFileSync(join(env.conf, 'docker-compose.yml'), 'utf8')).toContain(
+      'no-new-privileges:true',
+    );
+  });
+
+  it('docker snap: explained, never removed without an explicit yes', () => {
+    writeFileSync(
+      join(env.bin, 'snap'),
+      `#!/usr/bin/env bash\nprintf 'snap %s\\n' "$*" >>"$STUB_LOG"\n[[ "$1 $2" == "list docker" ]] && exit 0\nexit 1\n`,
+    );
+    chmodSync(join(env.bin, 'snap'), 0o755);
+    const r = run(['--yes', '--timezone', 'UTC'], { STUB_NNP_FAIL: '1' });
+    expect(r.code, r.out).toBe(0);
+    expect(r.out).toContain('als Snap installiert');
+    expect(r.out).toContain('sudo snap remove --purge docker');
+    // --yes takes the default, and the default never deletes the snap's data.
+    expect(r.calls).not.toContain('snap remove');
+  });
+
+  it('an image that does not start at all is a hard error, not a weaker compose file', () => {
+    const r = run(['--yes', '--timezone', 'UTC'], { STUB_RUN_FAIL: '1' });
+    expect(r.code).not.toBe(0);
+    expect(r.out).toContain('startet auf diesem Server gar nicht');
+    expect(r.calls).not.toContain('compose up');
+  });
+
   it('rejects secrets as arguments, non-ts.net base URLs and malformed modules', () => {
     for (const args of [
       ['--token', 'x'],
@@ -317,6 +398,22 @@ describe('deploy/install.sh share', () => {
     expect(r.calls).not.toContain(token);
     expect(readFileSync(join(env.share, 'docker-compose.yml'), 'utf8')).toContain(file);
     expect(r.calls).toContain('docker compose up -d --no-build --force-recreate share');
+  });
+
+  it('gateway: same hardening probe and fallback', () => {
+    const args = ['share', '--yes', '--core-url', 'https://heimserver.tail1234.ts.net'];
+    const ok = run(args, { HZ_SHARE_GATEWAY_TOKEN: token });
+    expect(ok.code, ok.out).toBe(0);
+    expect(ok.calls).toMatch(/docker run .*no-new-privileges:true .*homelab-share:latest/);
+    expect(readFileSync(join(env.share, 'docker-compose.yml'), 'utf8')).toContain(
+      'no-new-privileges:true',
+    );
+    const r = run(args, { HZ_SHARE_GATEWAY_TOKEN: token, STUB_NNP_FAIL: '1' });
+    expect(r.code, r.out).toBe(0);
+    const compose = readFileSync(join(env.share, 'docker-compose.yml'), 'utf8');
+    expect(compose).not.toContain('no-new-privileges');
+    expect(compose).toMatch(/cap_drop:\n\s+- ALL\n/);
+    expect(r.out).toContain('install.sh share update');
   });
 
   it('rejects a malformed token, a public core URL and the token as argument', () => {

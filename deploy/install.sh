@@ -315,6 +315,7 @@ need_docker() {
     install_docker
   fi
   docker info >/dev/null 2>&1 || die "der Docker-Dienst läuft nicht (systemctl start docker)"
+  check_docker_snap
   if ! docker compose version >/dev/null 2>&1; then
     warn "Docker Compose v2 fehlt."
     if [[ "$(os_id)" != unknown ]] && confirm "Paket docker-compose-plugin installieren?" j; then
@@ -323,6 +324,38 @@ need_docker() {
     docker compose version >/dev/null 2>&1 || die "Docker Compose v2 fehlt (Paket docker-compose-plugin)"
   fi
   ok "$(docker --version)"
+}
+
+docker_snap_installed() { command -v snap >/dev/null 2>&1 && snap list docker >/dev/null 2>&1; }
+docker_ce_installed() {
+  [[ "$(dpkg-query -W -f='${Status}' docker-ce 2>/dev/null || true)" == "install ok installed" ]]
+}
+
+# The docker snap (offered by the Ubuntu server installer) runs dockerd under AppArmor
+# confinement; then no container starts with no-new-privileges (see check_hardening).
+# Removing it deletes everything stored in the snap, so it is never the default.
+check_docker_snap() {
+  docker_snap_installed || return 0
+  warn "Docker ist als Snap installiert. Damit starten gehärtete Container (no-new-privileges) nicht."
+  if docker_ce_installed; then
+    info "docker-ce (download.docker.com) ist zusätzlich installiert. Empfohlen: nur docker-ce behalten."
+  else
+    info "Empfohlen: Snap entfernen und Docker aus download.docker.com installieren."
+  fi
+  info "Achtung: Entfernen löscht Container, Images und Volumes, die im Snap-Docker liegen."
+  if ! confirm "Docker-Snap jetzt entfernen (snap remove --purge docker)?" n; then
+    info "Snap bleibt. Von Hand: sudo snap remove --purge docker && sudo systemctl restart docker.socket docker"
+    return 0
+  fi
+  snap remove --purge docker || die "snap remove --purge docker ist fehlgeschlagen"
+  hash -r
+  if docker_ce_installed; then
+    systemctl restart docker.socket docker.service || die "docker-ce ließ sich nicht starten (systemctl status docker)"
+  else
+    install_docker
+  fi
+  docker info >/dev/null 2>&1 || die "der Docker-Dienst läuft nicht (systemctl start docker)"
+  ok "Docker-Snap entfernt, docker-ce läuft"
 }
 
 # tailscale status --json | <field of Self>
@@ -420,6 +453,73 @@ wait_health() { # wait_health <url> <seconds>
 }
 
 compose() { (cd "$CONF_DIR" && docker compose "$@"); }
+
+# --- container hardening probe -----------------------------------------------
+# Core and share gateway run with no-new-privileges. On some hosts Docker cannot
+# start any container with it: when dockerd itself runs under an AppArmor profile
+# (Docker as a snap, Ubuntu inside an LXC container, e.g. on Proxmox), the kernel
+# refuses the switch to the container's profile under no_new_privs and every start
+# ends in "exec /usr/local/bin/docker-entrypoint.sh: operation not permitted".
+# The probe runs the image once with the same hardening as the compose file, before
+# compose starts it, so such a host gets a clear diagnosis instead of a restart loop.
+
+# probe_image <image> [extra docker run args]: the image's default entrypoint, as its user.
+probe_image() {
+  local img="$1"
+  shift
+  docker run --rm --pull never --network none --read-only --tmpfs /tmp --cap-drop ALL \
+    --label hz.probe=1 "$@" "$img" node -e 'process.exit(0)'
+}
+
+# Why no-new-privileges fails here, as far as the host tells.
+explain_nnp() {
+  local virt="" pid label=""
+  if command -v snap >/dev/null 2>&1 && snap list docker >/dev/null 2>&1; then
+    info "Ursache: Docker ist zusätzlich als Snap installiert und läuft eingesperrt (AppArmor)."
+    info "Besser: Snap entfernen und nur docker-ce nutzen:"
+    info "  sudo snap remove --purge docker && sudo systemctl restart docker"
+    info "Danach dieses Skript erneut starten, dann bleibt no-new-privileges an."
+  fi
+  if command -v systemd-detect-virt >/dev/null 2>&1; then
+    virt="$(systemd-detect-virt --container 2>/dev/null || true)"
+  fi
+  if [[ -n "$virt" && "$virt" != none ]]; then
+    info "Ursache: dieser Server läuft selbst in einem Container ($virt, z. B. Proxmox-LXC)."
+    info "Dort lässt der Kernel no-new-privileges für Docker-Container oft nicht zu."
+  fi
+  pid="$(pidof dockerd 2>/dev/null | awk '{print $1}' || true)"
+  if [[ -n "$pid" && -r "/proc/$pid/attr/current" ]]; then
+    label="$(tr -d '\0' <"/proc/$pid/attr/current" 2>/dev/null || true)"
+    if [[ -n "$label" && "$label" != unconfined ]]; then
+      info "dockerd läuft mit dem AppArmor-Profil: $label"
+    fi
+  fi
+}
+
+# check_hardening <image> <compose file> <name> [subcommand]: keep no-new-privileges
+# when the host allows it; otherwise explain and (with consent) drop only that option.
+check_hardening() {
+  local img="$1" file="$2" name="$3" sub="${4:-}" err
+  step "Härtung prüfen ($name)"
+  if err="$(probe_image "$img" --security-opt no-new-privileges:true 2>&1)"; then
+    ok "$name startet schreibgeschützt, ohne Capabilities und mit no-new-privileges"
+    return 0
+  fi
+  if ! probe_image "$img" >/dev/null 2>&1; then
+    printf '%s\n' "$err" | tail -n 5 >&2
+    die "$name startet auf diesem Server gar nicht (Ausgabe oben). Prüfe: docker run --rm $img node -v"
+  fi
+  warn "$name startet hier nicht mit no-new-privileges:"
+  printf '%s\n' "$err" | tail -n 2 | sed 's/^/      /' >&2
+  explain_nnp
+  info "Ohne no-new-privileges bleibt der Rest der Härtung: eigener Benutzer (node),"
+  info "keine Capabilities, schreibgeschütztes Dateisystem, nur 127.0.0.1."
+  confirm "$name ohne no-new-privileges starten?" j ||
+    die "abgebrochen. Ursache beheben (siehe oben) und erneut starten"
+  sed -i '/^    security_opt:$/{N;/\n      - no-new-privileges:true$/d}' "$file"
+  if grep -q 'no-new-privileges' "$file"; then die "no-new-privileges ließ sich nicht aus $file entfernen"; fi
+  warn "$name läuft ohne no-new-privileges. Nach behobener Ursache: sudo $0${sub:+ $sub} update"
+}
 
 # --- core: install ------------------------------------------------------------
 write_core_compose() {
@@ -558,6 +658,7 @@ start_core() {
     info "Lade $image ..."
     compose pull core || die "docker pull ist fehlgeschlagen (Netz? Bei privaten Packages vorher docker login ghcr.io)"
   fi
+  check_hardening "$image" "$CORE_COMPOSE" Core
   started_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   compose up -d --no-build --force-recreate core
   step "Health-Check"
@@ -775,6 +876,7 @@ share_install() {
 
   step "Starten"
   if [[ "$simage" != "$SHARE_LOCAL_IMAGE" ]]; then share_compose pull share; fi
+  check_hardening "$simage" "$SHARE_COMPOSE" Gateway share
   share_compose up -d --no-build --force-recreate share
   local probe code="" i
   probe="http://127.0.0.1:8090/s/$(printf 'a%.0s' {1..43})"

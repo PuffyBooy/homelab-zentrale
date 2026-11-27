@@ -72,6 +72,19 @@ Damit Freunde ohne Tailscale einen Gameserver über einen öffentlichen Namen st
 
 `share update`, `share status` und `share uninstall` gibt es auch.
 
+## Wenn der Core nicht startet
+
+**`exec /usr/local/bin/docker-entrypoint.sh: operation not permitted` in Schleife:** Docker läuft hier selbst eingesperrt unter AppArmor, meistens weil der Ubuntu-Server-Installer Docker als **Snap** mitinstalliert hat (oder der Server ist ein LXC-Container, z. B. auf Proxmox). Dann startet kein Container mit `no-new-privileges`. Das Skript prüft das vor dem Start („Härtung prüfen“) und erklärt die Ursache. Beheben:
+
+```bash
+snap list docker                       # zeigt es "docker", ist es der Snap
+sudo snap remove --purge docker        # löscht alles, was im Snap-Docker liegt
+sudo systemctl restart docker.socket docker
+sudo ./deploy/install.sh               # Schlüssel und Einstellungen bleiben
+```
+
+Den Snap entfernt das Skript nur nach ausdrücklichem „j“, nie mit `--yes`. Lässt sich die Ursache nicht beheben (LXC), startet das Skript nach Rückfrage ohne `no-new-privileges`; Benutzer `node`, keine Capabilities, schreibgeschütztes Dateisystem und `127.0.0.1` bleiben. Jedes `update` prüft erneut und schaltet die Option wieder ein, sobald der Host es erlaubt.
+
 ## Was das Skript nie tut
 
 - `tailscale funnel` einschalten, eine Portweiterleitung anlegen oder den Core auf etwas anderes als `127.0.0.1` binden.
