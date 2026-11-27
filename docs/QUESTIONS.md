@@ -278,3 +278,7 @@ Agents tragen hier Fragen ein, wenn die Spezifikation fehlt oder sich widerspric
 - Budget aufgebraucht: Auch ein Start eines Spiels durch den Admin auf der Gameserver-Seite wird abgelehnt (`over_budget`), nicht nur automatische Starts. Weiter geht es nur über „Starten“ auf der Seite Cloud mit ausdrücklicher Bestätigung. Annahme: sicherste Variante, weil jeder Start Geld kostet.
 - Kosten gelöschter Cloud-Server fallen mit dem Löschen aus der Monatsschätzung (die echte Azure-Rechnung zählt weiter).
 - Das gemeinsame VNet `hz-vnet-<region>` bleibt nach dem letzten Löschen stehen (kostet nichts).
+
+## Installer: Docker-Snap und no-new-privileges
+- Core und Gateway starten auf Hosts mit eingesperrtem dockerd (Docker-Snap, LXC) nicht mit `no-new-privileges`. Annahme: `--yes` schwächt nie ab; abschwächen nur mit „j“ oder `--allow-no-nnp`, und nur beim bekannten Fehler „operation not permitted“. Den Snap entfernt das Skript nur mit „j“, weil `--purge` dessen Daten löscht.
+- Offen: Agent, Update-Helfer und Trivy-Scan nutzen ebenfalls `no-new-privileges` und hätten auf solchen Hosts dasselbe Problem. `install-agent.sh` prüft das noch nicht; Empfehlung bleibt, den Snap zu entfernen.

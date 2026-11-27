@@ -22,6 +22,8 @@
 #   --domain <name>        with share: public DDNS name for Caddy (e.g. spiel.example.duckdns.org)
 #   --core-url <url>       with share: https://<core>.ts.net
 #   --token-stdin          with share: read the gateway token from stdin
+#   --allow-no-nnp         start without no-new-privileges where the host refuses it
+#                          (docker snap, LXC); asked interactively, never assumed by --yes
 #
 # Secrets: the gateway token is never accepted as an argument (shell history, `ps`):
 # use HZ_SHARE_GATEWAY_TOKEN, --token-stdin or the hidden prompt. A Tailscale auth key
@@ -98,6 +100,7 @@ purge=0
 domain=""
 core_url_arg=""
 token_stdin=0
+allow_no_nnp=0
 
 need_value() { [[ $# -ge 2 && -n "$2" ]] || die "$1 braucht einen Wert"; }
 
@@ -115,6 +118,7 @@ while [[ $# -gt 0 ]]; do
     --domain) need_value "$@"; domain="$2"; shift 2 ;;
     --core-url) need_value "$@"; core_url_arg="$2"; shift 2 ;;
     --token-stdin) token_stdin=1; shift ;;
+    --allow-no-nnp) allow_no_nnp=1; shift ;;
     --token | --token=* | --auth-key | --auth-key=* | --secret-key | --secret-key=*)
       die "Secrets nie als Argument übergeben (Shell-History, ps), siehe --help" ;;
     -h | --help) usage 0 ;;
@@ -513,14 +517,30 @@ check_hardening() {
     printf '%s\n' "$err" | tail -n 5 >&2
     die "$name startet auf diesem Server gar nicht (Ausgabe oben). Prüfe: docker run --rm $img node -v"
   fi
+  # Only the known refusal (AppArmor under no_new_privs) weakens anything.
+  if ! grep -q 'operation not permitted' <<<"$err"; then
+    printf '%s\n' "$err" | tail -n 5 >&2
+    die "$name startet mit no-new-privileges nicht (Ausgabe oben), aus unbekanntem Grund"
+  fi
   warn "$name startet hier nicht mit no-new-privileges:"
   printf '%s\n' "$err" | tail -n 2 | sed 's/^/      /' >&2
   explain_nnp
   info "Ohne no-new-privileges bleibt der Rest der Härtung: eigener Benutzer (node),"
   info "keine Capabilities, schreibgeschütztes Dateisystem, nur 127.0.0.1."
-  confirm "$name ohne no-new-privileges starten?" j ||
-    die "abgebrochen. Ursache beheben (siehe oben) und erneut starten"
-  sed -i '/^    security_opt:$/{N;/\n      - no-new-privileges:true$/d}' "$file"
+  if [[ $allow_no_nnp -ne 1 ]] && ! confirm "$name ohne no-new-privileges starten?" n; then
+    die "abgebrochen. Ursache beheben (siehe oben) oder bewusst mit --allow-no-nnp starten"
+  fi
+  local tmp
+  tmp="$(mktemp "$file.XXXXXX")"
+  # Drop only that entry; drop the key too when nothing is left under it.
+  awk '
+    /^      - no-new-privileges:true$/ { next }
+    held != "" { if ($0 !~ /^      - /) { held = ""; print; next } print held; held = "" }
+    /^    security_opt:$/ { held = $0; next }
+    { print }
+  ' "$file" >"$tmp"
+  chmod 0644 "$tmp"
+  mv -f "$tmp" "$file"
   if grep -q 'no-new-privileges' "$file"; then die "no-new-privileges ließ sich nicht aus $file entfernen"; fi
   warn "$name läuft ohne no-new-privileges. Nach behobener Ursache: sudo $0${sub:+ $sub} update"
 }

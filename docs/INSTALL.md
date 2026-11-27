@@ -83,7 +83,7 @@ sudo systemctl restart docker.socket docker
 sudo ./deploy/install.sh               # Schlüssel und Einstellungen bleiben
 ```
 
-Den Snap entfernt das Skript nur nach ausdrücklichem „j“, nie mit `--yes`. Lässt sich die Ursache nicht beheben (LXC), startet das Skript nach Rückfrage ohne `no-new-privileges`; Benutzer `node`, keine Capabilities, schreibgeschütztes Dateisystem und `127.0.0.1` bleiben. Jedes `update` prüft erneut und schaltet die Option wieder ein, sobald der Host es erlaubt.
+Den Snap entfernt das Skript nur nach ausdrücklichem „j“, nie mit `--yes`. `--purge` löscht dabei alles im Snap-Docker, auch Volumes anderer Container (z. B. eines Agents). Lässt sich die Ursache nicht beheben (LXC), startet das Skript ohne `no-new-privileges`, aber nur nach ausdrücklichem „j“ oder mit `--allow-no-nnp` (`--yes` allein bricht ab); Benutzer `node`, keine Capabilities, schreibgeschütztes Dateisystem und `127.0.0.1` bleiben. Jedes `update` prüft erneut und schaltet die Option wieder ein, sobald der Host es erlaubt. Der Agent (`install-agent.sh`) prüft das noch nicht; auf so einem Host den Snap entfernen.
 
 ## Was das Skript nie tut
 

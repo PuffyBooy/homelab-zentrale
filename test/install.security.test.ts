@@ -278,7 +278,12 @@ describe('deploy/install.sh (core)', () => {
   });
 
   it('host refuses no-new-privileges (confined dockerd): explains, drops only that option', () => {
-    const r = run(['--yes', '--timezone', 'UTC'], { STUB_NNP_FAIL: '1' });
+    // --yes alone never weakens the hardening.
+    const no = run(['--yes', '--timezone', 'UTC'], { STUB_NNP_FAIL: '1' });
+    expect(no.code).not.toBe(0);
+    expect(no.out).toContain('--allow-no-nnp');
+    expect(no.calls).not.toContain('compose up');
+    const r = run(['--yes', '--allow-no-nnp', '--timezone', 'UTC'], { STUB_NNP_FAIL: '1' });
     expect(r.code, r.out).toBe(0);
     expect(r.out).toContain('operation not permitted');
     expect(r.out).toContain('ohne no-new-privileges');
@@ -318,12 +323,26 @@ describe('deploy/install.sh (core)', () => {
       `#!/usr/bin/env bash\nprintf 'snap %s\\n' "$*" >>"$STUB_LOG"\n[[ "$1 $2" == "list docker" ]] && exit 0\nexit 1\n`,
     );
     chmodSync(join(env.bin, 'snap'), 0o755);
-    const r = run(['--yes', '--timezone', 'UTC'], { STUB_NNP_FAIL: '1' });
+    const r = run(['--yes', '--allow-no-nnp', '--timezone', 'UTC'], { STUB_NNP_FAIL: '1' });
     expect(r.code, r.out).toBe(0);
     expect(r.out).toContain('als Snap installiert');
     expect(r.out).toContain('sudo snap remove --purge docker');
     // --yes takes the default, and the default never deletes the snap's data.
     expect(r.calls).not.toContain('snap remove');
+  });
+
+  it('any other no-new-privileges failure is a hard error, even with --allow-no-nnp', () => {
+    writeFileSync(
+      join(env.bin, 'docker'),
+      readFileSync(join(env.bin, 'docker'), 'utf8').replace(
+        'exec /usr/local/bin/docker-entrypoint.sh: operation not permitted',
+        'temporary failure',
+      ),
+    );
+    const r = run(['--yes', '--allow-no-nnp', '--timezone', 'UTC'], { STUB_NNP_FAIL: '1' });
+    expect(r.code).not.toBe(0);
+    expect(r.out).toContain('aus unbekanntem Grund');
+    expect(r.calls).not.toContain('compose up');
   });
 
   it('an image that does not start at all is a hard error, not a weaker compose file', () => {
@@ -408,7 +427,10 @@ describe('deploy/install.sh share', () => {
     expect(readFileSync(join(env.share, 'docker-compose.yml'), 'utf8')).toContain(
       'no-new-privileges:true',
     );
-    const r = run(args, { HZ_SHARE_GATEWAY_TOKEN: token, STUB_NNP_FAIL: '1' });
+    const r = run([...args, '--allow-no-nnp'], {
+      HZ_SHARE_GATEWAY_TOKEN: token,
+      STUB_NNP_FAIL: '1',
+    });
     expect(r.code, r.out).toBe(0);
     const compose = readFileSync(join(env.share, 'docker-compose.yml'), 'utf8');
     expect(compose).not.toContain('no-new-privileges');

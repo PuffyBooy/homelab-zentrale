@@ -239,7 +239,8 @@ jobs:
     # Regression: on hosts whose dockerd runs under an AppArmor profile (Docker as a
     # snap, Ubuntu in an LXC container) every container with no-new-privileges dies with
     # "exec /usr/local/bin/docker-entrypoint.sh: operation not permitted". The snap is
-    # the reproducible case on a GitHub runner.
+    # the reproducible case on a GitHub runner. Not a gate for publishing images: it
+    # depends on the snap store and on the snap's current AppArmor profile.
     name: installer on an AppArmor-confined dockerd (docker snap)
     runs-on: ubuntu-24.04
     timeout-minutes: 30
@@ -301,7 +302,7 @@ jobs:
           # docker-ce's CLI and compose plugin (/usr/bin) against the snap daemon.
           sudo env "PATH=/tmp/hz-stub:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
             "DOCKER_HOST=$DOCKER_HOST" HZ_HEALTH_TIMEOUT=120 \
-            ./deploy/install.sh --yes --image homelab-zentrale/core:local --timezone UTC > install.log 2>&1
+            ./deploy/install.sh --yes --allow-no-nnp --image homelab-zentrale/core:local --timezone UTC > install.log 2>&1
           grep -q 'operation not permitted' install.log
           grep -q 'als Snap installiert' install.log
           curl -fsS http://127.0.0.1:8080/api/health | jq -e '.ok == true'
@@ -324,7 +325,7 @@ jobs:
     name: publish images
     # Only a green push to main becomes :latest (never a pull request or another branch).
     if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
-    needs: [check, audit, docker, ha-smoke, share-image, installer, installer-confined]
+    needs: [check, audit, docker, ha-smoke, share-image, installer]
     permissions:
       contents: read
       packages: write
