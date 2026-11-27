@@ -258,6 +258,11 @@ Wunsch des Admins vom 27.11.2026. Modul `github` bleibt optional. Lesen ist Stan
 
 ---
 
+## M26: Freunde-Zugang mit einem Klick
+Wunsch des Admins vom 27.11.2026. Assistent „Freunde-Zugang einrichten“ richtet das Share-Gateway selbst ein: Weg A (empfohlen) als eigener Tailscale-Knoten mit Funnel nur für das Gateway (keine Ports, keine Domain), Weg B auf einem Server mit öffentlicher IP über den Agent (`share.install`, feste Compose mit Caddy, DNS über M20, Host-Firewall, optional Oracle-Security-List per OCI-Schlüssel). Dazu „Freunde“: ein persönlicher Link pro Freund für mehrere Gameserver, Einladen per Kopieren/QR/Teilen/Discord, Whitelist aus dem Minecraft-Namen. Core und Agent bleiben nie öffentlich. Details: `docs/M26-FREUNDE-ZUGANG-PLAN.md`.
+
+---
+
 ## Definition of Done (für jeden PR)
 - Code, Tests und Doku sind aktuell (`docs/` mitpflegen, wenn sich etwas ändert)
 - Keine `any`, keine auskommentierten Blöcke, keine TODOs ohne Issue
