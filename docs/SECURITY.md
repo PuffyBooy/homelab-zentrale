@@ -10,7 +10,7 @@ Die Zentrale hat Root-ähnliche Macht über alle Server. Diese Regeln sind **nic
 - Ein Admin-Konto, angelegt beim ersten Start über einen Setup-Assistenten. Den Setup-Link gibt es nur einmal, er steht im Log des Core-Containers.
 - Passwort mit argon2id gehasht (mindestens 12 Zeichen), dazu **TOTP Pflicht**, mit Wiederherstellungscodes (10 Stück, gehasht).
 - Session-Cookie: `httpOnly`, `Secure`, `SameSite=Strict`, 30 Tage gleitend, in der DB widerrufbar.
-- **Step-up:** Für die Konsole, Server-Neustart, Löschen eines Gameservers und das Ändern von Tokens muss TOTP erneut eingegeben werden. Das gilt dann 15 Min.
+- **Step-up:** Für die Konsole, Server-Neustart und -Herunterfahren, Löschen eines Gameservers und das Ändern von Tokens muss TOTP erneut eingegeben werden. Das gilt dann 15 Min.
 - Rate-Limit beim Login: 5 Versuche pro 15 Min pro IP, danach wachsende Wartezeit.
 - CSRF: `SameSite=Strict` plus `Origin`-Prüfung bei allen Anfragen, die etwas ändern.
 
@@ -36,6 +36,16 @@ Die Zentrale hat Root-ähnliche Macht über alle Server. Diese Regeln sind **nic
 - Welt-Download für Freunde nur mit Recht `world_download`, nur die Weltordner aus `worldPaths` der Vorlage (nie Konfigurationen mit Passwörtern oder Logs), 1 pro Link und Stunde.
 - Backup wiederherstellen nur mit Step-up und Namensbestätigung; jeder Archiv-Eintrag wird geprüft.
 
+## Serververwaltung und Auto-Update (M16, M17)
+- `system.du` misst nur Größen, mit festen Argumenten (`du -x -a -B1 -d1 -- <pfad>`); der Pfad wird im Schema und nach `realpath` im Agent geprüft, nie unter `/proc`, `/sys`, `/dev`, `/run`. Höchstens eine Anfrage pro 5 s und Server.
+- Dienste starten/stoppen nur für Units in `HZ_AGENT_SERVICES` auf dem Server und nie für `SERVICE_DENYLIST` (tailscaled, docker, containerd, ssh/sshd, dbus, systemd-*, Netzwerk, getty). Jede Aktion steht im `audit_log`.
+- Die Prozessliste enthält nur Prozessnamen, nie Kommandozeilen oder Umgebungsvariablen.
+- Herunterfahren und Neustart: Step-up und eingetippter Servername, im Core und im Agent geprüft.
+- Updates ersetzen nur die Container mit `hz.role=core` bzw. den Agent selbst, und nur mit dem Image-Tag, den der Container schon nutzt. Kein Image, kein Tag und keine Registry kommt aus einer Anfrage.
+- Der Helfer-Container für das Agent-Update läuft aus dem alten, bekannten Image, mit `hz.role=updater` (wie Core/Agent nie aus der UI steuerbar), ohne Netz, mit `cap_drop: ALL`, `no-new-privileges`, schreibgeschütztem Dateisystem, nur Docker-Socket und Agent-Datenvolume, und entfernt sich selbst.
+- `system.upgrade` ruft nur `apt-get update` und `apt-get -y upgrade` mit festen Argumenten auf (kein `dist-upgrade`, keine Entfernungen).
+- Ergebnis-Events (`update_result`) zählen nur für einen bekannten, laufenden Lauf desselben Servers und Ziels.
+- Neustart-Automatik nach Updates einschalten braucht Step-up.
 ## Game-Relay (M15)
 - Relay nur mit `HZ_AGENT_ALLOW_RELAY=1` am Eingang und Step-up für Eingänge und Relays. DNS-Namen setzt das Relay seit M20 über das Domains-Modul (Anbieter und Token dort, Step-up beim Einschalten); Relay-Einträge kann man in den Domains nicht bearbeiten oder löschen.
 - Ziele nur Tailscale-Adressen, Ports ab 1024 im Bereich des Eingangs, keine Überschneidungen; Grenzen für Verbindungen/Sessions (256 je Route) und Leerlauf (TCP 10 Min, UDP 2 Min). Keine Inhalte und keine Client-IPs im Log.

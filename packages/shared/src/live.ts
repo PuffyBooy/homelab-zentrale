@@ -13,7 +13,7 @@ import { serverDetailSchema, serverSummarySchema } from './api/servers.js';
  * `update` carries full items (upsert by id) or removals; no JSON patches.
  */
 export const liveTopicSchema = z.union([
-  z.enum(['servers', 'containers', 'games', 'checks', 'alerts', 'github', 'ha']),
+  z.enum(['servers', 'containers', 'games', 'checks', 'alerts', 'github', 'ha', 'updates']),
   z.string().regex(/^(server|container-logs|deploy|game):[A-Za-z0-9_-]{1,64}$/),
 ]);
 export type LiveTopic = z.infer<typeof liveTopicSchema>;

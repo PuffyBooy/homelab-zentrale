@@ -7,9 +7,10 @@ import { WebSocket } from 'ws';
  * trigger: cleanup preview and cleanup (M2), container.* and compose.* with a fresh
  * inventory, container.logs as a stream (M3), container.limit (M10), and for M11 the
  * listening ports of the inventory plus game.export / game.import (binary transfer with
- * transfer.begin/chunk/ack/end and a sha256 check). With `ops` (M18) it answers
- * logs.search, image.scan, fail2ban.status and fail2ban.unban from canned data, with
- * `apps` (M21) compose.write of an app.
+ * transfer.begin/chunk/ack/end and a sha256 check), for M16/M17 the server
+ * administration (du, docker df, services, processes, shutdown, update.*, upgrade) plus
+ * inventory.failedServices, with `ops` (M18) logs.search, image.scan, fail2ban.status
+ * and fail2ban.unban from canned data, and with `apps` (M21) compose.write of an app.
  * Nothing here runs a real command.
  */
 
@@ -44,7 +45,7 @@ export interface SimContainer {
   memBytes?: number;
   restartCount?: number;
   /** Label hz.role (core/agent): never a throttle target, container.limit is refused. */
-  role?: 'core' | 'agent';
+  role?: 'core' | 'agent' | 'updater';
   /** Current docker --cpus limit, null without a limit (container.limit). */
   cpuLimit?: number | null;
 }
@@ -68,6 +69,189 @@ const PROTOCOL_VERSION = 1;
 const GB = 1024 ** 3;
 /** cpuCores in the sim inventory; container.limit caps at this. */
 const SIM_CPU_CORES = 4;
+
+/** M16 system.du: a small fixed tree (names only, bytes, dir). */
+const SIM_DU: Record<string, { name: string; bytes: number; dir: boolean }[]> = {
+  '/': [
+    { name: 'var', bytes: 120 * GB, dir: true },
+    { name: 'home', bytes: 80 * GB, dir: true },
+    { name: 'opt', bytes: 60 * GB, dir: true },
+    { name: 'usr', bytes: 12 * GB, dir: true },
+    { name: 'swapfile', bytes: 2 * GB, dir: false },
+  ],
+  '/var': [
+    { name: 'lib', bytes: 100 * GB, dir: true },
+    { name: 'log', bytes: 12 * GB, dir: true },
+    { name: 'cache', bytes: 8 * GB, dir: true },
+  ],
+  '/var/lib': [
+    { name: 'docker', bytes: 95 * GB, dir: true },
+    { name: 'apt', bytes: 5 * GB, dir: true },
+  ],
+  '/home': [{ name: 'anna', bytes: 80 * GB, dir: true }],
+  '/opt': [{ name: 'homelab', bytes: 60 * GB, dir: true }],
+};
+
+interface SimUnit {
+  name: string;
+  description: string;
+  load: string;
+  active: string;
+  sub: string;
+  manageable: boolean;
+}
+
+/** M16 system.services; failed state comes from failedServices. */
+const SIM_UNITS: SimUnit[] = [
+  {
+    name: 'backup-sync.service',
+    description: 'Nightly backup sync',
+    load: 'loaded',
+    active: 'inactive',
+    sub: 'dead',
+    manageable: false,
+  },
+  {
+    name: 'cron.service',
+    description: 'Regular background program processing daemon',
+    load: 'loaded',
+    active: 'active',
+    sub: 'running',
+    manageable: false,
+  },
+  {
+    name: 'nginx.service',
+    description: 'A high performance web server',
+    load: 'loaded',
+    active: 'active',
+    sub: 'running',
+    manageable: true,
+  },
+  {
+    name: 'smbd.service',
+    description: 'Samba SMB Daemon',
+    load: 'loaded',
+    active: 'active',
+    sub: 'running',
+    manageable: true,
+  },
+  {
+    name: 'ssh.service',
+    description: 'OpenBSD Secure Shell server',
+    load: 'loaded',
+    active: 'active',
+    sub: 'running',
+    manageable: false,
+  },
+  {
+    name: 'tailscaled.service',
+    description: 'Tailscale node agent',
+    load: 'loaded',
+    active: 'active',
+    sub: 'running',
+    manageable: false,
+  },
+];
+
+/** M16 system.processes: names only, never arguments. */
+const SIM_PROCESSES = [
+  {
+    pid: 1,
+    name: 'systemd',
+    user: 'root',
+    cpu: 0.1,
+    memBytes: 12 * 1024 ** 2,
+    memPct: 0.1,
+    state: 'S',
+  },
+  {
+    pid: 812,
+    name: 'dockerd',
+    user: 'root',
+    cpu: 1.4,
+    memBytes: 140 * 1024 ** 2,
+    memPct: 0.9,
+    state: 'S',
+  },
+  {
+    pid: 990,
+    name: 'tailscaled',
+    user: 'root',
+    cpu: 0.6,
+    memBytes: 48 * 1024 ** 2,
+    memPct: 0.3,
+    state: 'S',
+  },
+  {
+    pid: 2301,
+    name: 'java',
+    user: 'minecraft',
+    cpu: 18.5,
+    memBytes: 3.2 * GB,
+    memPct: 20,
+    state: 'S',
+    container: 'mc-survival',
+  },
+  {
+    pid: 2410,
+    name: 'node',
+    user: 'root',
+    cpu: 2.2,
+    memBytes: 160 * 1024 ** 2,
+    memPct: 1,
+    state: 'S',
+    container: 'homelab-agent',
+  },
+  {
+    pid: 3005,
+    name: 'nginx',
+    user: 'www-data',
+    cpu: 0.3,
+    memBytes: 22 * 1024 ** 2,
+    memPct: 0.1,
+    state: 'S',
+  },
+  {
+    pid: 3120,
+    name: 'smbd',
+    user: 'root',
+    cpu: 0.2,
+    memBytes: 30 * 1024 ** 2,
+    memPct: 0.2,
+    state: 'S',
+  },
+  {
+    pid: 4077,
+    name: 'postgres',
+    user: '999',
+    cpu: 4.1,
+    memBytes: 512 * 1024 ** 2,
+    memPct: 3.1,
+    state: 'S',
+    container: 'db',
+  },
+];
+
+/** M17: image versions of the simulated agent (old -> new). */
+interface SimImageVersion {
+  imageId: string;
+  version: string;
+  revision: string;
+  created: string;
+}
+const SIM_AGENT_REF = 'ghcr.io/example/homelab-agent:latest';
+const SIM_AGENT_OLD: SimImageVersion = {
+  imageId: `sha256:${'1'.repeat(64)}`,
+  version: 'sha-1a2b3c4',
+  revision: '1a2b3c4',
+  created: '2026-11-01T03:00:00.000Z',
+};
+const SIM_AGENT_NEW: SimImageVersion = {
+  imageId: `sha256:${'5'.repeat(64)}`,
+  version: 'sha-5d6e7f8',
+  revision: '5d6e7f8',
+  created: '2026-11-20T03:00:00.000Z',
+};
 
 export interface SimAgentOptions {
   url: string;
@@ -97,6 +281,8 @@ export interface SimAgentOptions {
   storage?: Record<string, unknown>;
   /** M21: compose.write creates the app container (image from compose.yml), like docker compose create. */
   apps?: boolean;
+  /** M16: inventory.failedServices; default none (the M16 spec sets backup-sync.service). */
+  failedServices?: string[];
   /** M15: announce the relay capability and accept relay.set (no sockets are opened). */
   relay?: boolean;
   /** M18: answer logs.search, image.scan and fail2ban.* (see SimOps). */
@@ -186,6 +372,12 @@ export class SimAgent {
   /** M21: files of the last compose.write per folder (compose.yml, .env). */
   readonly writtenFiles = new Map<string, Record<string, unknown>>();
   private readonly exports = new Map<string, SimExport>();
+  /** M16: failed systemd units reported in every inventory. */
+  failedServices: string[];
+  /** M17: the simulated agent image; update.apply switches it to the newer one. */
+  agentImage: SimImageVersion = SIM_AGENT_OLD;
+  /** M16: systemd units of this sim (system.service changes their state). */
+  private readonly units: SimUnit[] = SIM_UNITS.map((u) => ({ ...u }));
   /** M15: the routes of the last accepted relay.set. */
   relayRoutes: Record<string, unknown>[] = [];
   /** M15: route ids relay.set reports as failed (port in use). */
@@ -200,6 +392,7 @@ export class SimAgent {
       ]
     ).map((p) => ({ ...p }));
     this.storage = o.storage;
+    this.failedServices = [...(o.failedServices ?? [])];
     this.backupTarget = o.backupTarget;
   }
 
@@ -490,6 +683,7 @@ export class SimAgent {
       fail2banBanned: 2,
       listeningPorts: this.listeningPorts,
       ...(this.storage ? { storage: this.storage } : {}),
+      failedServices: this.failedServices,
     });
   }
 
@@ -656,6 +850,7 @@ export class SimAgent {
       this.send({ type: 'rpc.result', id, ok: true, data: {} });
       return;
     }
+    if (this.answerAdmin(id, action, params)) return;
     if (msg.action === 'system.cleanupPreview') {
       this.send({
         type: 'rpc.result',
@@ -671,7 +866,17 @@ export class SimAgent {
         },
       });
     } else if (msg.action === 'system.cleanup') {
-      this.send({ type: 'rpc.result', id, ok: true, data: { freedBytes: 8.4 * GB } });
+      // M16: only the selected kinds count (sizes as in the preview above).
+      const sizes: Record<string, number> = {
+        'apt-cache': 1.2 * GB,
+        journal: 0.8 * GB,
+        'docker-images': 6.4 * GB,
+        'docker-build-cache': 0,
+        'old-kernels': 0,
+      };
+      const items = Array.isArray(params.items) ? params.items.map(String) : Object.keys(sizes);
+      const freedBytes = items.reduce((sum, k) => sum + (sizes[k] ?? 0), 0);
+      this.send({ type: 'rpc.result', id, ok: true, data: { freedBytes } });
     } else {
       this.send({
         type: 'rpc.result',
@@ -743,6 +948,136 @@ export class SimAgent {
     }
     this.sendInventory();
     this.send({ type: 'rpc.result', id, ok: true, data: {} });
+  }
+
+  /**
+   * M16/M17 server administration with fixed, plausible data: system.du (a small tree
+   * with one subfolder level), dockerDf, services (one failed, two manageable units),
+   * processes (names only), shutdown, update.check/apply (a newer agent image, the
+   * result arrives as event update_result) and system.upgrade. false: not one of them.
+   */
+  private answerAdmin(id: string, action: string, params: Record<string, unknown>): boolean {
+    const ok = (data: unknown, delayMs = 0): true => {
+      const go = () => this.send({ type: 'rpc.result', id, ok: true, data });
+      if (delayMs > 0) setTimeout(go, delayMs);
+      else go();
+      return true;
+    };
+    const fail = (code: string, message: string): true => {
+      this.send({ type: 'rpc.result', id, ok: false, error: { code, message } });
+      return true;
+    };
+    switch (action) {
+      case 'system.du': {
+        const path = String(params.path ?? '/');
+        const entries = SIM_DU[path] ?? [];
+        return ok(
+          {
+            path,
+            totalBytes: entries.reduce((s, e) => s + e.bytes, 0),
+            entries: [...entries].sort((a, b) => b.bytes - a.bytes),
+            truncated: false,
+          },
+          300,
+        );
+      }
+      case 'system.dockerDf':
+        return ok({
+          images: { count: 14, bytes: 9.6 * GB, unusedCount: 7, unusedBytes: 6.4 * GB },
+          containers: { count: this.containers.length, running: 1, bytes: 0.3 * GB },
+          volumes: { count: 6, bytes: 21.5 * GB, unusedCount: 1, unusedBytes: 0.4 * GB },
+          buildCache: { count: 0, bytes: 0, unusedBytes: 0 },
+        });
+      case 'system.services':
+        return ok({
+          systemd: true,
+          units: this.units
+            .map((u) => this.simUnit(u))
+            .sort(
+              (a, b) =>
+                (a.active === 'failed' ? 0 : 1) - (b.active === 'failed' ? 0 : 1) ||
+                a.name.localeCompare(b.name),
+            ),
+        });
+      case 'system.service': {
+        const unit = this.units.find((u) => u.name === params.unit);
+        if (!unit?.manageable)
+          return fail('not_allowed', 'unit is not listed in HZ_AGENT_SERVICES');
+        const op = String(params.op);
+        unit.active = op === 'stop' ? 'inactive' : 'active';
+        unit.sub = op === 'stop' ? 'dead' : 'running';
+        if (op !== 'stop' && this.failedServices.includes(unit.name)) {
+          this.failedServices = this.failedServices.filter((n) => n !== unit.name);
+          this.sendInventory();
+        }
+        return ok({ ok: true, active: unit.active }, 200);
+      }
+      case 'system.processes': {
+        const limit = typeof params.limit === 'number' ? params.limit : 25;
+        const list = [...SIM_PROCESSES]
+          .sort((a, b) => (params.sort === 'mem' ? b.memBytes - a.memBytes : b.cpu - a.cpu))
+          .slice(0, limit);
+        return ok({ total: 187, list });
+      }
+      case 'system.shutdown':
+        if (params.confirmName !== this.o.name) {
+          return fail('confirm_mismatch', 'confirmName does not match the server name');
+        }
+        return ok({ scheduled: true, inMs: 2000 });
+      case 'system.upgrade':
+        return ok({ upgraded: 12, kept: 0, rebootRequired: true }, 500);
+      case 'update.check': {
+        if (params.target !== 'agent') return fail('not_found', 'no core container on this host');
+        const newer = this.agentImage === SIM_AGENT_OLD ? SIM_AGENT_NEW : null;
+        return ok(
+          {
+            target: 'agent',
+            ref: SIM_AGENT_REF,
+            current: this.agentImage,
+            available: newer,
+            pulled: true,
+          },
+          300,
+        );
+      }
+      case 'update.apply': {
+        if (params.target !== 'agent') return fail('not_found', 'no core container on this host');
+        const runId = String(params.runId);
+        const from = this.agentImage;
+        const to = SIM_AGENT_NEW;
+        ok({ accepted: true });
+        setTimeout(() => {
+          this.agentImage = to;
+          const agent = this.containers.find((c) => c.role === 'agent');
+          if (agent) agent.imageId = to.imageId;
+          this.send({
+            type: 'event',
+            ts: new Date().toISOString(),
+            event: {
+              kind: 'update_result',
+              runId,
+              target: 'agent',
+              outcome: from.imageId === to.imageId ? 'up_to_date' : 'updated',
+              from,
+              to,
+            },
+          });
+          this.sendInventory();
+        }, 1500);
+        return true;
+      }
+      default:
+        return false;
+    }
+  }
+
+  private simUnit(u: SimUnit): SimUnit {
+    const failed = this.failedServices.includes(u.name);
+    return {
+      ...u,
+      active: failed ? 'failed' : u.active,
+      sub: failed ? 'failed' : u.sub,
+    };
   }
 
   /** Opens a port (like a new nginx on 0.0.0.0) and reports it in a fresh inventory. */

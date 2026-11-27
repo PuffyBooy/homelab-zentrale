@@ -173,7 +173,7 @@ describe('database', () => {
     ]);
   });
 
-  it('migration 18: drops the old relay DNS settings (token included), keeps other settings', () => {
+  it('migration 19: drops the old relay DNS settings (token included), keeps other settings', () => {
     const file = join(emptyDir(), 'm17.sqlite');
     const v16 = openDatabase(
       file,

@@ -38,6 +38,13 @@ import { ptyClose, ptyInput, ptyOpen, ptyResize } from './pty.js';
 import { cleanup, cleanupPreview } from './system-cleanup.js';
 import { speedtestRun } from './speedtest.js';
 import { systemReboot } from './system-reboot.js';
+import { systemDockerDf } from './system-docker-df.js';
+import { systemDu } from './system-du.js';
+import { systemProcesses } from './system-processes.js';
+import { systemService, systemServices } from './system-services.js';
+import { systemShutdown } from './system-shutdown.js';
+import { systemUpgrade } from './system-upgrade.js';
+import { updateApply, updateCheck } from './update.js';
 import { wolSend } from './wol-send.js';
 import { taskExec } from './task-exec.js';
 import {
@@ -88,6 +95,17 @@ export const handlers: ActionHandlers = {
   'game.mods.install': gameModsInstall,
   'game.mods.remove': gameModsRemove,
   'game.restore': (p, ctx, id) => gameRestore(p, ctx, id),
+  // M16 Server-Verwaltung
+  'system.du': systemDu,
+  'system.dockerDf': systemDockerDf,
+  'system.services': systemServices,
+  'system.service': systemService,
+  'system.processes': systemProcesses,
+  'system.shutdown': systemShutdown,
+  // M17 Auto-Update
+  'update.check': updateCheck,
+  'update.apply': updateApply,
+  'system.upgrade': systemUpgrade,
   'relay.set': relaySet,
   'logs.search': (p, ctx) => logsSearch(p, ctx),
   'image.scan': (p, ctx) => imageScan(p, ctx),

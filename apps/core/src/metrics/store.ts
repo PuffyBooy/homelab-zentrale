@@ -147,12 +147,13 @@ export class MetricsStore {
       temp: number | null;
       ni: number;
       no: number;
+      dm: number | null;
     };
     let rows: Row[];
     if (range === '1h') {
       rows = this.sqlite
         .prepare(
-          `SELECT ts, cpu, ram, temp, net_in AS ni, net_out AS no FROM metrics_raw
+          `SELECT ts, cpu, ram, temp, net_in AS ni, net_out AS no, disk_max AS dm FROM metrics_raw
            WHERE server_id = ? AND ts >= ? ORDER BY ts`,
         )
         .all(serverId, now - HOUR) as Row[];
@@ -160,7 +161,7 @@ export class MetricsStore {
       rows = this.sqlite
         .prepare(
           `SELECT (ts / ${BUCKET_5M}) * ${BUCKET_5M} AS ts, AVG(cpu) AS cpu, AVG(ram) AS ram,
-                  AVG(temp) AS temp, AVG(net_in) AS ni, AVG(net_out) AS no
+                  AVG(temp) AS temp, AVG(net_in) AS ni, AVG(net_out) AS no, MAX(disk_max) AS dm
            FROM metrics_raw WHERE server_id = ? AND ts >= ? GROUP BY 1 ORDER BY 1`,
         )
         .all(serverId, now - DAY) as Row[];
@@ -170,14 +171,15 @@ export class MetricsStore {
           `SELECT (ts / ${BUCKET_1H}) * ${BUCKET_1H} AS ts,
                   SUM(cpu * samples) / SUM(samples) AS cpu, SUM(ram * samples) / SUM(samples) AS ram,
                   SUM(temp * samples) / SUM(CASE WHEN temp IS NULL THEN NULL ELSE samples END) AS temp,
-                  SUM(net_in * samples) / SUM(samples) AS ni, SUM(net_out * samples) / SUM(samples) AS no
+                  SUM(net_in * samples) / SUM(samples) AS ni, SUM(net_out * samples) / SUM(samples) AS no,
+                  MAX(disk_max) AS dm
            FROM metrics_5m WHERE server_id = ? AND ts >= ? GROUP BY 1 ORDER BY 1`,
         )
         .all(serverId, now - 7 * DAY) as Row[];
     } else {
       rows = this.sqlite
         .prepare(
-          `SELECT ts, cpu, ram, temp, net_in AS ni, net_out AS no FROM metrics_1h
+          `SELECT ts, cpu, ram, temp, net_in AS ni, net_out AS no, disk_max AS dm FROM metrics_1h
            WHERE server_id = ? AND ts >= ? ORDER BY ts`,
         )
         .all(serverId, now - 30 * DAY) as Row[];
@@ -192,6 +194,7 @@ export class MetricsStore {
         netIn: Math.round(r.ni),
         netOut: Math.round(r.no),
         temp: r.temp === null ? null : round(r.temp),
+        diskMax: r.dm === null ? null : round(r.dm),
       })),
     };
   }

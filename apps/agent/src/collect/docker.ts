@@ -157,7 +157,7 @@ export function mapContainer(
   }
   if (details.restartCount !== undefined) info.restartCount = details.restartCount;
   const role = labels['hz.role'];
-  if (role === 'core' || role === 'agent') info.role = role;
+  if (role === 'core' || role === 'agent' || role === 'updater') info.role = role;
   const game = labels['homelab.game'];
   if (game !== undefined && gameFolderNameSchema.safeParse(game).success) info.game = game;
   if (details.cpuLimit !== undefined) info.cpuLimit = details.cpuLimit;

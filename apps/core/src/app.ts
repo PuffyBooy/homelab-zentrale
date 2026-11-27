@@ -38,6 +38,7 @@ import { GameStatsService } from './games/stats.js';
 import { WhitelistRequests } from './games/whitelist-requests.js';
 import { nextWallClock } from './calendar.js';
 import { seedDemoGames } from './demo/games.js';
+import { seedDemoUpdates } from './demo/updates.js';
 import { migrateRoutes } from './games/migrate-routes.js';
 import { GameService } from './games/service.js';
 import { loadTemplates } from './games/templates.js';
@@ -74,6 +75,8 @@ import {
 } from './features.js';
 import { Scheduler } from './scheduler.js';
 import { serverRoutes } from './servers/routes.js';
+import { serverAdminRoutes } from './servers/admin-routes.js';
+import { setupUpdates } from './updates/index.js';
 import { installScriptRoutes, onboardingRoutes } from './servers/onboarding-routes.js';
 import { OnboardingService } from './servers/onboarding.js';
 import { PortAuditService } from './servers/ports.js';
@@ -931,8 +934,9 @@ export async function buildApp(config: Config, deps: AppDeps = {}): Promise<Fast
     });
     alerts.log('report:weekly', 'info', title, body, null, 'system');
   });
+  let demoIds: string[] = [];
   if (config.demo) {
-    const demoIds = seedDemo({ db: db.db, now, servers, metrics, scheduler, logs });
+    demoIds = seedDemo({ db: db.db, now, servers, metrics, scheduler, logs });
     const demoGame = seedDemoGames({
       db: db.db,
       now,
@@ -1020,6 +1024,18 @@ export async function buildApp(config: Config, deps: AppDeps = {}): Promise<Fast
     alerts,
     ownedByCloud: (id) => cloud.ownsServer(id),
   });
+  // ---- M16 server admin, M17 auto-update ---------------------------------------
+  await app.register(serverAdminRoutes, { prefix: '/api', db: db.db, now, servers, hub });
+  const updates = await setupUpdates(app, {
+    db: db.db,
+    now,
+    hub,
+    servers,
+    alerts,
+    live,
+    scheduler,
+  });
+  if (config.demo) seedDemoUpdates({ db: db.db, now, updates, serverIds: demoIds });
   await app.register(onboardingRoutes, { prefix: '/api', db: db.db, now, onboarding });
   await app.register(installScriptRoutes, { onboarding });
   await app.register(portRoutes, { prefix: '/api', db: db.db, now, servers, ports });

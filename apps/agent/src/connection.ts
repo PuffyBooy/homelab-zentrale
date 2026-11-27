@@ -46,6 +46,8 @@ export interface ConnectionOptions {
   onTransfer?: (msg: TransferChunk | TransferAck | TransferEnd) => void;
   /** The connection closed; every stream is lost for the core. */
   onDisconnect?: () => void;
+  /** welcome received: the connection is ready (M17 health marker, pending update results). */
+  onReady?: () => void;
   /** Test hook: creates the WebSocket. */
   createSocket?: (url: string) => WebSocket;
   random?: () => number;
@@ -249,6 +251,7 @@ export class AgentConnection {
           inventoryIntervalS: msg.inventoryIntervalS,
         });
         this.startReporting(ws, msg.metricsIntervalS, msg.inventoryIntervalS);
+        this.o.onReady?.();
         return;
       }
       case 'reject': {
@@ -396,6 +399,11 @@ export class AgentConnection {
     const ws = this.ws;
     if (!ws || this.phase !== 'ready') return;
     void this.sendInventory(ws);
+  }
+
+  /** True after welcome until the connection closes. */
+  isReady(): boolean {
+    return this.phase === 'ready' && this.ws !== null;
   }
 
   /** Bytes waiting in the WebSocket send buffer (stream backpressure). */

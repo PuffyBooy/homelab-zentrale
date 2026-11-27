@@ -5,7 +5,9 @@ import {
   TRIVY_IMAGE_DEFAULT,
   agentNameSchema,
   agentTokenSchema,
+  isDeniedServiceUnit,
   pinnedImageRefSchema,
+  serviceUnitSchema,
 } from '@hz/shared';
 
 const boolFlag = z
@@ -82,6 +84,12 @@ export const configSchema = z.object({
   HZ_AGENT_DOCKER_SOCKET: z.string().min(1).default('/var/run/docker.sock'),
   /** Only for tests (NODE_ENV=test). */
   HZ_AGENT_HOMELAB_ROOT: z.string().min(2).optional(),
+  /**
+   * M16: systemd units the UI may start/stop/restart, comma-separated
+   * (e.g. "nginx.service,smbd.service"). Invalid names and units on
+   * SERVICE_DENYLIST are ignored (parseServiceList).
+   */
+  HZ_AGENT_SERVICES: z.string().max(4000).default(''),
   /** Trivy image for image.scan; must be pinned (`repo[:tag]@sha256:...`), else the default is used. */
   HZ_AGENT_TRIVY_IMAGE: z.string().optional(),
   HZ_AGENT_LOG_LEVEL: z.enum(['debug', 'info', 'warn', 'error']).default('info'),
@@ -103,10 +111,34 @@ export interface AgentConfig {
   dockerSocket: string;
   homelabRoot: string;
   logLevel: 'debug' | 'info' | 'warn' | 'error';
+  /** M16: manageable systemd units (HZ_AGENT_SERVICES, valid and not denied). */
+  services: readonly string[];
+  /** HZ_AGENT_SERVICES entries that were ignored (shortened, for one warning at start). */
+  ignoredServices: readonly string[];
   /** Pinned Trivy image for image.scan. */
   trivyImage: string;
   /** HZ_AGENT_TRIVY_IMAGE was set but not a pinned ref; trivyImage is the default (log a warning). */
   trivyImageRejected: boolean;
+}
+
+/**
+ * Parses HZ_AGENT_SERVICES. A name without suffix gets `.service`. Entries that
+ * fail serviceUnitSchema or are on SERVICE_DENYLIST are returned in `ignored`.
+ */
+export function parseServiceList(raw: string): { units: string[]; ignored: string[] } {
+  const units = new Set<string>();
+  const ignored: string[] = [];
+  for (const part of raw.split(',')) {
+    const entry = part.trim();
+    if (entry === '') continue;
+    const unit = entry.endsWith('.service') ? entry : `${entry}.service`;
+    if (!serviceUnitSchema.safeParse(unit).success || isDeniedServiceUnit(unit)) {
+      ignored.push(entry.replace(/[^\x20-\x7e]/g, '?').slice(0, 60));
+      continue;
+    }
+    units.add(unit);
+  }
+  return { units: [...units].slice(0, 200), ignored: ignored.slice(0, 20) };
 }
 
 /** HZ_AGENT_TRIVY_IMAGE -> pinned image; anything not pinned by digest falls back to the default. */
@@ -146,6 +178,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AgentConfig {
   if (c.HZ_AGENT_HOMELAB_ROOT !== undefined && c.NODE_ENV !== 'test') {
     throw new ConfigError(['HZ_AGENT_HOMELAB_ROOT: nur mit NODE_ENV=test erlaubt']);
   }
+  const services = parseServiceList(c.HZ_AGENT_SERVICES);
   const trivy = resolveTrivyImage(c.HZ_AGENT_TRIVY_IMAGE);
   return {
     coreUrl: c.HZ_CORE_URL,
@@ -162,6 +195,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AgentConfig {
     dockerSocket: c.HZ_AGENT_DOCKER_SOCKET,
     homelabRoot: c.HZ_AGENT_HOMELAB_ROOT ?? HOMELAB_ROOT,
     logLevel: c.HZ_AGENT_LOG_LEVEL,
+    services: services.units,
+    ignoredServices: services.ignored,
     trivyImage: trivy.image,
     trivyImageRejected: trivy.rejected,
   };

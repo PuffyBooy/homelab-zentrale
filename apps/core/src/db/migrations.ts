@@ -810,7 +810,7 @@ CREATE INDEX whitelist_requests_share ON whitelist_requests(share_id, created_at
     // A record value set last), listen_ports_json (the public ports on the ingress per port
     // name, fixed at assignment: friends keep address and port when the game moves or its
     // host ports change) and the relay state per game (ok | pending | error). The DNS
-    // provider lived in settings key relay.dns until migration 18 moved relay DNS to the
+    // provider lived in settings key relay.dns until migration 19 moved relay DNS to the
     // domains module (dns_ip is no longer written).
     sql: `
 CREATE TABLE server_ingress (
@@ -883,6 +883,32 @@ CREATE TABLE cloud_usage (
   },
   {
     version: 18,
+    name: 'server_admin_updates',
+    // M16: failed systemd units of the latest inventory (JSON array, null = unknown).
+    // M17 Auto-Update: one row per update run (agent, core, os, reboot); the core keeps
+    // the 200 newest. from_text/to_text: version text before/after.
+    sql: `
+ALTER TABLE server_state ADD COLUMN failed_services_json TEXT;
+
+CREATE TABLE update_runs (
+  id TEXT PRIMARY KEY,
+  server_id TEXT NOT NULL REFERENCES servers(id) ON DELETE CASCADE,
+  server_name TEXT NOT NULL,
+  target TEXT NOT NULL,
+  trigger TEXT NOT NULL,
+  status TEXT NOT NULL,
+  started_at INTEGER NOT NULL,
+  finished_at INTEGER,
+  from_text TEXT,
+  to_text TEXT,
+  message TEXT
+);
+CREATE INDEX update_runs_started ON update_runs(started_at);
+CREATE INDEX update_runs_status ON update_runs(status);
+`,
+  },
+  {
+    version: 19,
     name: 'automation_domains_apps',
     sql: `
 CREATE TABLE scheduled_tasks (

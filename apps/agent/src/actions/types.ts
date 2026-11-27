@@ -6,6 +6,7 @@ import type { StreamManager } from '../streams.js';
 import type { WakeManager } from './game-wake.js';
 import type { PtyManager } from './pty.js';
 import type { TaskManager } from './task-exec.js';
+import type { UpdateService } from '../update/service.js';
 import type { RelayManager } from './relay.js';
 
 /** Thrown by actions; becomes rpc.result {ok:false, error:{code, message}}. */
@@ -50,6 +51,10 @@ export interface ActionContext {
   tasks?: TaskManager;
   /** Wake listeners of sleeping games (game.wake.*); set by index.ts. */
   wake?: WakeManager;
+  /** M16: systemd units system.service may control (HZ_AGENT_SERVICES, already filtered). */
+  services?: readonly string[];
+  /** M17: image updates (update.*); set by index.ts when Docker is available. */
+  updates?: UpdateService;
   /** Game relay routes (relay.set); only set when HZ_AGENT_ALLOW_RELAY=1. */
   relay?: RelayManager;
 }

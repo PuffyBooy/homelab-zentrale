@@ -72,7 +72,7 @@ import {
 
 /**
  * Domains, DNS and certificates (packages/shared/src/api/domains.ts). Owns the
- * three tables of migration 18 and the settings `domains.settings` (ACME
+ * three tables of migration 19 and the settings `domains.settings` (ACME
  * contact) and `domains.acme` (account key, encrypted, and account URLs).
  */
 

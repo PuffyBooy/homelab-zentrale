@@ -1574,6 +1574,16 @@ body,
   margin: 0;
   padding: 0 var(--space-3) var(--space-1);
 }
+/* A throttled row (meta + Aufheben + Stoppen) is wider than one column: wrap
+   inside the column instead of overflowing into the neighbour (which would also
+   swallow clicks on its buttons). */
+.app-consumers-col .hz-row {
+  flex-wrap: wrap;
+  row-gap: var(--space-1);
+}
+.app-consumers-col .hz-row-meta {
+  white-space: normal;
+}
 @media (max-width: 699px) {
   .app-consumers {
     grid-template-columns: minmax(0, 1fr);
@@ -1893,6 +1903,216 @@ a.hz-btn {
   color: var(--ink-faint);
 }
 
+/* ---------- Server detail M16/M17: Verlauf, Speicher, Dienste, Prozesse, Auto-Update ---------- */
+/* Anchor inside a tile body (Aktionen): lands with the tile head in view. */
+.app-anchor-in {
+  display: block;
+  height: 0;
+  scroll-margin-top: calc(var(--space-4) + 48px);
+}
+.app-hist {
+  display: grid;
+  grid-template-columns: minmax(64px, max-content) minmax(0, 1fr) max-content;
+  gap: var(--space-3);
+}
+.app-hist-row {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: subgrid;
+  align-items: center;
+}
+.app-hist-chart {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+.app-hist-chart .hz-spark {
+  width: 100%;
+  height: auto;
+}
+.app-hist-chart .app-spark-empty {
+  width: auto;
+}
+.app-hist-stats {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 11px;
+  line-height: 16px;
+  color: var(--ink-faint);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.app-crumbs {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1);
+  margin-bottom: var(--space-3);
+}
+.app-crumb {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+.app-crumb-sep {
+  font-family: var(--font-mono);
+  color: var(--ink-faint);
+}
+.app-crumb .hz-btn {
+  font-family: var(--font-mono);
+}
+.app-crumb .hz-btn[aria-current] {
+  color: var(--ink);
+}
+.app-du {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: minmax(96px, max-content) auto 1fr;
+  gap: var(--space-1) var(--space-3);
+}
+.app-du > .app-du-row {
+  grid-column: 1 / -1;
+  grid-template-columns: subgrid;
+}
+.app-du-name {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  justify-self: start;
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.app-du-file {
+  color: var(--ink-muted);
+  padding: 0 var(--space-2);
+}
+.app-df thead th,
+.app-proc thead th,
+.app-runs thead th {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+.app-df thead th + th {
+  text-align: right;
+}
+.app-cleanup th .hz-toggle {
+  padding: 0;
+}
+.app-cleanup td {
+  padding-left: var(--space-4);
+  white-space: nowrap;
+}
+.app-svc-tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: var(--space-3);
+  margin-bottom: var(--space-3);
+}
+.app-svc-tools .hz-field {
+  flex: 1 1 220px;
+  max-width: 320px;
+}
+.app-svc-tools .app-range {
+  padding-bottom: var(--space-1);
+}
+.app-svc-state {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--ink-faint);
+}
+.app-proc,
+.app-runs {
+  min-width: 560px;
+}
+.app-proc th,
+.app-proc td,
+.app-runs th,
+.app-runs td {
+  padding-right: var(--space-3);
+  text-align: left;
+}
+.app-proc td:nth-child(4),
+.app-proc td:nth-child(5),
+.app-proc thead th:nth-child(4),
+.app-proc thead th:nth-child(5) {
+  text-align: right;
+}
+.app-proc tbody th,
+.app-runs tbody th {
+  color: var(--ink);
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+.app-runs td {
+  font-family: var(--font-sans);
+  font-size: 12px;
+}
+.app-runs td:first-child,
+.app-runs td:nth-child(4) {
+  font-family: var(--font-mono);
+}
+.app-update {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: var(--space-5);
+  align-items: start;
+}
+@media (max-width: 999px) {
+  .app-update {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+.app-update-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2) var(--space-3);
+  padding: var(--space-2) 0;
+  border-bottom: 1px solid var(--line);
+}
+.app-update-main {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+.app-update-ver {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 16px;
+  line-height: 20px;
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+.app-update-fields {
+  display: grid;
+  gap: var(--space-3);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: start;
+}
+/* Phones: unit name stays on the first line, state and buttons move below it. */
+@media (max-width: 699px) {
+  .app-svc-rows .hz-row {
+    flex-wrap: wrap;
+    row-gap: var(--space-1);
+  }
+  .app-svc-rows .hz-row-main {
+    flex: 1 1 60%;
+    min-width: 0;
+  }
+  .app-svc-rows .hz-row-meta,
+  .app-svc-rows .hz-row-actions {
+    margin-left: 0;
+  }
+}
 /* ---------- Operations modules: Log-Suche, Sicherheit, Discord-Bot, Sprachsteuerung ---------- */
 .app-subhead {
   margin: 0;

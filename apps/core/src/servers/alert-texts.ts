@@ -82,6 +82,9 @@ export function alertText(r: EvaluatedReason, c: AlertContext): { title: string;
         title: `${name} braucht einen Neustart`,
         body: `Seit ${clockTime(now)} nach Updates nötig. Neustart im Serverdetail.`,
       };
+    case 'service_failed':
+      // Not used for alerts: failed units get one alert each (service-alerts.ts).
+      return { title: `${r.text} auf ${name}`, body: `Seit ${clockTime(now)}.` };
     case 'never_seen':
       return {
         title: `${name} hat sich noch nicht gemeldet`,
